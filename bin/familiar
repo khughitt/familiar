@@ -1,0 +1,1127 @@
+#!/usr/bin/env node
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { execFileSync, execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
+import { adapterFor, AGENTS } from '../src/adapters/index.js';
+import { spritesheet, petFile, SPRITESHEET_PATH } from '../src/render/codex/pets.js';
+import { paths as resolvePaths } from '../src/bus/paths.js';
+import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
+import { listThemes } from '../src/theme/catalog.js';
+import { slotSpec } from '../src/protocol/slot-hues.js';
+import { identityColors } from '../src/theme/ramp.js';
+import { BOLD, fg, RESET } from '../src/render/term/sgr.js';
+import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
+import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
+import { loadIdentities } from '../src/bus/pins.js';
+import { displayedIntent } from '../src/protocol/intent.js';
+import { emit } from '../src/render/term/emit.js';
+import { composeForIntent, textLines } from '../src/render/term/statusline.js';
+import { hudLines } from '../src/render/term/hud.js';
+import { readFields } from '../src/render/term/statusfields.js';
+import { readJson } from '../src/bus/store.js';
+import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capability.js';
+import { transmit } from '../src/render/term/kitty.js';
+import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
+import { preflightKittyPrograms } from '../src/render/term/kitty-animation.js';
+import {
+  loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
+  assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
+} from 'familiar-theme';
+
+export function cliColor({ stream = process.stdout, env = process.env } = {}) {
+  return stream.isTTY === true && (env.NO_COLOR === undefined || env.NO_COLOR === '');
+}
+
+export function cliSwatch(hex, { color = cliColor() } = {}) {
+  return color ? `${fg(hex)}███${RESET}` : hex;
+}
+
+const HELP_FLAGS = new Set(['-h', '--help']);
+const FAMILIES = new Map([
+  ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate'])],
+  ['install', new Set(['pets', 'opencode'])],
+  ['scheme', new Set(['set'])],
+]);
+const ROOT_LEAVES = new Set(['whoami', 'hook', 'statusline', 'reap']);
+
+function usageError(message, help) {
+  return Object.assign(new Error(message), { help });
+}
+
+export function resolveCommand(argv) {
+  if (argv.length === 0 || HELP_FLAGS.has(argv[0])) return { command: null, args: [], help: 'root' };
+  const [first, second, ...tail] = argv;
+  const children = FAMILIES.get(first);
+  if (children) {
+    if (second === undefined || HELP_FLAGS.has(second)) return { command: null, args: [], help: first };
+    if (!children.has(second)) throw usageError(`unknown ${first} command ${JSON.stringify(second)}`, first);
+    const command = `${first} ${second}`;
+    if (HELP_FLAGS.has(tail[0])) return command === 'install opencode'
+      ? { command, args: [tail[0]], help: null }
+      : { command, args: [], help: command };
+    return { command, args: tail, help: null };
+  }
+  if (!ROOT_LEAVES.has(first)) throw usageError(`unknown command ${JSON.stringify(first)}`, 'root');
+  if (HELP_FLAGS.has(second)) return { command: first, args: [], help: first };
+  return { command: first, args: argv.slice(1), help: null };
+}
+
+export function parseLeaf(args, {
+  options = {}, minPositionals = 0, maxPositionals = minPositionals, help,
+} = {}) {
+  let parsed;
+  try {
+    parsed = parseArgs({ args, options, allowPositionals: true, strict: true, tokens: true });
+  } catch (error) {
+    let message = error.message;
+    if (error.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') message = message.split('. ')[0];
+    if (error.code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE' && message.includes('argument is ambiguous')) {
+      const option = message.match(/Option '(--[^']+)'/)?.[1];
+      if (option) message = `${option} requires a value`;
+    }
+    throw usageError(message, help);
+  }
+  const seen = new Set();
+  for (const token of parsed.tokens) {
+    if (token.kind !== 'option') continue;
+    if (typeof token.value === 'string' && (token.value === '' || token.value.startsWith('-'))) {
+      throw usageError(`--${token.name} requires a value`, help);
+    }
+    if (seen.has(token.name)) throw usageError(`duplicate --${token.name} flag`, help);
+    seen.add(token.name);
+  }
+  if (parsed.positionals.length < minPositionals || parsed.positionals.length > maxPositionals) {
+    const found = parsed.positionals[maxPositionals];
+    throw usageError(found === undefined ? `missing required argument for ${help}`
+      : `unexpected argument ${JSON.stringify(found)}`, help);
+  }
+  return parsed;
+}
+
+const HELP = {
+  root: `familiar — your coding agent gets a face
+
+Usage:
+  familiar <command> [options]
+
+Explore
+  whoami [PATH]                Show this project's familiar identity
+  theme list                   List installed themes
+  theme validate DIR           Prove a theme directory conforms
+  theme show [ID]              Show a theme's twelve members
+  theme preview MEMBER         Preview one member and its states
+  theme sheet                  Show every member across every state
+
+Set up
+  scheme set dark|light        Set the terminal colour scheme
+  install pets                 Install the active theme as Codex pets
+  install opencode             Install the OpenCode integration
+
+Runtime
+  hook EVENT                   Record an agent lifecycle event
+  statusline                   Render the Claude Code status line
+  reap                         Remove sessions whose agent has exited
+
+Examples:
+  familiar whoami
+  familiar theme preview ginger --state working
+  familiar scheme set dark
+
+Run \`familiar <command> --help\` for details.
+`,
+  whoami: `Show a project's familiar identity.
+
+Usage:
+  familiar whoami [PATH]
+
+Arguments:
+  PATH            Project path; defaults to the current directory
+
+Examples:
+  familiar whoami
+  familiar whoami ~/d/familiar
+`,
+  theme: `Browse and inspect themes.
+
+Usage:
+  familiar theme <command>
+
+Commands:
+  list                   List installed themes
+  validate DIR           Prove a theme directory conforms
+  show [ID]              Show a theme's twelve members
+  preview MEMBER         Preview one member and its states
+  sheet                  Show every member across every state
+
+Examples:
+  familiar theme list
+  familiar theme show cats
+`,
+  'theme validate': `Prove a theme directory conforms.
+
+Usage:
+  familiar theme validate DIR
+
+Arguments:
+  DIR             Theme directory
+
+Examples:
+  familiar theme validate themes/cats
+`,
+  'theme list': `List shipped and user-installed themes.
+
+Usage:
+  familiar theme list
+
+Examples:
+  familiar theme list
+  NO_COLOR=1 familiar theme list
+`,
+  'theme show': `Show a theme's twelve members.
+
+Usage:
+  familiar theme show [ID] [--rows N]
+
+Arguments:
+  ID              Theme id; defaults to the active theme
+
+Options:
+  --rows N        Terminal row height
+
+Examples:
+  familiar theme show
+  familiar theme show cats --rows 2
+`,
+  'theme preview': `Preview one member and its states.
+
+Usage:
+  familiar theme preview MEMBER [--theme ID] [--state STATE]
+
+Arguments:
+  MEMBER          Theme member id
+
+Options:
+  --theme ID      Theme id; defaults to the active theme
+  --state STATE   Show one state
+
+Examples:
+  familiar theme preview ginger
+  familiar theme preview ginger --state working
+`,
+  'theme sheet': `Show every member across every state.
+
+Usage:
+  familiar theme sheet [--theme ID] [--member ID] [--rows N] [--out FILE]
+
+Options:
+  --theme ID      Theme id; defaults to the active theme
+  --member ID     Show one member
+  --rows N        Terminal row height
+  --out FILE      Write a PNG instead of terminal art
+
+Examples:
+  familiar theme sheet --rows 2
+  familiar theme sheet --member ginger --out ginger.png
+`,
+  scheme: `Set Familiar's terminal colour scheme.
+
+Usage:
+  familiar scheme set dark|light [--sat N]
+
+Commands:
+  set dark|light          Set mode and saturation
+
+Examples:
+  familiar scheme set dark
+  familiar scheme set light --sat 0.8
+`,
+  'scheme set': `Set Familiar's terminal colour scheme.
+
+Usage:
+  familiar scheme set dark|light [--sat N]
+
+Arguments:
+  dark|light      Terminal colour mode
+
+Options:
+  --sat N         Positive saturation scale
+
+Examples:
+  familiar scheme set dark
+  familiar scheme set light --sat 0.8
+`,
+  install: `Install Familiar integrations.
+
+Usage:
+  familiar install <command>
+
+Commands:
+  pets            Install the active theme as Codex pets
+  opencode        Install the OpenCode integration
+
+Examples:
+  familiar install pets
+  familiar install opencode
+`,
+  'install pets': `Compile the active theme into Codex native pets.
+
+Usage:
+  familiar install pets [--out DIR]
+
+Options:
+  --out DIR        Write pets to DIR
+
+Motion policies:
+  full             Duration-sample canonical animation clips where available
+  reduced          Install static state roots in every occupied cell
+  off              refuses installation and writes no pet files
+
+This command does not change the user-owned [tui] pet setting; select with /pets.
+
+Examples:
+  familiar install pets
+  familiar install pets --out ./pets
+`,
+  hook: `Record an agent lifecycle event.
+
+Usage:
+  familiar hook EVENT [--agent NAME] [--trace FILE]
+
+Arguments:
+  EVENT           Agent lifecycle event
+
+Options:
+  --agent NAME    Agent adapter: ${AGENTS.join(', ')}
+  --trace FILE    Append metadata-only lifecycle records as JSONL
+
+Examples:
+  familiar hook SessionStart
+  familiar hook Stop --agent codex
+`,
+  statusline: `Render the Claude Code status line.
+
+Usage:
+  familiar statusline [--with CMD]
+
+Options:
+  --with CMD      Wrap another status-line command
+
+Examples:
+  familiar statusline
+  familiar statusline --with "printf ready"
+`,
+  reap: `Remove sessions whose agent has exited. No output means nothing was reaped.
+
+Usage:
+  familiar reap
+
+Examples:
+  familiar reap
+  familiar reap && familiar statusline
+`,
+};
+
+const HELP_ACCENT = '#5f87af';
+const HELP_HEADINGS = new Set([
+  'Usage:', 'Explore', 'Set up', 'Runtime', 'Commands:', 'Arguments:', 'Options:', 'Examples:',
+]);
+
+export function renderHelp(key, { color = false } = {}) {
+  const text = HELP[key];
+  if (text === undefined) throw new Error(`no help for resolved command ${JSON.stringify(key)}`);
+  if (!color) return text;
+  return text.split('\n').map((line) => HELP_HEADINGS.has(line)
+    ? `${BOLD}${fg(HELP_ACCENT)}${line}${RESET}` : line).join('\n');
+}
+
+// The OTHER promise in the hook path that could never settle (the first was the
+// un-timed `git` — see gitContext). This one resolves on `end` or `error`, so a
+// parent that writes the payload and then holds the pipe open without closing it
+// leaves the hook waiting forever, and claude-code kills it at 60s.
+//
+// So EOF gets a deadline. On expiry we resolve with whatever arrived rather than
+// rejecting, because by then one of two things is true, and both are handled
+// downstream: either the payload is complete and only the EOF was missing — in
+// which case parsing it is exactly right — or it is short, and parsePayload says
+// "hook payload is not JSON" on one line through the boundary. Neither hangs.
+//
+// The timer is unref'd: it must never hold the process open on the normal path,
+// which is every hook, every tool call.
+const STDIN_EOF_TIMEOUT_MS = 5_000;
+
+// A PINNABLE CLOCK, for the decay tests only. Nothing in production sets this; without it
+// testing the 8s done and 30s error expiries would require real sleeps.
+const now = () => (process.env.FAMILIAR_NOW_MS ? Number(process.env.FAMILIAR_NOW_MS) : Date.now());
+
+function readStdin() {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) return resolve('');
+    let data = '';
+    const done = () => { clearTimeout(timer); resolve(data); };
+    const timer = setTimeout(done, STDIN_EOF_TIMEOUT_MS);
+    timer.unref();
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => { data += chunk; });
+    process.stdin.on('end', done);
+    process.stdin.on('error', done);
+  });
+}
+
+// Everything the resolver needs, assembled once. This is the composition root:
+// the only place that knows where files live.
+async function context({ paths = resolvePaths(), config } = {}) {
+  const [{ themeId, motionPolicy }, tone] = await Promise.all([
+    config ?? loadConfig({ paths }),
+    loadTone({ paths }),
+  ]);
+  const pack = await loadThemePack(themeDirFor(paths, themeId));
+  const catalog = await loadIdentities(paths.identitiesPath);
+  return { paths, themeId, motionPolicy, tone, pack, catalog };
+}
+
+// Resolve every live record's identity ONCE — one per project in practice, and a
+// cache hit on every event after the first. Nothing is BAKED any more: the sprite
+// baker is gone, the terminal ships the master's bytes to kitty verbatim and the bar
+// tints one 22px mask at paint time. Animation manifests and their program budgets
+// are admitted at this same member boundary before anything reaches the bus.
+//
+// The identity map is RETURNED, not thrown away: resolveAll needs exactly the
+// same map, and recomputing it there would mean a second full pin-match +
+// realpathSync sweep over every record, on every tool call, for nothing.
+//
+// BOTH passes fault per RECORD, never per BUS. Everything here can fail — an
+// unpopulated slot, a pin contradicting its member, a deleted sprite PNG — and
+// any of it can start failing for a record that was fine a moment ago, because
+// all of it is read from files the user edits. A failure that escaped this
+// function would be a failure of the whole transaction, for every session on the
+// machine, including the ones whose config nobody touched.
+//
+// So faults are collected, not thrown, and handed to the transaction — which is
+// the only layer that knows whether a faulted record is the incoming one (abort)
+// or a pre-existing one (evict). See commit() in src/bus/transaction.js.
+export function makePrepareSprites(ctx, {
+  loadAnimationMember: loadMember = loadAnimationMember,
+  preflightKittyPrograms: preflight = preflightKittyPrograms,
+  readFrame = readFileSync,
+} = {}) {
+  return async (agents) => {
+    const { identities, faults } = resolveIdentities({ agents, catalog: ctx.catalog, pack: ctx.pack });
+
+    // Keyed by MEMBER, because that is what an asset or animation failure is
+    // about: a deleted PNG or malformed manifest belongs to a member, and faults
+    // exactly the sessions resolving to that member — not its bus neighbours.
+    //
+    // Nothing is generated here any more: the assets are committed, and this
+    // pass RESOLVES and VALIDATES them. The recolouring died with the indexed
+    // codec; the per-member fault isolation did not, and it is the reason a
+    // missing sprite cannot write a dangling path onto a surface with no error
+    // channel.
+    const cache = new Map();
+    const memberFaults = new Map();
+    for (const { member } of identities.values()) {
+      if (cache.has(member) || memberFaults.has(member)) continue;
+      try {
+        const assets = assetsFor(ctx.pack, member, ctx.tone.mode);
+        const { ref: animationRef, set: animationSet } = await loadMember(ctx.pack, member);
+        const animationPreflight = animationSet.kind === 'clips'
+          ? preflight(animationSet, {
+            memberId: member,
+            roots: Object.fromEntries(
+              STATES.map((state) => [state, assets[state].terminal]),
+            ),
+            readFrame,
+          })
+          : null;
+        cache.set(member, {
+          assets,
+          animationRef,
+          animationSet,
+          preflight: animationPreflight,
+        });
+      } catch (error) {
+        memberFaults.set(member, error.message);
+      }
+    }
+
+    for (const [sessionId, identity] of [...identities]) {
+      if (!memberFaults.has(identity.member)) continue;
+      faults.set(sessionId, memberFaults.get(identity.member));
+      identities.delete(sessionId);
+    }
+
+    // Named, not `cache.get(id)[state]`. If the identity pass and the asset pass
+    // ever disagree, the bare version says "Cannot read properties of undefined"
+    // and names neither the member nor the state — an anonymous failure in the
+    // one place that has both facts to hand. Every surviving identity now has
+    // resolved assets by construction, so reaching either throw is a bug here,
+    // not a user's config.
+    const spriteFor = (memberId, state) => {
+      const admitted = cache.get(memberId);
+      if (!admitted) {
+        throw new Error(`no assets for member "${memberId}" (needed for state "${state}")`);
+      }
+      const { assets } = admitted;
+      const sprite = assets[state];
+      if (!sprite) throw new Error(`member "${memberId}" has no asset for state "${state}"`);
+      return sprite;
+    };
+
+    const animationFor = (memberId) => {
+      const admitted = cache.get(memberId);
+      if (!admitted) throw new Error(`no animation for member "${memberId}"`);
+      return admitted.animationRef;
+    };
+
+    const animationSetFor = (memberId) => {
+      const admitted = cache.get(memberId);
+      if (!admitted) throw new Error(`no animation set for member "${memberId}"`);
+      return admitted.animationSet;
+    };
+
+    return { identities, spriteFor, animationFor, animationSetFor, faults };
+  };
+}
+
+// An eviction is not an error — the transaction succeeded, for everyone who could
+// be resolved. It is a report: this session's record left the bus, and here is the
+// misconfiguration that put it out. One line each, on stderr, exactly like the
+// boundary below.
+function reportEvictions(evicted) {
+  for (const { sessionId, reason } of evicted) {
+    process.stderr.write(`familiar: evicted session ${sessionId} from the bus — ${reason}\n`);
+  }
+}
+
+export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, next }) {
+  const payload = JSON.parse(stdin);
+  appendFileSync(path, `${JSON.stringify({
+    timestamp,
+    agent,
+    event,
+    hook_event_name: payload.hook_event_name ?? null,
+    source: payload.source ?? null,
+    session_id: payload.session_id,
+    turn_id: payload.turn_id ?? null,
+    prev_state: prev?.state ?? null,
+    next_state: next?.state ?? null,
+  })}\n`);
+}
+
+// The `theme sheet` caption row. Exported and pure because it now makes a
+// choice: a member holds several slots but the swatch takes one colour.
+export function sheetRowCaptions(rows, tone) {
+  const slotText = rows.map((row) => row.member.slots.join(','));
+  // Width once, from the widest list. `padStart(2)` was right when every member
+  // held exactly one slot; a member holding 1,2,3 would shove every other row's
+  // label three columns right.
+  const width = Math.max(...slotText.map((text) => text.length));
+  return rows.map((row, index) => {
+    // slots[0] is the member's primary identity — the same first-declared-wins
+    // rule as bySlot, read from the member's end instead of the slot's.
+    const swatch = cliSwatch(identityColors(row.member.slots[0], tone).base);
+    return `  ${slotText[index].padStart(width)}  ${swatch}  `
+      + `${row.member.label.padEnd(20)}${row.id}\n`;
+  });
+}
+
+async function main({ command, args: rest }) {
+  if (command === 'whoami') {
+    const { positionals } = parseLeaf(rest, {
+      minPositionals: 0, maxPositionals: 1, help: 'whoami',
+    });
+    const cwd = positionals[0] ?? process.cwd();
+    const paths = resolvePaths();
+    const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
+    const pack = await loadThemePack(themeDirFor(paths, themeId));
+    const catalog = await loadIdentities(paths.identitiesPath);
+    const { remote, repoRoot } = await gitContext(cwd);
+    const projectKey = projectKeyFor({ remote, repoRoot, cwd });
+    const project = displayProject({ repoRoot, cwd });
+    const identity = resolveIdentity({ projectKey, project, remote, repoRoot, catalog, pack });
+    assetsFor(pack, identity.member, tone.mode);
+    const { hue } = slotSpec(identity.slot);
+    process.stdout.write(
+      `${identity.project}\n` +
+      `  theme   ${themeId}\n` +
+      `  slot    ${identity.slot} · hue ${hue}°\n` +
+      `  member  ${identity.label} (${identity.member})\n`,
+    );
+  } else if (command === 'hook') {
+    const { positionals, values } = parseLeaf(rest, {
+      options: { agent: { type: 'string' }, trace: { type: 'string' } },
+      minPositionals: 1, maxPositionals: 1, help: 'hook',
+    });
+    const name = values.agent ?? 'claude-code';
+    const adapter = adapterFor(name);          // throws on an unknown agent, before any work
+    const ctx = await context();
+    const stdin = await readStdin();
+
+    const { prev, next, priorIntent, intent, evicted } = await applyHookEvent({
+      event: positionals[0],
+      stdin,
+      deps: { ...ctx, adapter, prepareSprites: makePrepareSprites(ctx) },
+    });
+    reportEvictions(evicted);
+    if (values.trace !== undefined) {
+      appendHookTrace(values.trace, {
+        timestamp: new Date(now()).toISOString(),
+        agent: name,
+        event: positionals[0],
+        stdin,
+        prev,
+        next,
+      });
+    }
+
+    // The transaction hands us the transition AND the resolved intent, so nothing
+    // here re-reads the file we just wrote.
+    //
+    // `intent` is keyed to IntentRecord — { current, expiresAt, after }. The
+    // emitter wants the Intent, so pass `.current`. Get this wrong and every
+    // field the emitter reads is undefined, in every project, on every event.
+    // The emitter throws a named error rather than a TypeError if you do, and
+    // test/emit.test.js asserts on exactly that mistake.
+    const transmitSprite = adapter.printsPlaceholderCells;
+    if (next !== null) {
+      emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite });
+    } else if (prev !== null) {
+      // A cleared session has no intent left to read — synthesize just enough
+      // to reset the terminal it borrowed.
+      emit({
+        prev,
+        next: null,
+        priorIntent,
+        intent: { identity: { project: prev.project }, pid: prev.pid },
+        transmitSprite,
+      });
+    }
+  } else if (command === 'statusline') {
+    const { values } = parseLeaf(rest, {
+      options: { with: { type: 'string' } }, help: 'statusline',
+    });
+    // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
+    // an id derived from the session). This prints the CELLS it lands in -- ordinary characters,
+    // which claude-code's own layout engine places, wraps and scrolls. That is the whole reason
+    // the cat stopped being an overlay: it is text now, and text cannot obscure text.
+    //
+    // It TRANSMITS NOTHING. See src/render/term/statusline.js -- two processes chunking graphics
+    // escapes into one fd is a corrupt escape stream. One writer, and it is the hook.
+    const stdin = await readStdin();
+    const payload = JSON.parse(stdin || '{}');
+    const sessionId = payload.session_id;
+
+    const ctx = await context();
+    const agents = (await readJson(ctx.paths.agentsPath)) ?? {};
+    const record = sessionId ? agents[sessionId] : undefined;
+
+    // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
+    // much of the wrapped text fits beside it. Resolve one session only: a broken config in
+    // ANOTHER project must not fault this status line.
+    let intent;
+    if (record) {
+      const one = { [sessionId]: record };
+      const { identities, spriteFor, animationFor } = await makePrepareSprites(ctx)(one);
+      // THE DECAY CONTRACT (src/protocol/intent.js:40), not `.current`. `.current` discards
+      // expiresAt, which was survivable while this ran about once a turn -- but with
+      // refreshInterval set it is permanent: `done` carries an 8s TTL and `error` a 30s one,
+      // so a polled HUD reading `.current` would show `done` every two seconds, forever,
+      // until the next hook fired. The other polling renderer already follows this contract.
+      const intentRecord = resolveAll({
+        agents: one,
+        identities,
+        tone: ctx.tone,
+        spriteFor,
+        animationFor,
+        motionPolicy: ctx.motionPolicy,
+      })[sessionId];
+      intent = displayedIntent(intentRecord, now());
+    }
+
+    const wrapped = values.with ?? null;
+    const rawOutput = wrapped
+      ? execSync(wrapped, { input: stdin, encoding: 'utf8', shell: '/bin/sh' })
+      : null;
+
+    // NO CAT IS NOT A FALLBACK, IT IS THE TRUTH. A session not on the bus has no identity yet
+    // — the first hook has not fired, or it was evicted.
+    //
+    // BUT THE HUD STILL RENDERS, and this is the one place dropping --with changes existing
+    // control flow. This branch used to print `rawOutput ?? ''`; with no --with that is null,
+    // and printing it is a BLANK STATUS LINE for every session until its first hook fires.
+    // No identity means no hue and no state — so the HUD renders uncoloured, with the state
+    // slot reading as absent, at the full four rows (there is no cat here to fit against).
+    if (!intent) {
+      const lines = wrapped
+        ? textLines(rawOutput, Infinity)
+        : hudLines({ intent: null, fields: readFields(payload), rows: 4 });
+      process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+      return;
+    }
+
+    // The HUD is fitted to the number of rows the composed output will actually occupy: the
+    // cat's height when there is a cat, and the full four when motion is off and there is not.
+    // Field collection belongs inside the native branch: readFields performs a synchronous,
+    // bounded git lookup, and --with replaces the HUD rather than paying to build unused fields.
+    const hudRows = intent.motionPolicy === 'off' ? 4 : intent.sprite.rows;
+    const text = wrapped
+      ? rawOutput
+      : hudLines({
+        intent,
+        // THE PROJECT IS THE IDENTITY'S, NOT THE DIRECTORY'S. identity.project is the repo the
+        // familiar resolved — the thing that chose the slot, the hue and the member. In
+        // ~/repo/packages/api, basename(cwd) is `api` while the identity is `repo`, and a HUD
+        // labelled `api` beside an ember cat that means `repo` contradicts itself.
+        fields: { ...readFields(payload), project: intent.identity.project },
+        rows: hudRows,
+      }).join('\n');
+
+    const lines = composeForIntent({ intent, sessionId, rawOutput: text });
+    process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+  } else if (command === 'install pets') {
+    const { values } = parseLeaf(rest, {
+      options: { out: { type: 'string' } }, help: 'install pets',
+    });
+    // AN OFFLINE GENERATOR THAT HAPPENS TO LIVE IN THE CLI, like the compositor integration's own
+    // rule generator.
+    // It runs once, at install; nothing on the hook path imports it.
+    //
+    // ONE PET PER MEMBER. Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
+    // user-wide default and an override in a trusted project's `.codex/config.toml` can choose
+    // different members. We write only the roster; config remains user-owned and project selection
+    // remains an explicit edit.
+    const paths = resolvePaths();
+    const config = await loadConfig({ paths });
+    if (config.motionPolicy === 'off') {
+      throw new Error(
+        'pets are disabled while motion is off; set motion to full or reduced to install Codex pets',
+      );
+    }
+    const out = values.out !== undefined
+      ? values.out
+      : join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets');
+
+    const ctx = await context({ paths, config });
+
+    let written = 0;
+    for (const [memberId, member] of ctx.pack.members) {
+      // The SAME resolver every other surface uses — not a second path to the same PNGs. The
+      // sprites codex renders are byte-for-byte the ones the terminal and the bar render.
+      const assets = assetsFor(ctx.pack, memberId, ctx.tone.mode);
+      const poses = Object.fromEntries(
+        STATES.map((state) => [state, decodeRgba(readFileSync(assets[state].terminal))]),
+      );
+      const { set: animationSet } = await loadAnimationMember(ctx.pack, memberId);
+
+      const id = `familiar-${memberId}`;
+      const dir = join(out, id);
+      mkdirSync(join(dir, 'assets'), { recursive: true });
+      writeFileSync(join(dir, SPRITESHEET_PATH), encodeRgba(spritesheet({
+        animationSet,
+        roots: poses,
+        motionPolicy: ctx.motionPolicy,
+        readFrame: (path) => decodeRgba(readFileSync(path)),
+      })));
+      writeFileSync(
+        join(dir, 'pet.json'),
+        JSON.stringify(petFile({
+          id,
+          displayName: member.label ?? memberId,
+          description: member.persona ?? `familiar — ${member.label ?? memberId}`,
+        }), null, 2) + '\n',
+      );
+      written++;
+    }
+
+    const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
+    process.stdout.write(
+      `wrote ${written} pets to ${out}\n` +
+      'enable one with:  [tui] pet = "custom:familiar-<member>"\n' +
+      `user-wide: ${userConfig}\n` +
+      'project (trusted): <project>/.codex/config.toml\n',
+    );
+  } else if (command === 'reap') {
+    parseLeaf(rest, { help: 'reap' });
+    const ctx = await context();
+    const { reaped, evicted } = await reap({ deps: { ...ctx, prepareSprites: makePrepareSprites(ctx) } });
+    reportEvictions(evicted);
+    if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
+  } else if (command === 'install opencode') {
+    // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
+    // portability seam forbids THIS file from naming the integration directory. Dispatch to it,
+    // inheriting stdio so its output and diagnostics reach the user directly.
+    //
+    // CATCH the child's failure HERE and exit with its status. bin/familiar's error boundary
+    // (below) deliberately swallows every throw and exits 0 — right for the cosmetic hook path,
+    // WRONG for a user-invoked mutating command: an install that failed must exit nonzero. So we
+    // must not let execFileSync's throw reach that boundary; we propagate the child's code instead.
+    const bin = fileURLToPath(new URL('familiar-opencode', import.meta.url));
+    try {
+      execFileSync(process.execPath, [bin, ...rest], { stdio: 'inherit' });
+    } catch (err) {
+      process.exit(typeof err.status === 'number' ? err.status : 1);
+    }
+  } else if (command === 'scheme set') {
+    const { positionals, values } = parseLeaf(rest, {
+      options: { sat: { type: 'string' } },
+      minPositionals: 1, maxPositionals: 1, help: 'scheme set',
+    });
+    // The portable escape hatch. Without it, a machine with no bar cannot produce
+    // a scheme.json at all, and `familiar` refuses to run — which would make the
+    // "no compositor, no bar" promise false.
+    const paths = resolvePaths();
+    const tone = {
+      mode: positionals[0],
+      satScale: values.sat === undefined ? 1.0 : Number(values.sat),
+    };
+    await writeTone(paths, tone);
+    process.stdout.write(
+      `scheme ${tone.mode} · saturation ${tone.satScale}\n` +
+      `wrote ${paths.schemePath}\n`,
+    );
+  } else if (command === 'theme preview') {
+    const { positionals, values } = parseLeaf(rest, {
+      options: { theme: { type: 'string' }, state: { type: 'string' } },
+      minPositionals: 1, maxPositionals: 1, help: 'theme preview',
+    });
+    const memberId = positionals[0];
+
+    const paths = resolvePaths();
+    const { themeId: activeId } = await loadConfig({ paths });
+    const themeId = values.theme ?? activeId;
+
+    const rows = listThemes(paths);
+    const row = rows.find((r) => r.id === themeId);
+    if (!row) {
+      throw new Error(
+        `unknown theme "${themeId}" — available: ${rows.map((r) => r.id).join(', ') || '(none)'}`
+      );
+    }
+    const pack = loadThemePackSync(row.dir);
+    const { mode } = await loadTone({ paths });
+
+    if (values.state !== undefined && !STATES.includes(values.state)) {
+      throw new Error(`unknown state "${values.state}" — one of: ${STATES.join(', ')}`);
+    }
+    const states = values.state === undefined ? STATES : [values.state];
+
+    const member = memberOrThrow(pack, memberId);
+    const assets = assetsFor(pack, memberId, mode);
+
+    const capability = graphicsCapability(process.env);
+    const graphical = process.stdout.isTTY === true && (
+      capability === GRAPHICS_CAPABILITY.ANIMATION ||
+      capability === GRAPHICS_CAPABILITY.STATIC
+    );
+    process.stdout.write(`\n  ${member.label} · ${themeId} · slot${member.slots.length === 1 ? '' : 's'} ${member.slots.join(', ')}\n  ${member.persona}\n\n`);
+    for (const state of states) {
+      // Caption UNDER the art, for the same floor-anchoring reason as the theme grid
+      // below — see the note there. The pose text is long enough to wrap, which made
+      // the mis-association worse here than anywhere else.
+      // ALWAYS pass the env explicitly. preview IS the interactive process, so its own
+      // environment is the right one — and saying so here means graphicsCapability() needs
+      // no default, which is what stops any OTHER caller silently asking the wrong
+      // process. A default that is correct in one branch and wrong in the other is a
+      // default worth not having.
+      // THE SAME HEIGHT THE EMITTER USES, from the same place: the theme's one row
+      // count, carried onto every state's asset as assets[state].rows. A preview that
+      // renders at a different height than the live terminal is not a preview.
+      if (graphical) {
+        process.stdout.write(transmit(readFileSync(assets[state].terminal), { rows: assets[state].rows }));
+      }
+      process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
+    }
+  } else if (command === 'theme list') {
+    parseLeaf(rest, { help: 'theme list' });
+    // Deliberately NOT context(): a broken theme on disk must not stop you
+    // LISTING what is on disk — that is exactly when you need the list. Each
+    // pack is loaded independently and a failure is reported on its own row.
+    const paths = resolvePaths();
+    const { themeId: activeId } = await loadConfig({ paths });
+    const rows = listThemes(paths);
+
+    process.stdout.write('\n');
+    for (const row of rows) {
+      const status = row.id === activeId ? 'active' : '';
+      let detail;
+      try {
+        const pack = loadThemePackSync(row.dir);
+        const source = row.shadowed ? 'user (shadows shipped)' : row.source;
+        // pack.label is required non-empty by parseThemePack, and pack.members
+        // is a Map — hence .size, not .length.
+        detail = `${pack.label.padEnd(16)}${String(pack.members.size).padStart(2)} members   ${source}`;
+        if (pack.description) detail += `\n${' '.repeat(24)}${pack.description}`;
+      } catch (error) {
+        detail = `— unreadable: ${error.message}`;
+      }
+      process.stdout.write(`  ${row.id.padEnd(12)}${status.padEnd(10)}${detail}\n`);
+    }
+    process.stdout.write('\n');
+  } else if (command === 'theme validate') {
+    const { positionals } = parseLeaf(rest, {
+      minPositionals: 1, maxPositionals: 1, help: 'theme validate',
+    });
+    const pack = await validateThemePack(resolve(positionals[0]));
+    const covered = pack.bySlot.size;
+    process.stdout.write(
+      `${pack.id} — ${pack.label}\n` +
+      `  ${pack.members.size} member${pack.members.size === 1 ? '' : 's'}, ` +
+      `${covered}/${SLOT_COUNT} slots covered\n` +
+      `  conforms to spec-version ${pack.specVersion}\n`,
+    );
+  } else if (command === 'theme show') {
+    const { positionals, values } = parseLeaf(rest, {
+      options: { rows: { type: 'string' } },
+      minPositionals: 0, maxPositionals: 1, help: 'theme show',
+    });
+    const paths = resolvePaths();
+    const { themeId: activeId } = await loadConfig({ paths });
+    const rows = listThemes(paths);
+
+    // --rows lowers the render height so more of the roster fits on one screen.
+    // It is a VIEW control and never touches the theme: pack.rows is the height
+    // the surfaces ship at, and this must not be mistaken for changing it.
+    //
+    const rowsArg = values.rows;
+    const wanted = positionals[0] ?? activeId;
+
+    const row = rows.find((r) => r.id === wanted);
+    if (!row) {
+      throw new Error(
+        `unknown theme "${wanted}" — available: ${rows.map((r) => r.id).join(', ') || '(none)'}`
+      );
+    }
+
+    const pack = loadThemePackSync(row.dir);
+    const ctxTone = await loadTone({ paths });
+    const { mode } = ctxTone;
+    const interactive = process.stdout.isTTY === true;
+    const capability = graphicsCapability(process.env);
+    const graphical = interactive && (
+      capability === GRAPHICS_CAPABILITY.ANIMATION ||
+      capability === GRAPHICS_CAPABILITY.STATIC
+    );
+
+    // THIS VERB'S ENTIRE VALUE IS THE ART — README says `familiar theme show` renders
+    // the twelve slots WITH their art. Without graphics (a plain TERM, or any
+    // tmux session — graphicsCapability returns NONE for both) it silently
+    // degrades to a bare slot listing. `preview` stays quiet about this on
+    // purpose (test/bin-familiar.test.js pins that); `theme` does not, because
+    // a human judging whether twelve familiars cohere as a set needs to know
+    // they are looking at labels, not the set.
+    if (interactive && !graphical) {
+      process.stderr.write(
+        `familiar: no graphics capability (${capability}) — showing labels only, no art\n`
+      );
+    }
+
+    // ROW_MIN/ROW_MAX come from pack.js — the SAME bound the parser enforces on a
+    // theme's own `rows:`. A second hand-copied "1 and 40" here is exactly the
+    // mirror-with-nothing-enforcing-it defect pack.js's own comment on these
+    // constants names; box.js already imports them for the same reason.
+    const viewRows = rowsArg === undefined ? pack.rows : Number(rowsArg);
+    if (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX) {
+      throw new Error(
+        `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(rowsArg)}`
+      );
+    }
+
+    // The header names the DIRECTORY (row.id), not pack.id. themeDirFor resolves
+    // by directory, so a pack whose theme.yaml disagrees is still reached by the
+    // directory's name — printing pack.id would name something unreachable.
+    process.stdout.write(`\n  ${row.id} — ${pack.label} · ${row.source}${row.shadowed ? ' (shadows shipped)' : ''}\n`);
+    if (pack.description) process.stdout.write(`  ${pack.description}\n`);
+    process.stdout.write('\n');
+
+    // SLOT ORDER, not member order. The slot is the stable identity a project
+    // hashes to; a theme is that identity's inhabitants. Walking the slots is
+    // also what surfaces a gap as a gap rather than a shorter list.
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      // A REAL SWATCH, not the text "hue 22/62". identityColors(slot, tone) is
+      // the same ramp every other surface paints this slot with, so the strip
+      // shows the colour the bar and the border actually use rather than a
+      // second opinion computed here. sgr.js exports fg(hex) and no background
+      // setter, hence a block glyph rather than a filled cell.
+      const swatch = cliSwatch(identityColors(slot, ctxTone).base);
+
+      // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
+      // precisely when this view earns its keep — so the gap is caught, labelled,
+      // and the grid keeps going. A theme must fill all twelve; showing WHICH one
+      // is missing beats refusing to draw any of them.
+      //
+      // assetsFor + readFileSync + transmit live in THIS SAME try, not after it.
+      // The build workflow writes all twelve member blocks up front and fills
+      // sprites one member at a time, so every intermediate state of a theme
+      // under construction has twelve members and fewer than twelve sprite
+      // sets — assetsFor throwing on a faulted asset-root or a missing
+      // <state>.png is the ORDINARY case this view exists to survive, not an
+      // edge case. One bad slot labels itself; the other eleven still draw.
+      let member = null;
+      let fault = null;
+      let rendered = null;
+      try {
+        member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+        if (graphical) {
+          const assets = assetsFor(pack, member.id, mode);
+          // A STRIP, NOT A GRID, and that is a property of transmit(): it sends
+          // C=1 (the image does not move the cursor) and then advances by hand
+          // with exactly `rows` newlines, so consecutive images always stack
+          // vertically. Twelve side by side would need a placement-capable
+          // emitter that does not exist — see the spec's §1.2 and §9.
+          rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows });
+        }
+      } catch (error) {
+        fault = error.message;
+      }
+
+      // THE CAPTION GOES UNDER THE SPRITE, and the reason is that sprites are
+      // FLOOR-ANCHORED. transmit() always advances by the full `rows` regardless of
+      // how much of that box the art fills, so a sleeping loaf leaves most of its box
+      // empty at the TOP. With the label printed first, that empty space opens up
+      // between a label and the sprite it names, and closes the gap to the sprite
+      // ABOVE it — every short pose captions the wrong cat. Printing the caption
+      // afterwards puts it hard against the art's bottom edge, which is the one edge
+      // the art is guaranteed to reach.
+      if (rendered) process.stdout.write(rendered);
+
+      process.stdout.write(
+        `  ${String(slot).padStart(2)}  ${swatch}  ` +
+        `${(member?.label ?? '(no member)').padEnd(20)}${fault ?? member?.id}\n`
+      );
+    }
+    process.stdout.write('\n');
+  } else if (command === 'theme sheet') {
+    const { values } = parseLeaf(rest, {
+      options: {
+        rows: { type: 'string' }, theme: { type: 'string' },
+        member: { type: 'string' }, out: { type: 'string' },
+      },
+      help: 'theme sheet',
+    });
+    // THE WHOLE THEME AT A GLANCE: one row per member, six poses across it, at whatever
+    // height fits your screen. `theme` shows twelve members in ONE state and `preview`
+    // shows one member in six — the sheet neither of them can draw is the one that puts
+    // every member beside every state, and that is the view you want when judging
+    // whether a roster reads as a set.
+    //
+    // Each row is composed into a SINGLE image before it is transmitted, because
+    // transmit() stacks and cannot place (see contact.js). That also means --out can
+    // hand back the exact same picture as a file, which is the only way to look at this
+    // on a terminal without kitty graphics.
+    const paths = resolvePaths();
+    const { themeId: activeId } = await loadConfig({ paths });
+
+    const { rows: rowsArg, theme: themeArg, member: memberArg, out: outArg } = values;
+
+    const wanted = themeArg ?? activeId;
+    const pack = loadThemePackSync(themeDirFor(paths, wanted));
+    const ctxTone = await loadTone({ paths });
+    const { mode } = ctxTone;
+
+    // The same bounds and the same meaning as `theme --rows`: a VIEW control that never
+    // touches pack.rows. Default is the theme's own height, so an unflagged contact
+    // sheet shows the art at the size the live surfaces ship it at.
+    const viewRows = rowsArg === undefined ? pack.rows : Number(rowsArg);
+    if (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX) {
+      throw new Error(
+        `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(rowsArg)}`
+      );
+    }
+
+    const ids = memberArg === undefined
+      ? [...Array(SLOT_COUNT).keys()].map((slot) => defaultMemberForSlot(pack, slot))
+      : [memberOrThrow(pack, memberArg).id];
+
+    // ONE BOX FOR THE WHOLE SHEET, computed before anything is drawn. Members have
+    // different canvas sizes, so scaling each to the same HEIGHT still leaves them
+    // different widths — and columns that do not line up defeat the point of reading
+    // down a column. Every frame is padded to the widest one instead.
+    const FRAME_H = 128;   // composition height; the terminal scales the finished row
+    const decoded = ids.map((id) => ({
+      id,
+      member: memberOrThrow(pack, id),
+      frames: STATES.map((state) => {
+        const assets = assetsFor(pack, id, mode);
+        return scaleTo(decodeRgba(readFileSync(assets[state].terminal)), { height: FRAME_H });
+      }),
+    }));
+    const boxW = Math.max(...decoded.flatMap((row) => row.frames.map((f) => f.w)));
+    const boxed = decoded.map((row) => ({
+      ...row,
+      frames: row.frames.map((f) => padTo(f, { width: boxW, height: FRAME_H })),
+    }));
+
+    if (outArg !== undefined) {
+      const grid = composeGrid(boxed.map((row) => row.frames), { gap: 8, rowGap: 16 });
+      writeFileSync(outArg, encodeRgba(grid));
+      process.stdout.write(
+        `\n  ${pack.id} — ${STATES.join(', ')}\n`
+        + `  ${boxed.length} member${boxed.length === 1 ? '' : 's'} x ${STATES.length} states -> ${outArg} (${grid.w}x${grid.h})\n\n`
+      );
+      return;
+    }
+
+    const interactive = process.stdout.isTTY === true;
+    const capability = graphicsCapability(process.env);
+    const graphical = interactive && (
+      capability === GRAPHICS_CAPABILITY.ANIMATION ||
+      capability === GRAPHICS_CAPABILITY.STATIC
+    );
+    process.stdout.write(`\n  ${pack.id} — ${pack.label}\n  ${STATES.join('   ')}\n\n`);
+    const captions = sheetRowCaptions(boxed, ctxTone);
+    for (const [index, row] of boxed.entries()) {
+      if (graphical) {
+        process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows }));
+      }
+      // Caption UNDER the art, same floor-anchoring reason as `theme` — see the note there.
+      process.stdout.write(captions[index]);
+    }
+    if (interactive && !graphical) {
+      process.stderr.write(
+        'familiar: this terminal does not advertise kitty graphics, so no art was drawn — '
+        + 'use `--out FILE` to write the contact sheet as a PNG\n'
+      );
+    }
+    process.stdout.write('\n');
+  } else {
+    throw new Error(`resolved command ${JSON.stringify(command)} is not implemented`);
+  }
+}
+
+// THE ERROR BOUNDARY, and the one place in this codebase that formats a thrown error.
+//
+// Every module below fails early and loudly, which is right — but `familiar hook`
+// runs on EVERY TOOL CALL of the user's coding agent. An uncaught throw here is a
+// Node stack trace in their transcript, on every Bash, forever. The failure is
+// still reported once, on one line. Hook and statusline remain exit-zero protocols;
+// every human-invoked command fails nonzero.
+//
+// A cosmetic layer must never be able to degrade the tool it decorates. That is
+// worth exactly one catch, and this is it.
+//
+const COSMETIC_COMMANDS = new Set(['hook', 'statusline']);
+const invokedPath = process.argv[1];
+const isMain = invokedPath !== undefined
+  && realpathSync(invokedPath) === realpathSync(fileURLToPath(import.meta.url));
+if (isMain) {
+  let resolved = null;
+  try {
+    resolved = resolveCommand(process.argv.slice(2));
+    if (resolved.help) process.stdout.write(renderHelp(resolved.help, { color: cliColor() }));
+    else await main(resolved);
+  } catch (error) {
+    reportCosmeticError(error);
+    if (error.help) {
+      const target = error.help === 'root' ? 'familiar --help' : `familiar ${error.help} --help`;
+      process.stderr.write(`Run \`${target}\` for help.\n`);
+    }
+    process.exitCode = COSMETIC_COMMANDS.has(resolved?.command) ? 0 : 1;
+  }
+}
+
+export function reportCosmeticError(error, { write = (line) => process.stderr.write(line) } = {}) {
+  write(`familiar: ${error.message}\n`);
+}

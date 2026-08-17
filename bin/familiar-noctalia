@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+// The integration that supplies SchemeTone. The core never asks a bar what the
+// colorscheme is — it reads the file this writes. Swap this for a wallust,
+// pywal, or static-config equivalent and nothing else changes.
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { paths as resolvePaths } from '../src/bus/paths.js';
+import { writeJsonAtomic } from '../src/bus/store.js';
+
+const paths = resolvePaths();
+const [command] = process.argv.slice(2);
+
+if (command === 'scheme-sync') {
+  const settingsPath = join(homedir(), '.config', 'noctalia', 'settings.json');
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+
+  // Read the key EXPLICITLY and throw when it is absent. `settings.colorSchemes
+  // ?.darkMode === false ? 'light' : 'dark'` looks equivalent and is not: if
+  // noctalia ever renames or nests this key, that expression quietly yields
+  // 'dark' forever, and a user on a light theme gets dark sprites with nothing to
+  // tell them why. A missing key is a broken integration, not a dark scheme.
+  const darkMode = settings.colorSchemes?.darkMode;
+  if (typeof darkMode !== 'boolean') {
+    throw new Error(
+      'noctalia settings.json has no boolean colorSchemes.darkMode — ' +
+      'the key moved, and familiar cannot infer the scheme. Update this adapter.'
+    );
+  }
+
+  const tone = { mode: darkMode ? 'dark' : 'light', satScale: 1.0 };
+  await writeJsonAtomic(paths.schemePath, tone);
+  process.stdout.write(`${tone.mode}\n`);
+} else {
+  process.stderr.write('usage: familiar-noctalia scheme-sync\n');
+  process.exit(1);
+}

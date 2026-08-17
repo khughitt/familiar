@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { readFileSync, mkdirSync } from 'node:fs';
+import { installOpencode } from '../src/install/opencode.js';
+import { writeAtomicSync } from '../src/install/atomic.js';
+
+// The integration's plugin files, resolved from this binary's own location (bin/ -> ../integrations).
+const integrationDir = fileURLToPath(new URL('../integrations/opencode/', import.meta.url));
+
+const HELP = `Install Familiar's OpenCode server and TUI plugins.
+
+Usage:
+  familiar install opencode [--project DIR | --config-dir DIR]
+
+Options:
+  --project DIR      Install into DIR/.opencode
+  --config-dir DIR   Install into this exact config directory
+
+The two target options are mutually exclusive. With neither, installs globally.
+`;
+
+// Strict arg parsing. A flag with no value must NOT fall through to a default: `--project` with
+// nothing after it once silently targeted the GLOBAL config, so a typo could mutate ~/.config.
+// Reject a missing value, an unknown flag, and mutually exclusive targets — all BEFORE any read.
+function parseArgs(argv) {
+  let project = null, configDir = null;
+  const seen = new Set();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--project' || a === '--config-dir') {
+      if (seen.has(a)) throw new Error(`duplicate ${a}`);
+      seen.add(a);
+      const v = argv[i + 1];
+      // Reject undefined, empty, and flag-shaped values: an empty string is falsy and would
+      // otherwise fall through to the GLOBAL config dir below — a typo silently mutating ~/.config.
+      if (v === undefined || v === '' || v.startsWith('-')) throw new Error(`${a} requires a non-empty directory value`);
+      if (a === '--project') project = v; else configDir = v;
+      i++;
+    } else {
+      throw new Error(`unknown argument: ${a}`);
+    }
+  }
+  if (project && configDir) throw new Error('--project and --config-dir are mutually exclusive');
+  return { project, configDir };
+}
+
+const args = process.argv.slice(2);
+if (args[0] === '-h' || args[0] === '--help') {
+  process.stdout.write(HELP);
+} else try {
+  const { project, configDir: explicit } = parseArgs(args);
+  // Distribution target (spec §5). Default: the GLOBAL opencode config dir. `--project <dir>`
+  // writes the project-local `<dir>/.opencode/` fallback (the one opencode dependency-auto-installs
+  // into). `--config-dir <dir>` overrides both (used by the tests).
+  const configDir = explicit
+    ? explicit
+    : project
+      ? join(project, '.opencode')
+      : join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'opencode');
+
+  const { tuiPath, configPath } = installOpencode({
+    configDir,
+    tuiPluginPath: join(integrationDir, 'sprite-plugin.tsx'),
+    serverPluginPath: join(integrationDir, 'plugin.js'),
+    read: (p) => {
+      try { return readFileSync(p, 'utf8'); }
+      catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    },
+    writeAtomic: (p, text) => {
+      mkdirSync(configDir, { recursive: true });
+      writeAtomicSync(p, text);
+    },
+  });
+  process.stdout.write(`wrote ${tuiPath}\nwrote ${configPath}\n`);
+} catch (err) {
+  process.stderr.write(`familiar: opencode install failed: ${err.message}\n`);
+  // exitCode, NOT process.exit(1): stderr is a pipe, and exiting immediately after a write can
+  // truncate it before it drains (see integrations/opencode/hook.test.mjs:49). Let the loop drain.
+  process.exitCode = 1;
+}

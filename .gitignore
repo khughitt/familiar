@@ -1,0 +1,7 @@
+node_modules/
+
+# Mutation fixture a test must build INSIDE the repo, because the specifier
+# under test only resolves from a path under the workspace root: a bare
+# `familiar-theme` import. Removed in a finally; this pattern covers the
+# hard-crash case.
+/slots-guard-*

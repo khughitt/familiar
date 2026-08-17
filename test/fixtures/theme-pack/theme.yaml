@@ -1,0 +1,19 @@
+spec-version: 1
+id: fixture
+label: Fixture
+rows: 4
+members:
+  - id: pip
+    asset-root: sprites/pip
+    label: Pip
+    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    persona: placeholder sprite so engine tests need no shipped art
+    animation:
+      kind: static
+    poses:
+      idle: flat grey square
+      working: flat grey square
+      needs-input: flat grey square
+      needs-approval: flat grey square
+      error: flat grey square
+      done: flat grey square

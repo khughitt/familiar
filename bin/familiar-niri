@@ -1,0 +1,88 @@
+#!/usr/bin/env node
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { watch, mkdirSync } from 'node:fs';
+import { basename } from 'node:path';
+import { createInterface } from 'node:readline';
+import { paths as resolvePaths } from '../src/bus/paths.js';
+import { readJson, writeJsonAtomic } from '../src/bus/store.js';
+import { mapSessionsToWindows, niriWindowsPath, shouldResync } from '../integrations/niri/window.js';
+
+const exec = promisify(execFile);
+const [command, ...rest] = process.argv.slice(2);
+
+if (rest.length > 0) {
+  process.stderr.write('usage: familiar-niri <sync | watch>\n');
+  process.exit(1);
+}
+
+const paths = resolvePaths();
+const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not name niri
+
+let lastWritten = null;
+
+async function sync() {
+  const { stdout } = await exec('niri', ['msg', '-j', 'windows']);
+  const agents = (await readJson(paths.agentsPath)) ?? {};
+  const map = mapSessionsToWindows(agents, JSON.parse(stdout));
+
+  // WindowFocusChanged fires on every focus change — constantly. Writing an
+  // identical map each time would wake workspace-awareness readers for nothing. Compare
+  // before writing.
+  const serialized = JSON.stringify(map);
+  if (serialized === lastWritten) return;
+  lastWritten = serialized;
+
+  await writeJsonAtomic(windowsPath, map);
+}
+
+if (command === 'sync') {
+  await sync();
+} else if (command === 'watch') {
+  // The map is NOT fixed for the life of a session: the terminal can be moved
+  // to another workspace, closed and reopened, or reparented at any time. A
+  // one-shot sync at SessionStart would leave workspace awareness pointing at
+  // the workspace the window used to be on, indefinitely.
+  //
+  // So: resync on every niri event that could move a window, and on every
+  // change to the bus (a new session needs placing). There is no hook-driven
+  // sync anywhere else — this is the single writer of niri-windows.json.
+  let pending = null;
+  const resync = () => {
+    clearTimeout(pending);
+    pending = setTimeout(() => sync().catch((e) => process.stderr.write(`${e.message}\n`)), 100);
+  };
+
+  // WATCH THE DIRECTORY, NOT THE FILE. writeJsonAtomic replaces agents.json via
+  // rename(2), which swaps the INODE — and inotify watches the inode, not the
+  // path. A watch on the file itself delivers events for the first atomic write
+  // and then goes permanently deaf, so no session started afterwards is ever
+  // placed on a workspace. It fails silently, and the niri event stream keeps
+  // firing often enough to make it LOOK like it works, which is worse.
+  //
+  // The mkdir also matters: fs.watch on a nonexistent path throws ENOENT, and
+  // this process is spawned at compositor startup, long before any agent exists.
+  mkdirSync(paths.stateDir, { recursive: true });
+  watch(paths.stateDir, (_event, file) => {
+    if (file === basename(paths.agentsPath)) resync();
+  });
+
+  await sync();
+
+  const stream = spawn('niri', ['msg', '-j', 'event-stream'], { stdio: ['ignore', 'pipe', 'inherit'] });
+  for await (const line of createInterface({ input: stream.stdout })) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;   // niri prints a non-JSON banner line on some versions
+    }
+    if (shouldResync(event)) resync();
+  }
+
+  process.stderr.write('niri event stream closed\n');
+  process.exit(1);   // let the compositor restart us
+} else {
+  process.stderr.write('usage: familiar-niri <sync | watch>\n');
+  process.exit(1);
+}
