@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHook, AsyncLocalStorage } from 'node:async_hooks';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
-  readdirSync, renameSync, rmSync, truncateSync, watch, writeFileSync,
+  readdirSync, readlinkSync, renameSync, rmSync, truncateSync, watch, writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
@@ -17,6 +16,26 @@ import { LIMITS } from 'familiar-theme';
 import { writePack } from './helpers/fixture.js';
 
 const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
+const acquireModule = new URL('../src/theme/acquire.js', import.meta.url).href;
+const fileCopyModule = new URL('../src/theme/copy-regular-file.js', import.meta.url).href;
+
+function makeDeepTree(root, depth) {
+  let dir = root;
+  for (let i = 0; i < depth; i++) {
+    dir = join(dir, `level-${i}`);
+    mkdirSync(dir);
+  }
+}
+
+function hasOpenDirectory(target) {
+  return readdirSync('/proc/self/fd').some((fd) => {
+    try {
+      return readlinkSync(`/proc/self/fd/${fd}`) === target;
+    } catch {
+      return false;
+    }
+  });
+}
 
 test('an https URL classifies as a clone source', () => {
   assert.deepEqual(classifySource('https://example.test/themes/cats'),
@@ -106,6 +125,33 @@ test('a FIFO fails acquisition by path', async () => {
   await assert.rejects(copySource(src, destDir()), /pipe/);
 });
 
+test('a FIFO at the regular-file open boundary is rejected without blocking', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'fifo-open-'));
+  t.after(() => rmSync(dir, { recursive: true }));
+  const fifo = join(dir, 'swapped-file');
+  const out = join(dir, 'out');
+  execFileSync('mkfifo', [fifo]);
+  const script = `
+const { copyRegularFile } = await import(${JSON.stringify(fileCopyModule)});
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(new Error('test timeout')), 50);
+try {
+  await copyRegularFile(process.argv[1], process.argv[1], process.argv[2], controller.signal);
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 2;
+} finally {
+  clearTimeout(timer);
+}
+`;
+  const result = spawnSync(process.execPath,
+    ['--input-type=module', '--eval', script, fifo, out],
+    { encoding: 'utf8', timeout: 1000 });
+  assert.equal(result.signal, null, 'regular-file open blocked on the FIFO');
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /swapped-file.*regular file or directory/);
+});
+
 test('a Unix socket fails acquisition by path', async () => {
   const src = writePack();
   const sock = join(src, 'listen.sock');
@@ -145,10 +191,15 @@ test('a queued directory swapped for a symlink is never followed', async (t) => 
   writeFileSync(join(outside, 'secret.txt'), 'must not be copied');
   for (let i = 0; i < 32; i++) mkdirSync(join(delay, `entry-${i}`));
   const dest = destDir();
+  let copySettled = false;
+  let swappedBeforeTraversal = false;
+  let swappedBeforeSettlement = false;
   let resolveSwap;
   const swapped = new Promise((resolveSwapPromise) => { resolveSwap = resolveSwapPromise; });
   const watcher = watch(dest, (event, name) => {
     if (name !== 'aa-victim' || existsSync(held)) return;
+    swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
+    swappedBeforeSettlement = !copySettled;
     renameSync(victim, held);
     symlinkSync(outside, victim, 'dir');
     resolveSwap();
@@ -165,10 +216,42 @@ test('a queued directory swapped for a symlink is never followed', async (t) => 
     await copySource(src, dest);
   } catch (error) {
     failure = error;
+  } finally {
+    copySettled = true;
   }
   await swapped;
+  assert.equal(swappedBeforeTraversal, true, 'swap occurred after victim traversal');
+  assert.equal(swappedBeforeSettlement, true, 'swap occurred after copy settled');
   if (failure) assert.match(failure.message, /aa-victim.*regular file or directory/);
+  else assert.equal(readFileSync(join(dest, 'aa-victim', 'safe.txt'), 'utf8'), 'safe');
   assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
+});
+
+test('copy depth fails by name before a reduced fd limit can produce EMFILE', (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-deep-copy-'));
+  const dest = destDir();
+  t.after(() => {
+    rmSync(src, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+  makeDeepTree(src, 100);
+  const script = `
+const { copySource } = await import(${JSON.stringify(acquireModule)});
+try {
+  await copySource(process.argv[1], process.argv[2]);
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 2;
+}
+`;
+  const result = spawnSync('bash', [
+    '-c', 'ulimit -n 96; exec "$@"', 'bash', process.execPath,
+    '--input-type=module', '--eval', script, src, dest,
+  ], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(result.signal, null, 'deep copy hung under the reduced fd limit');
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /exceeds the 64-directory traversal depth limit.*flatten/);
+  assert.doesNotMatch(result.stderr, /EMFILE|too many open files/i);
 });
 
 test('isolation env wins over anything the caller injects', () => {
@@ -249,6 +332,20 @@ test('the wall clock interrupts local topology traversal before it finishes', as
   assert.ok(readdirSync(dest).length < 500);
 });
 
+test('growth measurement enforces the same named traversal depth limit', async (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
+  const dest = destDir();
+  t.after(() => {
+    rmSync(src, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+  makeDeepTree(dest, 70);
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, dest, { pollMs: 60_000 }),
+    /exceeds the 64-directory traversal depth limit.*flatten/
+  );
+});
+
 test('Git diagnostics are bounded and disclose truncation', async (t) => {
   const bin = mkdtempSync(join(tmpdir(), 'fake-git-'));
   const fakeGit = join(bin, 'git');
@@ -310,38 +407,51 @@ test('an interval scan error aborts acquisition instead of throwing out of band'
   );
 });
 
-test('acquisition failure waits for its active growth scan to settle', async (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-failing-'));
+test('acquisition failure waits for the observed active growth scan to close',
+  { timeout: 5000 }, async (t) => {
+  const bin = mkdtempSync(join(tmpdir(), 'fake-git-'));
+  const control = mkdtempSync(join(tmpdir(), 'git-control-'));
+  const fakeGit = join(bin, 'git');
+  const release = join(control, 'fail');
   const dest = destDir();
-  const large = join(src, 'aa-large.bin');
-  writeFileSync(large, '');
-  truncateSync(large, 64 * 1024 * 1024);
-  symlinkSync('/dev/null', join(src, 'zz-invalid'));
+  writeFileSync(fakeGit, `#!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { watch } from 'node:fs/promises';
+import { dirname } from 'node:path';
+const release = process.env.FAMILIAR_TEST_RELEASE;
+if (!existsSync(release)) {
+  for await (const event of watch(dirname(release))) {
+    if (existsSync(release)) break;
+  }
+}
+process.stderr.write('fixture failure\\n');
+process.exitCode = 1;
+`);
+  chmodSync(fakeGit, 0o755);
   for (let i = 0; i < 5000; i++) writeFileSync(join(dest, `prefill-${i}`), '');
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  process.env.FAMILIAR_TEST_RELEASE = release;
   t.after(() => {
-    rmSync(src, { recursive: true });
+    process.env.PATH = originalPath;
+    delete process.env.FAMILIAR_TEST_RELEASE;
+    rmSync(bin, { recursive: true });
+    rmSync(control, { recursive: true });
     rmSync(dest, { recursive: true });
   });
 
-  const context = new AsyncLocalStorage();
-  const pending = new Set();
-  const token = {};
-  const hook = createHook({
-    init(asyncId, type) {
-      if (type === 'PROMISE' && context.getStore() === token) pending.add(asyncId);
-    },
-    promiseResolve(asyncId) { pending.delete(asyncId); },
-  });
-  hook.enable();
-  try {
-    await assert.rejects(
-      context.run(token, () => acquireSource(
-        { kind: 'local', path: src }, dest, { pollMs: 0 }
-      )),
-      /zz-invalid/
-    );
-    assert.equal(pending.size, 0, 'growth scan still had pending work after rejection');
-  } finally {
-    hook.disable();
+  let settled = false;
+  const acquisition = acquireSource(
+    { kind: 'https', url: 'https://example.test/theme' }, dest,
+    { pollMs: 0, timeoutMs: 2000 }
+  );
+  acquisition.then(() => { settled = true; }, () => { settled = true; });
+  while (!hasOpenDirectory(dest)) {
+    assert.equal(settled, false, 'acquisition settled before an interval scan opened staging');
+    await new Promise((resume) => setImmediate(resume));
   }
+  assert.equal(settled, false, 'scan was not active before clone failure');
+  writeFileSync(release, 'fail');
+  await assert.rejects(acquisition, /clone failed: fixture failure/);
+  assert.equal(hasOpenDirectory(dest), false, 'growth scan directory remained open');
 });

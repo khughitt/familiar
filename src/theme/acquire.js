@@ -1,14 +1,15 @@
 import { spawn } from 'node:child_process';
-import { constants, createWriteStream, statSync } from 'node:fs';
+import { constants, statSync } from 'node:fs';
 import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { stripVTControlCharacters } from 'node:util';
 import { LIMITS } from 'familiar-theme';
+import { copyRegularFile, unsupportedEntry } from './copy-regular-file.js';
 
 export const DEFAULT_TIMEOUT_MS = 300_000;
 export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
+const MAX_TRAVERSAL_DEPTH = 64;
 
 // Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
 // Credentialed URLs are refused because the given URL is persisted in the
@@ -77,10 +78,11 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
       `theme add: staging at ${destReal} lies inside the source ${sourceReal} — a self-copy would never terminate`
     );
   }
-  await copyDirectory(sourceReal, sourceReal, destReal, signal);
+  await copyDirectory(sourceReal, sourceReal, destReal, signal, 0);
 }
 
-async function copyDirectory(openPath, displayPath, to, signal) {
+async function copyDirectory(openPath, displayPath, to, signal, depth) {
+  if (depth >= MAX_TRAVERSAL_DEPTH) throw traversalDepthError(displayPath);
   let handle;
   try {
     try {
@@ -105,7 +107,7 @@ async function copyDirectory(openPath, displayPath, to, signal) {
       signal?.throwIfAborted();
       if (st.isDirectory()) {
         await mkdir(out);
-        await copyDirectory(src, display, out, signal);
+        await copyDirectory(src, display, out, signal, depth + 1);
       } else if (st.isFile()) {
         await copyRegularFile(src, display, out, signal);
       } else {
@@ -117,36 +119,16 @@ async function copyDirectory(openPath, displayPath, to, signal) {
   }
 }
 
-function unsupportedEntry(path) {
-  return new Error(
-    `theme add: ${path} is not a regular file or directory — the source must contain only files and directories`
+function traversalDepthError(path) {
+  const error = new Error(
+    `theme add: ${path} exceeds the ${MAX_TRAVERSAL_DEPTH}-directory traversal depth limit — flatten the theme pack`
   );
+  error.code = 'THEME_TRAVERSAL_DEPTH';
+  return error;
 }
 
 async function openDirectory(path) {
   return open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-}
-
-async function copyRegularFile(src, display, out, signal) {
-  let handle;
-  try {
-    try {
-      handle = await open(src, constants.O_RDONLY | constants.O_NOFOLLOW);
-    } catch (error) {
-      if (error.code === 'ELOOP') throw unsupportedEntry(display);
-      throw error;
-    }
-    if (!(await handle.stat()).isFile()) throw unsupportedEntry(display);
-    await pipeline(
-      handle.createReadStream({ autoClose: false }),
-      createWriteStream(out, { flags: 'wx' }),
-      { signal }
-    );
-  } catch (error) {
-    throw signal?.aborted ? signal.reason : error;
-  } finally {
-    await handle?.close();
-  }
 }
 
 // Git isolation (spec §3). The machine's own configuration must not shape
@@ -302,7 +284,8 @@ export async function acquireSource(source, dest, {
 
 async function stagedBytes(root, signal) {
   let total = 0;
-  const measureDirectory = async (openPath, displayPath) => {
+  const measureDirectory = async (openPath, displayPath, depth) => {
+    if (depth >= MAX_TRAVERSAL_DEPTH) throw traversalDepthError(displayPath);
     let handle;
     try {
       try {
@@ -328,10 +311,11 @@ async function stagedBytes(root, signal) {
           );
         }
         total += st.size;
-        if (st.isDirectory()) await measureDirectory(path, display);
+        if (st.isDirectory()) await measureDirectory(path, display, depth + 1);
       }
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
+      if (error.code === 'THEME_TRAVERSAL_DEPTH') throw error;
       if (error.message.startsWith('theme add: could not measure staging growth')) throw error;
       throw new Error(
         `theme add: could not measure staging growth at ${displayPath}: ${error.message}`,
@@ -342,6 +326,6 @@ async function stagedBytes(root, signal) {
     }
   };
 
-  await measureDirectory(root, root);
+  await measureDirectory(root, root, 0);
   return total;
 }
