@@ -6,7 +6,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { paths } from '../src/bus/paths.js';
-import { addTheme, STAGING_DIR_NAME } from '../src/theme/add.js';
+import { addTheme, lockPathFor, STAGING_DIR_NAME } from '../src/theme/add.js';
 import { readReceipt, receiptPath, writeReceipt } from '../src/theme/receipt.js';
 import { writePack } from './helpers/fixture.js';
 
@@ -143,4 +143,24 @@ test('a held lock makes the second add fail by name, not race', async () => {
   }
   const result = await first;
   assert.equal(result.id, 'gate-fixture');
+});
+
+test('locked callback rejections pass through unchanged', async () => {
+  for (const primitive of [false, true]) {
+    const p = scratch();
+    const rejection = primitive
+      ? 'non-error rejection'
+      : new Error(`could not acquire lock: ${lockPathFor(p)}`);
+    let caught;
+    try {
+      await addTheme({
+        paths: p,
+        source: writePack(),
+        validate: async () => { throw rejection; },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assert.equal(caught, rejection);
+  }
 });

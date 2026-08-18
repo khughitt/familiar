@@ -36,9 +36,11 @@ export async function addTheme({
   const classified = classifySource(source);
   mkdirSync(paths.userThemesDir, { recursive: true });
   const lockPath = lockPathFor(paths);
+  let entered = false;
 
   try {
     return await withLock(lockPath, async () => {
+      entered = true;
       const stagingRoot = join(paths.userThemesDir, STAGING_DIR_NAME);
       const stagingStat = lstatOrNull(stagingRoot);
       if (stagingStat === null) mkdirSync(stagingRoot);
@@ -89,7 +91,8 @@ export async function addTheme({
       }
     }, { ...lockOpts, staleMs: Infinity });
   } catch (error) {
-    if (error.message === `could not acquire lock: ${lockPath}`) {
+    if (!entered && error instanceof Error
+      && error.message === `could not acquire lock: ${lockPath}`) {
       throw new Error('theme add: another theme add is running');
     }
     throw error;
