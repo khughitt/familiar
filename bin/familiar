@@ -9,10 +9,12 @@ import { adapterFor, AGENTS } from '../src/adapters/index.js';
 import { spritesheet, petFile, SPRITESHEET_PATH } from '../src/render/codex/pets.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
-import { listThemes } from '../src/theme/catalog.js';
+import { listThemes, stagingStatus } from '../src/theme/catalog.js';
+import { addTheme } from '../src/theme/add.js';
+import { readReceipt } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
-import { BOLD, fg, RESET } from '../src/render/term/sgr.js';
+import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
 import { applyHookEvent, reap } from '../src/bus/transaction.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
@@ -42,7 +44,7 @@ export function cliSwatch(hex, { color = cliColor() } = {}) {
 
 const HELP_FLAGS = new Set(['-h', '--help']);
 const FAMILIES = new Map([
-  ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate'])],
+  ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate', 'add'])],
   ['install', new Set(['pets', 'opencode'])],
   ['scheme', new Set(['set'])],
 ]);
@@ -111,6 +113,7 @@ Usage:
 Explore
   whoami [PATH]                Show this project's familiar identity
   theme list                   List installed themes
+  theme add SOURCE             Install a theme from an HTTPS URL or local directory
   theme validate DIR           Prove a theme directory conforms
   theme show [ID]              Show a theme's twelve members
   theme preview MEMBER         Preview one member and its states
@@ -152,6 +155,7 @@ Usage:
 
 Commands:
   list                   List installed themes
+  add SOURCE             Install a theme
   validate DIR           Prove a theme directory conforms
   show [ID]              Show a theme's twelve members
   preview MEMBER         Preview one member and its states
@@ -161,6 +165,21 @@ Examples:
   familiar theme list
   familiar theme show cats
 `,
+  'theme add': `Install a theme from an HTTPS URL or local directory.
+
+Usage
+  familiar theme add SOURCE
+
+Arguments
+  SOURCE          An https:// git URL, or a local theme directory
+
+The pack is fetched into staging, validated whole, and promoted atomically;
+an install receipt records the source. Private repos: clone with git, then
+add the clone's directory.
+
+Examples
+  familiar theme add https://github.com/khughitt/familiar-cats
+  familiar theme add ./my-theme`,
   'theme validate': `Prove a theme directory conforms.
 
 Usage:
@@ -834,6 +853,17 @@ async function main({ command, args: rest }) {
       }
       process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
     }
+  } else if (command === 'theme add') {
+    const { positionals } = parseLeaf(rest, {
+      minPositionals: 1, maxPositionals: 1, help: 'theme add',
+    });
+    const paths = resolvePaths();
+    const result = await addTheme({ paths, source: positionals[0] });
+    process.stdout.write(`installed theme '${result.id}' (${result.members} members) at ${result.dir}\n`);
+    const { themeId: activeId } = await loadConfig({ paths });
+    if (result.id !== activeId) {
+      process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
+    }
   } else if (command === 'theme list') {
     parseLeaf(rest, { help: 'theme list' });
     // Deliberately NOT context(): a broken theme on disk must not stop you
@@ -857,7 +887,22 @@ async function main({ command, args: rest }) {
       } catch (error) {
         detail = `— unreadable: ${error.message}`;
       }
+      if (row.source === 'user') {
+        const read = readReceipt(paths, row.id);
+        const receiptNote = read.verdict === 'validated'
+          ? `validated ${read.receipt.installedAt.slice(0, 10)} from ${sanitize(read.receipt.source.kind === 'https' ? read.receipt.source.url : read.receipt.source.path)}`
+          : read.verdict === 'invalid'
+            ? `invalid receipt (${read.reason})`
+            : 'never validated (manual install)';
+        detail += `\n${' '.repeat(24)}${receiptNote}`;
+      }
       process.stdout.write(`  ${row.id.padEnd(12)}${status.padEnd(10)}${detail}\n`);
+    }
+    const staging = stagingStatus(paths);
+    if (staging === 'occupied') {
+      process.stdout.write('  theme add staging present — another add may be running; abandoned staging is cleaned by the next add\n');
+    } else if (staging === 'not-a-directory') {
+      process.stdout.write(`  ${join(paths.userThemesDir, '.staging')} is not a directory — remove it\n`);
     }
     process.stdout.write('\n');
   } else if (command === 'theme validate') {

@@ -69,7 +69,7 @@ test('root and bare families print offline help with status zero', (t) => {
     assert.equal(root.match(new RegExp(`^${heading}$`, 'gm'))?.length, 1);
   }
   for (const command of [
-    'whoami [PATH]', 'theme list', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
+    'whoami [PATH]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
     'scheme set dark|light', 'install pets', 'install opencode', 'hook EVENT', 'statusline', 'reap',
   ]) {
     assert.equal(root.split(command).length - 1, 1, command);
@@ -79,7 +79,7 @@ test('root and bare families print offline help with status zero', (t) => {
 });
 
 const leaves = [
-  ['whoami'], ['theme', 'list'], ['theme', 'show'], ['theme', 'preview'],
+  ['whoami'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
   ['install', 'opencode'], ['hook'], ['statusline'], ['reap'],
 ];
@@ -90,7 +90,7 @@ test('every leaf owns -h and --help before config or work', (t) => {
     const result = run([...leaf, flag], f.env);
     assert.equal(result.status, 0, `${leaf.join(' ')} ${flag}: ${result.stderr}`);
     assert.equal(result.stderr, '');
-    assert.match(result.stdout, /Usage:/);
+    assert.match(result.stdout, leaf.join(' ') === 'theme add' ? /^Usage$/m : /Usage:/);
   }
   assert.deepEqual(readdirSync(f.state).sort(), ['sentinel']);
   assert.deepEqual(readdirSync(f.xdg).sort(), []);
@@ -218,7 +218,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
   const oldRootLeaves = ['themes', 'preview', 'contact', 'pets'];
   const retired = new RegExp(
     `familiar (?:${oldRootLeaves.join('|')})\\b|tools/whoami\\.mjs|` +
-    'familiar theme (?!list\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
+    'familiar theme (?!list\\b|add\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
     'u',
   );
   const textExtensions = new Set(['.js', '.mjs', '.ts', '.tsx', '.md', '.yaml', '.yml']);
