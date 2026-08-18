@@ -1,9 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { classifySource, collapseStderr } from '../src/theme/acquire.js';
+import { classifySource, collapseStderr, copySource } from '../src/theme/acquire.js';
+import { writePack } from './helpers/fixture.js';
+
+const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
 
 test('an https URL classifies as a clone source', () => {
   assert.deepEqual(classifySource('https://example.test/themes/cats'),
@@ -63,4 +68,59 @@ test('bare CR, backspace, and BEL cannot rewrite the message', () => {
   const line = collapseStderr('progress 1%\rprogress 100%\bdone\x07!');
   assert.equal(/[\p{Cc}]/u.test(line), false);
   assert.match(line, /progress 1%; progress 100%/);
+});
+
+test('a pack copies byte-for-byte, excluding any .git', async () => {
+  const src = writePack();
+  mkdirSync(join(src, '.git'));
+  writeFileSync(join(src, '.git', 'config'), 'x');
+  mkdirSync(join(src, 'sprites', '.git'));
+  writeFileSync(join(src, 'sprites', '.git', 'HEAD'), 'x');
+  const dest = destDir();
+  await copySource(src, dest);
+  assert.equal(existsSync(join(dest, '.git')), false);
+  assert.equal(existsSync(join(dest, 'sprites', '.git')), false);
+  assert.deepEqual(readFileSync(join(dest, 'theme.yaml')),
+    readFileSync(join(src, 'theme.yaml')));
+  assert.deepEqual(readFileSync(join(dest, 'sprites', 'solo', 'idle.png')),
+    readFileSync(join(src, 'sprites', 'solo', 'idle.png')));
+});
+
+test('a symlink in the source fails acquisition by path, undereferenced', async () => {
+  const src = writePack();
+  symlinkSync('/etc/hostname', join(src, 'link.png'));
+  await assert.rejects(copySource(src, destDir()), /link\.png/);
+});
+
+test('a FIFO fails acquisition by path', async () => {
+  const src = writePack();
+  execFileSync('mkfifo', [join(src, 'pipe')]);
+  await assert.rejects(copySource(src, destDir()), /pipe/);
+});
+
+test('a Unix socket fails acquisition by path', async () => {
+  const src = writePack();
+  const sock = join(src, 'listen.sock');
+  const server = createNetServer();
+  await new Promise((ready) => server.listen(sock, ready));
+  try {
+    await assert.rejects(copySource(src, destDir()), /listen\.sock/);
+  } finally {
+    await new Promise((closed) => server.close(closed));
+  }
+});
+
+test('a destination beneath the source is rejected before the walk', async () => {
+  const src = writePack();
+  const dest = join(src, 'nested', 'dest');
+  mkdirSync(dest, { recursive: true });
+  await assert.rejects(copySource(src, dest), /inside the source/);
+});
+
+test('an aborted signal stops the copy with its reason', async () => {
+  const src = writePack();
+  const controller = new AbortController();
+  controller.abort(new Error('bound tripped'));
+  await assert.rejects(copySource(src, destDir(), { signal: controller.signal }),
+    /bound tripped/);
 });

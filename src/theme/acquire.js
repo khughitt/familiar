@@ -1,5 +1,8 @@
-import { statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import {
+  createReadStream, createWriteStream, lstatSync, mkdirSync, readdirSync, realpathSync, statSync,
+} from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { stripVTControlCharacters } from 'node:util';
 
 // Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
@@ -51,4 +54,47 @@ export function collapseStderr(text) {
     .map((line) => line.replaceAll(/\p{Cc}/gu, ' ').trim())
     .filter((line) => line.length > 0)
     .join('; ');
+}
+
+// The defensive copy (spec §3). Validation runs only AFTER acquisition, so
+// the copy itself must refuse what it cannot safely materialize: it walks
+// with lstat and never dereferences — a symlink, FIFO, socket or device is
+// rejected by path, never opened, never recreated in staging. `.git` at any
+// depth is excluded; git is never invoked on the source. Regular files are
+// copied by abortable streaming because fs.copyFile/fs.cp accept no
+// AbortSignal, and the wall clock must be able to stop a stalled file.
+export async function copySource(sourceDir, dest, { signal } = {}) {
+  const sourceReal = realpathSync(sourceDir);
+  const destReal = realpathSync(dest);
+  if (destReal === sourceReal || destReal.startsWith(sourceReal + sep)) {
+    throw new Error(
+      `theme add: staging at ${destReal} lies inside the source ${sourceReal} — a self-copy would never terminate`
+    );
+  }
+  await copyTree(sourceReal, destReal, signal);
+}
+
+async function copyTree(from, to, signal) {
+  const entries = readdirSync(from, { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : 1));
+  for (const entry of entries) {
+    if (entry.name === '.git') continue;
+    const src = join(from, entry.name);
+    const out = join(to, entry.name);
+    const st = lstatSync(src);
+    if (st.isDirectory()) {
+      mkdirSync(out);
+      await copyTree(src, out, signal);
+    } else if (st.isFile()) {
+      try {
+        await pipeline(createReadStream(src), createWriteStream(out, { flags: 'wx' }), { signal });
+      } catch (error) {
+        throw signal?.aborted ? signal.reason : error;
+      }
+    } else {
+      throw new Error(
+        `theme add: ${src} is not a regular file or directory — the source must contain only files and directories`
+      );
+    }
+  }
 }
