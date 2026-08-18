@@ -18,6 +18,7 @@ export function paths(env = process.env) {
     schemePath: join(configDir, 'scheme.json'),
     identitiesPath: join(configDir, 'identities.yaml'),
     userThemesDir: join(configDir, 'themes'),
+    themeReceiptsDir: join(configDir, 'theme-receipts'),
     themesDir: env.FAMILIAR_THEMES_DIR ?? join(REPO_ROOT, 'themes'),
     agentsPath: join(stateDir, 'agents.json'),
     lockPath: join(stateDir, 'agents.lock'),
