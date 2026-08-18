@@ -7,12 +7,12 @@ import {
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import {
   acquireSource, buildCloneEnv, classifySource, cloneSource, collapseStderr, copySource,
   DEFAULT_GROWTH_LIMIT_BYTES,
 } from '../src/theme/acquire.js';
-import { LIMITS } from 'familiar-theme';
+import { LIMITS, validateThemePack } from 'familiar-theme';
 import { writePack } from './helpers/fixture.js';
 
 const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
@@ -25,6 +25,7 @@ function makeDeepTree(root, depth) {
     dir = join(dir, `level-${i}`);
     mkdirSync(dir);
   }
+  return dir;
 }
 
 function hasOpenDirectory(target) {
@@ -35,6 +36,53 @@ function hasOpenDirectory(target) {
       return false;
     }
   });
+}
+
+async function copyAfterQueuedSwap(t, kind) {
+  const src = mkdtempSync(join(tmpdir(), 'src-swap-'));
+  const victim = join(src, 'aa-victim');
+  const held = join(src, 'held-victim');
+  const delay = join(src, 'zz-delay');
+  const outside = mkdtempSync(join(tmpdir(), 'outside-swap-'));
+  const replacement = kind === 'directory' ? join(outside, 'replacement') : outside;
+  mkdirSync(victim);
+  mkdirSync(delay);
+  if (replacement !== outside) mkdirSync(replacement);
+  writeFileSync(join(victim, 'safe.txt'), 'safe');
+  writeFileSync(join(replacement, 'secret.txt'), 'must not be copied');
+  for (let i = 0; i < 32; i++) mkdirSync(join(delay, `entry-${i}`));
+  const dest = destDir();
+  let copySettled = false;
+  let swappedBeforeTraversal = false;
+  let swappedBeforeSettlement = false;
+  let resolveSwap;
+  const swapped = new Promise((resolveSwapPromise) => { resolveSwap = resolveSwapPromise; });
+  const watcher = watch(dest, (event, name) => {
+    if (name !== 'aa-victim' || existsSync(held)) return;
+    swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
+    swappedBeforeSettlement = !copySettled;
+    renameSync(victim, held);
+    if (kind === 'directory') renameSync(replacement, victim);
+    else symlinkSync(outside, victim, 'dir');
+    resolveSwap();
+  });
+  t.after(() => {
+    watcher.close();
+    rmSync(src, { recursive: true });
+    rmSync(outside, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+
+  let failure;
+  try {
+    await copySource(src, dest);
+  } catch (error) {
+    failure = error;
+  } finally {
+    copySettled = true;
+  }
+  await swapped;
+  return { dest, failure, swappedBeforeSettlement, swappedBeforeTraversal };
 }
 
 test('an https URL classifies as a clone source', () => {
@@ -180,78 +228,58 @@ test('an aborted signal stops the copy with its reason', async () => {
 });
 
 test('a queued directory swapped for a symlink is never followed', async (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-swap-'));
-  const victim = join(src, 'aa-victim');
-  const held = join(src, 'held-victim');
-  const delay = join(src, 'zz-delay');
-  const outside = mkdtempSync(join(tmpdir(), 'outside-'));
-  mkdirSync(victim);
-  mkdirSync(delay);
-  writeFileSync(join(victim, 'safe.txt'), 'safe');
-  writeFileSync(join(outside, 'secret.txt'), 'must not be copied');
-  for (let i = 0; i < 32; i++) mkdirSync(join(delay, `entry-${i}`));
-  const dest = destDir();
-  let copySettled = false;
-  let swappedBeforeTraversal = false;
-  let swappedBeforeSettlement = false;
-  let resolveSwap;
-  const swapped = new Promise((resolveSwapPromise) => { resolveSwap = resolveSwapPromise; });
-  const watcher = watch(dest, (event, name) => {
-    if (name !== 'aa-victim' || existsSync(held)) return;
-    swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
-    swappedBeforeSettlement = !copySettled;
-    renameSync(victim, held);
-    symlinkSync(outside, victim, 'dir');
-    resolveSwap();
-  });
-  t.after(() => {
-    watcher.close();
-    rmSync(src, { recursive: true });
-    rmSync(outside, { recursive: true });
-    rmSync(dest, { recursive: true });
-  });
-
-  let failure;
-  try {
-    await copySource(src, dest);
-  } catch (error) {
-    failure = error;
-  } finally {
-    copySettled = true;
-  }
-  await swapped;
+  const { dest, failure, swappedBeforeSettlement, swappedBeforeTraversal }
+    = await copyAfterQueuedSwap(t, 'symlink');
   assert.equal(swappedBeforeTraversal, true, 'swap occurred after victim traversal');
   assert.equal(swappedBeforeSettlement, true, 'swap occurred after copy settled');
-  if (failure) assert.match(failure.message, /aa-victim.*regular file or directory/);
-  else assert.equal(readFileSync(join(dest, 'aa-victim', 'safe.txt'), 'utf8'), 'safe');
+  assert.match(failure?.message ?? '', /aa-victim.*changed during acquisition.*retry/);
   assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
 });
 
-test('copy depth fails by name before a reduced fd limit can produce EMFILE', (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-deep-copy-'));
-  const dest = destDir();
+test('a contract-valid deep pack copies and acquires under a reduced fd limit', async (t) => {
+  const src = writePack();
+  const deepRoot = join(src, 'extra');
+  mkdirSync(deepRoot);
+  const leafDir = makeDeepTree(deepRoot, 80);
+  const leaf = join(leafDir, 'deep.txt');
+  writeFileSync(leaf, 'deep');
+  await validateThemePack(src);
+  const destinations = [];
   t.after(() => {
     rmSync(src, { recursive: true });
-    rmSync(dest, { recursive: true });
+    for (const dest of destinations) rmSync(dest, { recursive: true });
   });
-  makeDeepTree(src, 100);
   const script = `
-const { copySource } = await import(${JSON.stringify(acquireModule)});
+const { acquireSource, copySource } = await import(${JSON.stringify(acquireModule)});
 try {
-  await copySource(process.argv[1], process.argv[2]);
+  if (process.argv[1] === 'copy') await copySource(process.argv[2], process.argv[3]);
+  else await acquireSource({ kind: 'local', path: process.argv[2] }, process.argv[3],
+    { pollMs: 60_000 });
 } catch (error) {
   console.error(error.message);
   process.exitCode = 2;
 }
 `;
-  const result = spawnSync('bash', [
-    '-c', 'ulimit -n 96; exec "$@"', 'bash', process.execPath,
-    '--input-type=module', '--eval', script, src, dest,
-  ], { encoding: 'utf8', timeout: 5000 });
-  assert.equal(result.signal, null, 'deep copy hung under the reduced fd limit');
-  assert.equal(result.status, 2);
-  assert.match(result.stderr, /exceeds the 64-directory traversal depth limit.*flatten/);
-  assert.doesNotMatch(result.stderr, /EMFILE|too many open files/i);
+  for (const mode of ['copy', 'acquire']) {
+    const dest = destDir();
+    destinations.push(dest);
+    const result = spawnSync('bash', [
+      '-c', 'ulimit -n 48; exec "$@"', 'bash', process.execPath,
+      '--input-type=module', '--eval', script, mode, src, dest,
+    ], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(result.signal, null, `${mode} hung under the reduced fd limit`);
+    assert.equal(result.status, 0, `${mode}: ${result.stderr}`);
+    assert.equal(readFileSync(join(dest, relative(src, leaf)), 'utf8'), 'deep');
+  }
+});
+
+test('a queued directory replaced by another directory is rejected by identity', async (t) => {
+  const { dest, failure, swappedBeforeSettlement, swappedBeforeTraversal }
+    = await copyAfterQueuedSwap(t, 'directory');
+  assert.equal(swappedBeforeTraversal, true, 'replacement occurred after victim traversal');
+  assert.equal(swappedBeforeSettlement, true, 'replacement occurred after copy settled');
+  assert.match(failure?.message ?? '', /aa-victim.*changed during acquisition.*retry/);
+  assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
 });
 
 test('isolation env wins over anything the caller injects', () => {
@@ -330,20 +358,6 @@ test('the wall clock interrupts local topology traversal before it finishes', as
     /exceeded the 0 ms wall clock/
   );
   assert.ok(readdirSync(dest).length < 500);
-});
-
-test('growth measurement enforces the same named traversal depth limit', async (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
-  const dest = destDir();
-  t.after(() => {
-    rmSync(src, { recursive: true });
-    rmSync(dest, { recursive: true });
-  });
-  makeDeepTree(dest, 70);
-  await assert.rejects(
-    acquireSource({ kind: 'local', path: src }, dest, { pollMs: 60_000 }),
-    /exceeds the 64-directory traversal depth limit.*flatten/
-  );
 });
 
 test('Git diagnostics are bounded and disclose truncation', async (t) => {

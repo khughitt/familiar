@@ -9,7 +9,6 @@ import { copyRegularFile, unsupportedEntry } from './copy-regular-file.js';
 
 export const DEFAULT_TIMEOUT_MS = 300_000;
 export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
-const MAX_TRAVERSAL_DEPTH = 64;
 
 // Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
 // Credentialed URLs are refused because the given URL is persisted in the
@@ -65,9 +64,10 @@ export function collapseStderr(text) {
 // The defensive copy (spec §3). Validation runs only AFTER acquisition, so
 // the copy itself must refuse what it cannot safely materialize. Directories
 // are opened no-follow and traversed through their /proc fd identity, so a
-// pathname swap cannot redirect a queued walk. A symlink, FIFO, socket or
-// device is rejected by path, never opened, never recreated in staging.
-// `.git` at any depth is excluded; git is never invoked on the source.
+// pathname swap cannot redirect a queued walk. Static symlinks, FIFOs, sockets
+// and devices are rejected by lstat before open; a raced file replacement is
+// opened no-follow/nonblocking and rejected through the handle. `.git` at any
+// depth is excluded; git is never invoked on the source.
 // Regular files are copied by abortable streaming because fs.copyFile/fs.cp
 // accept no AbortSignal, and the wall clock must stop a stalled file.
 export async function copySource(sourceDir, dest, { signal } = {}) {
@@ -78,53 +78,72 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
       `theme add: staging at ${destReal} lies inside the source ${sourceReal} — a self-copy would never terminate`
     );
   }
-  await copyDirectory(sourceReal, sourceReal, destReal, signal, 0);
-}
-
-async function copyDirectory(openPath, displayPath, to, signal, depth) {
-  if (depth >= MAX_TRAVERSAL_DEPTH) throw traversalDepthError(displayPath);
-  let handle;
-  try {
+  const root = await lstat(sourceReal);
+  const pending = [{
+    openPath: sourceReal, displayPath: sourceReal, to: destReal,
+    dev: root.dev, ino: root.ino,
+  }];
+  for (let cursor = 0; cursor < pending.length; cursor++) {
+    const task = pending[cursor];
+    let handle;
     try {
-      handle = await openDirectory(openPath);
-    } catch (error) {
-      if (error.code === 'ELOOP' || error.code === 'ENOTDIR') {
-        throw unsupportedEntry(displayPath);
-      }
-      throw error;
-    }
-    signal?.throwIfAborted();
-    const bound = `/proc/self/fd/${handle.fd}`;
-    const entries = (await readdir(bound, { withFileTypes: true }))
-      .sort((a, b) => (a.name < b.name ? -1 : 1));
-    for (const entry of entries) {
+      handle = await openVerifiedDirectory(task);
       signal?.throwIfAborted();
-      if (entry.name === '.git') continue;
-      const src = join(bound, entry.name);
-      const display = join(displayPath, entry.name);
-      const out = join(to, entry.name);
-      const st = await lstat(src);
-      signal?.throwIfAborted();
-      if (st.isDirectory()) {
-        await mkdir(out);
-        await copyDirectory(src, display, out, signal, depth + 1);
-      } else if (st.isFile()) {
-        await copyRegularFile(src, display, out, signal);
-      } else {
-        throw unsupportedEntry(display);
+      const bound = `/proc/self/fd/${handle.fd}`;
+      const entries = (await readdir(bound, { withFileTypes: true }))
+        .sort((a, b) => (a.name < b.name ? -1 : 1));
+      for (const entry of entries) {
+        signal?.throwIfAborted();
+        if (entry.name === '.git') continue;
+        const src = join(bound, entry.name);
+        const openPath = join(task.openPath, entry.name);
+        const display = join(task.displayPath, entry.name);
+        const out = join(task.to, entry.name);
+        const st = await lstat(src);
+        signal?.throwIfAborted();
+        if (st.isDirectory()) {
+          await mkdir(out);
+          pending.push({
+            openPath, displayPath: display, to: out, dev: st.dev, ino: st.ino,
+          });
+        } else if (st.isFile()) {
+          await copyRegularFile(src, display, out, signal);
+        } else {
+          throw unsupportedEntry(display);
+        }
       }
+    } finally {
+      await handle?.close();
     }
-  } finally {
-    await handle?.close();
   }
 }
 
-function traversalDepthError(path) {
+function changedEntry(path) {
   const error = new Error(
-    `theme add: ${path} exceeds the ${MAX_TRAVERSAL_DEPTH}-directory traversal depth limit — flatten the theme pack`
+    `theme add: ${path} changed during acquisition — retry with a stable source`
   );
-  error.code = 'THEME_TRAVERSAL_DEPTH';
+  error.code = 'THEME_ENTRY_CHANGED';
   return error;
+}
+
+async function openVerifiedDirectory(task) {
+  let handle;
+  try {
+    try {
+      handle = await openDirectory(task.openPath);
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ELOOP' || error.code === 'ENOTDIR') {
+        throw changedEntry(task.displayPath);
+      }
+      throw error;
+    }
+    const st = await handle.stat();
+    if (st.dev !== task.dev || st.ino !== task.ino) throw changedEntry(task.displayPath);
+    return handle;
+  } catch (error) {
+    await handle?.close();
+    throw error;
+  }
 }
 
 async function openDirectory(path) {
@@ -284,22 +303,31 @@ export async function acquireSource(source, dest, {
 
 async function stagedBytes(root, signal) {
   let total = 0;
-  const measureDirectory = async (openPath, displayPath, depth) => {
-    if (depth >= MAX_TRAVERSAL_DEPTH) throw traversalDepthError(displayPath);
+  let rootStat;
+  try {
+    rootStat = await lstat(root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return total;
+    throw new Error(
+      `theme add: could not measure staging growth at ${root}: ${error.message}`,
+      { cause: error }
+    );
+  }
+  const pending = [{
+    openPath: root, displayPath: root, dev: rootStat.dev, ino: rootStat.ino,
+  }];
+  for (let cursor = 0; cursor < pending.length; cursor++) {
+    const task = pending[cursor];
     let handle;
     try {
-      try {
-        handle = await openDirectory(openPath);
-      } catch (error) {
-        if (error.code === 'ENOENT') return;
-        throw error;
-      }
+      handle = await openVerifiedDirectory(task);
       const bound = `/proc/self/fd/${handle.fd}`;
       const entries = await readdir(bound, { withFileTypes: true });
       for (const entry of entries) {
         signal?.throwIfAborted();
         const path = join(bound, entry.name);
-        const display = join(displayPath, entry.name);
+        const openPath = join(task.openPath, entry.name);
+        const display = join(task.displayPath, entry.name);
         let st;
         try {
           st = await lstat(path);
@@ -311,21 +339,20 @@ async function stagedBytes(root, signal) {
           );
         }
         total += st.size;
-        if (st.isDirectory()) await measureDirectory(path, display, depth + 1);
+        if (st.isDirectory()) {
+          pending.push({ openPath, displayPath: display, dev: st.dev, ino: st.ino });
+        }
       }
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
-      if (error.code === 'THEME_TRAVERSAL_DEPTH') throw error;
       if (error.message.startsWith('theme add: could not measure staging growth')) throw error;
       throw new Error(
-        `theme add: could not measure staging growth at ${displayPath}: ${error.message}`,
+        `theme add: could not measure staging growth at ${task.displayPath}: ${error.message}`,
         { cause: error }
       );
     } finally {
       await handle?.close();
     }
-  };
-
-  await measureDirectory(root, root, 0);
+  }
   return total;
 }

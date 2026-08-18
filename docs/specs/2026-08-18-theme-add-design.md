@@ -179,18 +179,17 @@ would otherwise copy staging into itself until a bound trips). Then an
 `lstat` walk that never dereferences: regular files and directories only; a
 symlink, FIFO, socket, or device fails acquisition by path; any entry named
 `.git` at any depth is excluded from the copy; git is never invoked on the
-source. Each directory is opened with `O_DIRECTORY | O_NOFOLLOW` and traversed
-through its `/proc/self/fd` identity while the handle remains open; regular
-files are likewise opened with `O_NOFOLLOW | O_NONBLOCK`, checked through the
-handle, and streamed from it. `O_NONBLOCK` keeps a post-`lstat` FIFO or device
-swap from hanging in `open`; the handle-type check still rejects everything
-but a regular file. Replacing either kind of entry with a symlink after `lstat`
-therefore cannot redirect the copy. Handles are closed as each depth-first
-directory visit completes, and the abort signal is checked between entries.
-Before opening a directory at depth 64, both copy and growth measurement fail
-with a named instruction to flatten the pack. Real themes are only a few levels
-deep; 64 leaves ample process headroom under a typical 256-fd limit while
-preventing an untrusted empty-directory chain from reaching `EMFILE` first.
+source. Directory tasks retain the `dev`/`ino` observed through their parent's
+opened identity. The iterative worker later opens each task with
+`O_DIRECTORY | O_NOFOLLOW`, checks the handle's `dev`/`ino`, traverses through
+`/proc/self/fd`, and closes the handle before taking the next task. A symlink or
+different-directory replacement therefore fails with an instruction to retry
+from a stable source, while the walk holds one directory handle regardless of
+pack depth. Regular files are opened with `O_NOFOLLOW | O_NONBLOCK`, checked
+through the handle, and streamed from it. Static special entries are rejected
+by `lstat` before open; `O_NONBLOCK` keeps a post-`lstat` FIFO or device swap
+from hanging in `open`, and the handle-type check rejects it. The abort signal
+is checked between entries.
 The gate remains the authority for anything that reaches it anyway.
 
 **Bounds, honestly.** Both paths run under a wall-clock timeout (default
