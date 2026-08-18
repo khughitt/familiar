@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHook, AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
-  readdirSync, rmSync, truncateSync, writeFileSync,
+  readdirSync, renameSync, rmSync, truncateSync, watch, writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
@@ -132,20 +133,42 @@ test('an aborted signal stops the copy with its reason', async () => {
     /bound tripped/);
 });
 
-test('a regular file swapped for a symlink is never followed', async () => {
-  const src = writePack();
-  const victim = join(src, 'theme.yaml');
-  const secret = join(mkdtempSync(join(tmpdir(), 'secret-')), 'secret.txt');
-  writeFileSync(secret, 'must not be copied');
+test('a queued directory swapped for a symlink is never followed', async (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-swap-'));
+  const victim = join(src, 'aa-victim');
+  const held = join(src, 'held-victim');
+  const delay = join(src, 'zz-delay');
+  const outside = mkdtempSync(join(tmpdir(), 'outside-'));
+  mkdirSync(victim);
+  mkdirSync(delay);
+  writeFileSync(join(victim, 'safe.txt'), 'safe');
+  writeFileSync(join(outside, 'secret.txt'), 'must not be copied');
+  for (let i = 0; i < 32; i++) mkdirSync(join(delay, `entry-${i}`));
   const dest = destDir();
-  await assert.rejects(copySource(src, dest, {
-    afterLstat: async (path) => {
-      if (path !== victim) return;
-      rmSync(path);
-      symlinkSync(secret, path);
-    },
-  }), /theme\.yaml.*regular file or directory/);
-  assert.equal(existsSync(join(dest, 'theme.yaml')), false);
+  let resolveSwap;
+  const swapped = new Promise((resolveSwapPromise) => { resolveSwap = resolveSwapPromise; });
+  const watcher = watch(dest, (event, name) => {
+    if (name !== 'aa-victim' || existsSync(held)) return;
+    renameSync(victim, held);
+    symlinkSync(outside, victim, 'dir');
+    resolveSwap();
+  });
+  t.after(() => {
+    watcher.close();
+    rmSync(src, { recursive: true });
+    rmSync(outside, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+
+  let failure;
+  try {
+    await copySource(src, dest);
+  } catch (error) {
+    failure = error;
+  }
+  await swapped;
+  if (failure) assert.match(failure.message, /aa-victim.*regular file or directory/);
+  assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
 });
 
 test('isolation env wins over anything the caller injects', () => {
@@ -285,4 +308,40 @@ test('an interval scan error aborts acquisition instead of throwing out of band'
     acquireSource({ kind: 'local', path: src }, dest, { pollMs: 1 }),
     /could not measure staging growth.*blocked/
   );
+});
+
+test('acquisition failure waits for its active growth scan to settle', async (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-failing-'));
+  const dest = destDir();
+  const large = join(src, 'aa-large.bin');
+  writeFileSync(large, '');
+  truncateSync(large, 64 * 1024 * 1024);
+  symlinkSync('/dev/null', join(src, 'zz-invalid'));
+  for (let i = 0; i < 5000; i++) writeFileSync(join(dest, `prefill-${i}`), '');
+  t.after(() => {
+    rmSync(src, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+
+  const context = new AsyncLocalStorage();
+  const pending = new Set();
+  const token = {};
+  const hook = createHook({
+    init(asyncId, type) {
+      if (type === 'PROMISE' && context.getStore() === token) pending.add(asyncId);
+    },
+    promiseResolve(asyncId) { pending.delete(asyncId); },
+  });
+  hook.enable();
+  try {
+    await assert.rejects(
+      context.run(token, () => acquireSource(
+        { kind: 'local', path: src }, dest, { pollMs: 0 }
+      )),
+      /zz-invalid/
+    );
+    assert.equal(pending.size, 0, 'growth scan still had pending work after rejection');
+  } finally {
+    hook.disable();
+  }
 });

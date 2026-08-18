@@ -179,21 +179,25 @@ would otherwise copy staging into itself until a bound trips). Then an
 `lstat` walk that never dereferences: regular files and directories only; a
 symlink, FIFO, socket, or device fails acquisition by path; any entry named
 `.git` at any depth is excluded from the copy; git is never invoked on the
-source. The traversal is iterative and asynchronous, checking its abort
-signal between entries. A regular source is opened with `O_NOFOLLOW`, then
-checked through the opened handle and streamed from that handle, so replacing
-it with a symlink after `lstat` cannot redirect the copy. The gate remains the
-authority for anything that reaches it anyway.
+source. Each directory is opened with `O_DIRECTORY | O_NOFOLLOW` and traversed
+through its `/proc/self/fd` identity while the handle remains open; regular
+files are likewise opened with `O_NOFOLLOW`, checked through the handle, and
+streamed from it. Replacing either kind of entry with a symlink after `lstat`
+therefore cannot redirect the copy. Handles are closed as each depth-first
+directory visit completes, and the abort signal is checked between entries.
+The gate remains the authority for anything that reaches it anyway.
 
 **Bounds, honestly.** Both paths run under a wall-clock timeout (default
 300 s, kills the child / aborts the walk) and a staging-growth monitor
 (polled about once per second; aborts past 4 × `MAX_TOTAL_BYTES` = 640 MiB,
 headroom because a clone's `.git` can briefly double the tree). The
-monitor's own traversal is `lstat`-based and never follows symlinks — a
-clone's contents are untrusted before validation, and a symlink must not
-redirect the supposedly bounded scan outside staging (symlink sizes count
-as their `lstat` size, and the gate rejects them later regardless). For
-the timeout to be real on the copy path, regular files are copied by
+monitor's own traversal uses the same no-follow, fd-bound directory identity —
+a clone's contents are untrusted before validation, and a directory swap must
+not redirect the supposedly bounded scan outside staging (symlink sizes count
+as their `lstat` size, and the gate rejects them later regardless). On any
+acquisition failure, the controller aborts and the caller awaits an active
+growth scan before returning, so orchestrator cleanup cannot race a background
+scan. For the timeout to be real on the copy path, regular files are copied by
 **abortable streaming** (`stream.pipeline` with an `AbortSignal`) —
 `fs.copyFile`/`fs.cp` accept no signal, so a large or stalled file would
 otherwise outlive the deadline. These bound disk and time with bounded

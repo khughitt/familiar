@@ -62,15 +62,14 @@ export function collapseStderr(text) {
 }
 
 // The defensive copy (spec §3). Validation runs only AFTER acquisition, so
-// the copy itself must refuse what it cannot safely materialize: it walks
-// with lstat and never dereferences — a symlink, FIFO, socket or device is
-// rejected by path, never opened, never recreated in staging. `.git` at any
-// depth is excluded; git is never invoked on the source. Regular files are
-// copied by abortable streaming because fs.copyFile/fs.cp accept no
-// AbortSignal, and the wall clock must be able to stop a stalled file.
-// afterLstat is the narrow test seam that deterministically swaps an entry
-// between inspection and open; production callers leave it undefined.
-export async function copySource(sourceDir, dest, { signal, afterLstat } = {}) {
+// the copy itself must refuse what it cannot safely materialize. Directories
+// are opened no-follow and traversed through their /proc fd identity, so a
+// pathname swap cannot redirect a queued walk. A symlink, FIFO, socket or
+// device is rejected by path, never opened, never recreated in staging.
+// `.git` at any depth is excluded; git is never invoked on the source.
+// Regular files are copied by abortable streaming because fs.copyFile/fs.cp
+// accept no AbortSignal, and the wall clock must stop a stalled file.
+export async function copySource(sourceDir, dest, { signal } = {}) {
   const sourceReal = await realpath(sourceDir);
   const destReal = await realpath(dest);
   if (destReal === sourceReal || destReal.startsWith(sourceReal + sep)) {
@@ -78,29 +77,43 @@ export async function copySource(sourceDir, dest, { signal, afterLstat } = {}) {
       `theme add: staging at ${destReal} lies inside the source ${sourceReal} — a self-copy would never terminate`
     );
   }
-  const pending = [{ from: sourceReal, to: destReal }];
-  while (pending.length > 0) {
+  await copyDirectory(sourceReal, sourceReal, destReal, signal);
+}
+
+async function copyDirectory(openPath, displayPath, to, signal) {
+  let handle;
+  try {
+    try {
+      handle = await openDirectory(openPath);
+    } catch (error) {
+      if (error.code === 'ELOOP' || error.code === 'ENOTDIR') {
+        throw unsupportedEntry(displayPath);
+      }
+      throw error;
+    }
     signal?.throwIfAborted();
-    const { from, to } = pending.pop();
-    const entries = (await readdir(from, { withFileTypes: true }))
+    const bound = `/proc/self/fd/${handle.fd}`;
+    const entries = (await readdir(bound, { withFileTypes: true }))
       .sort((a, b) => (a.name < b.name ? -1 : 1));
     for (const entry of entries) {
       signal?.throwIfAborted();
       if (entry.name === '.git') continue;
-      const src = join(from, entry.name);
+      const src = join(bound, entry.name);
+      const display = join(displayPath, entry.name);
       const out = join(to, entry.name);
       const st = await lstat(src);
-      await afterLstat?.(src, st);
       signal?.throwIfAborted();
       if (st.isDirectory()) {
         await mkdir(out);
-        pending.push({ from: src, to: out });
+        await copyDirectory(src, display, out, signal);
       } else if (st.isFile()) {
-        await copyRegularFile(src, out, signal);
+        await copyRegularFile(src, display, out, signal);
       } else {
-        throw unsupportedEntry(src);
+        throw unsupportedEntry(display);
       }
     }
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -110,16 +123,20 @@ function unsupportedEntry(path) {
   );
 }
 
-async function copyRegularFile(src, out, signal) {
+async function openDirectory(path) {
+  return open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+}
+
+async function copyRegularFile(src, display, out, signal) {
   let handle;
   try {
     try {
       handle = await open(src, constants.O_RDONLY | constants.O_NOFOLLOW);
     } catch (error) {
-      if (error.code === 'ELOOP') throw unsupportedEntry(src);
+      if (error.code === 'ELOOP') throw unsupportedEntry(display);
       throw error;
     }
-    if (!(await handle.stat()).isFile()) throw unsupportedEntry(src);
+    if (!(await handle.stat()).isFile()) throw unsupportedEntry(display);
     await pipeline(
       handle.createReadStream({ autoClose: false }),
       createWriteStream(out, { flags: 'wx' }),
@@ -273,45 +290,58 @@ export async function acquireSource(source, dest, {
     controller.signal.throwIfAborted();
     return provenance;
   } catch (error) {
-    throw controller.signal.aborted ? controller.signal.reason : error;
+    const failure = controller.signal.aborted ? controller.signal.reason : error;
+    if (!controller.signal.aborted) controller.abort(failure);
+    throw failure;
   } finally {
     clearTimeout(timer);
     clearInterval(poller);
+    await growthCheck;
   }
 }
 
 async function stagedBytes(root, signal) {
   let total = 0;
-  const pending = [root];
-  while (pending.length > 0) {
-    signal?.throwIfAborted();
-    const dir = pending.pop();
-    let entries;
-    let st;
+  const measureDirectory = async (openPath, displayPath) => {
+    let handle;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      try {
+        handle = await openDirectory(openPath);
+      } catch (error) {
+        if (error.code === 'ENOENT') return;
+        throw error;
+      }
+      const bound = `/proc/self/fd/${handle.fd}`;
+      const entries = await readdir(bound, { withFileTypes: true });
+      for (const entry of entries) {
+        signal?.throwIfAborted();
+        const path = join(bound, entry.name);
+        const display = join(displayPath, entry.name);
+        let st;
+        try {
+          st = await lstat(path);
+        } catch (error) {
+          if (error.code === 'ENOENT') continue;
+          throw new Error(
+            `theme add: could not measure staging growth at ${display}: ${error.message}`,
+            { cause: error }
+          );
+        }
+        total += st.size;
+        if (st.isDirectory()) await measureDirectory(path, display);
+      }
     } catch (error) {
-      if (error.code === 'ENOENT') continue;
+      if (signal?.aborted) throw signal.reason;
+      if (error.message.startsWith('theme add: could not measure staging growth')) throw error;
       throw new Error(
-        `theme add: could not measure staging growth at ${dir}: ${error.message}`,
+        `theme add: could not measure staging growth at ${displayPath}: ${error.message}`,
         { cause: error }
       );
+    } finally {
+      await handle?.close();
     }
-    for (const entry of entries) {
-      signal?.throwIfAborted();
-      const path = join(dir, entry.name);
-      try {
-        st = await lstat(path);
-      } catch (error) {
-        if (error.code === 'ENOENT') continue;
-        throw new Error(
-          `theme add: could not measure staging growth at ${path}: ${error.message}`,
-          { cause: error }
-        );
-      }
-      total += st.size;
-      if (st.isDirectory()) pending.push(path);
-    }
-  }
+  };
+
+  await measureDirectory(root, root);
   return total;
 }
