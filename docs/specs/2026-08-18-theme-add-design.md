@@ -110,6 +110,13 @@ installation-ignorant.
      symlink) is never overwritten; shadowing a **shipped** id remains
      allowed. The check is meaningful because it happens under the lock:
      `rename` alone would silently replace an empty target directory.
+     Fail equally if a **receipt** for `<id>` exists without its theme —
+     an orphan, refused by name with the remedy (remove the receipt
+     file). Otherwise a crash or a failed receipt write after the
+     rename would leave the *old* receipt describing the *new* bytes: a
+     false validation claim, the exact thing receipt-last ordering
+     exists to make impossible. With both target and receipt proven
+     absent here, that ordering guarantee holds unconditionally.
   7. **Rename** into place — atomic and same-filesystem by construction,
      because staging lives beneath the themes directory (a symlinked or
      mounted themes dir cannot introduce a cross-device rename).
@@ -136,7 +143,10 @@ installation-ignorant.
   either — that would make corruption look like a clean manual install.
 - `src/theme/catalog.js` — learns exactly one reserved name, `.staging`:
   excluded from id validation, surfaced as the neutral staging row
-  above.
+  above **only when it contains an entry**. The parent directory
+  outlives every run (each add creates it, cleanup removes only run
+  directories), so its mere existence is the steady state after one
+  successful install and reports nothing.
 
 ## 3. Acquisition defenses
 
@@ -182,8 +192,12 @@ Every failure is a named, single-line instruction:
 
 - Transport violations (bad scheme, missing or non-directory local path)
   fail before anything is created, naming the rule.
-- Clone failures surface git's stderr; isolation guarantees no prompt can
-  hang, so a private repo fails fast rather than waiting for credentials.
+- Clone failures surface git's stderr **collapsed to the contract**: a
+  failed clone normally emits several lines (`Cloning into…`, `fatal: …`),
+  so the nonempty lines are sanitized with `util.stripVTControlCharacters`
+  and joined into the one instruction (`clone failed: <lines; joined>`)
+  — stdlib only. Isolation guarantees no prompt can hang, so a private
+  repo fails fast rather than waiting for credentials.
 - A tripped bound names which bound and how much had been fetched.
 - Validation failures are `validateThemePack`'s own messages, staging
   already cleaned.
@@ -210,10 +224,12 @@ Every failure is a named, single-line instruction:
   rejection, receipt round-trip plus the invalid cases (corrupt JSON,
   wrong shape, id/filename mismatch — each yielding `invalid receipt`,
   never `validated`), staging cleanup and the symlinked-`.staging`
-  refusal, catalog `.staging` handling, id-exists refusal (including an
-  empty directory at the target, and proving the refusal leaves no
-  staging residue), and receipt-last ordering via an injected fault
-  between rename and receipt (pack present, `list` says never
+  refusal, catalog `.staging` handling (row for a non-empty `.staging`,
+  no row for an empty one), id-exists refusal (including an empty
+  directory at the target, and proving the refusal leaves no staging
+  residue), orphan-receipt refusal (receipt present, theme absent —
+  named, nothing installed), and receipt-last ordering via an injected
+  fault between rename and receipt (pack present, `list` says never
   validated).
 - **Hermetic HTTPS integration (fast suite, no network):** a committed
   test-only self-signed certificate and key for `127.0.0.1`, served by a
