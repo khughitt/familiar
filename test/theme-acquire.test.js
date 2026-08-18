@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync, writeFileSync,
+} from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { classifySource, collapseStderr, copySource } from '../src/theme/acquire.js';
+import {
+  acquireSource, buildCloneEnv, classifySource, collapseStderr, copySource,
+  DEFAULT_GROWTH_LIMIT_BYTES,
+} from '../src/theme/acquire.js';
+import { LIMITS } from 'familiar-theme';
 import { writePack } from './helpers/fixture.js';
 
 const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
@@ -123,4 +129,45 @@ test('an aborted signal stops the copy with its reason', async () => {
   controller.abort(new Error('bound tripped'));
   await assert.rejects(copySource(src, destDir(), { signal: controller.signal }),
     /bound tripped/);
+});
+
+test('isolation env wins over anything the caller injects', () => {
+  const env = buildCloneEnv({ caFile: '/fixture/ca.pem' }, {
+    GIT_ALLOW_PROTOCOL: 'file',
+    GIT_ASKPASS: '/evil/askpass',
+    GIT_CONFIG_GLOBAL: '/evil/gitconfig',
+    GIT_CONFIG_SYSTEM: '/evil/system-config',
+    GIT_TERMINAL_PROMPT: '1',
+    GIT_SSL_CAINFO: '/evil/ca.pem',
+    SSH_ASKPASS: '/evil/ssh-askpass',
+  });
+  assert.equal(env.GIT_ALLOW_PROTOCOL, 'https');
+  assert.equal(env.GIT_CONFIG_GLOBAL, devNull);
+  assert.equal(env.GIT_CONFIG_SYSTEM, devNull);
+  assert.equal(env.GIT_TERMINAL_PROMPT, '0');
+  assert.equal(env.GIT_ASKPASS, '');
+  assert.equal(env.SSH_ASKPASS, '');
+  assert.equal(env.GIT_SSL_CAINFO, '/fixture/ca.pem');
+});
+
+test('the default growth limit derives from the contract limit', () => {
+  assert.equal(DEFAULT_GROWTH_LIMIT_BYTES, 4 * LIMITS.MAX_TOTAL_BYTES);
+});
+
+test('the post-acquisition size check rejects a fast local copy past the bound', async () => {
+  const src = writePack();
+  const dest = destDir();
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, dest,
+      { growthLimitBytes: 16, pollMs: 60_000 }),
+    /grew past the 16-byte bound \(\d+ bytes fetched\)/
+  );
+});
+
+test('a completed local acquisition returns local provenance', async () => {
+  const src = writePack();
+  const dest = destDir();
+  const provenance = await acquireSource({ kind: 'local', path: src }, dest);
+  assert.deepEqual(provenance, { kind: 'local', path: realpathSync(src) });
+  assert.equal(existsSync(join(dest, 'theme.yaml')), true);
 });

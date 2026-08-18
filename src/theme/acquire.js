@@ -1,9 +1,15 @@
+import { spawn } from 'node:child_process';
 import {
   createReadStream, createWriteStream, lstatSync, mkdirSync, readdirSync, realpathSync, statSync,
 } from 'node:fs';
+import { devNull } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { stripVTControlCharacters } from 'node:util';
+import { LIMITS } from 'familiar-theme';
+
+export const DEFAULT_TIMEOUT_MS = 300_000;
+export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
 
 // Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
 // Credentialed URLs are refused because the given URL is persisted in the
@@ -97,4 +103,122 @@ async function copyTree(from, to, signal) {
       );
     }
   }
+}
+
+// Git isolation (spec §3). The machine's own configuration must not shape
+// what an untrusted clone does. Isolation is applied after caller input; the
+// sole TLS seam is caFile -> GIT_SSL_CAINFO.
+export function buildCloneEnv({ caFile } = {}, base = process.env) {
+  const env = { ...base };
+  if (caFile !== undefined) env.GIT_SSL_CAINFO = caFile;
+  env.GIT_CONFIG_GLOBAL = devNull;
+  env.GIT_CONFIG_SYSTEM = devNull;
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.GIT_ASKPASS = '';
+  env.SSH_ASKPASS = '';
+  env.GIT_ALLOW_PROTOCOL = 'https';
+  return env;
+}
+
+function runGit(args, { env, signal, what }) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn('git', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const onAbort = () => child.kill('SIGKILL');
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.on('error', rejectRun);
+    child.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort);
+      if (signal?.aborted) return rejectRun(signal.reason);
+      if (code !== 0) {
+        return rejectRun(new Error(`${what} failed: ${collapseStderr(stderr)}`));
+      }
+      resolveRun(stdout);
+    });
+    if (signal?.aborted) onAbort();
+  });
+}
+
+export async function cloneSource(url, dest, { caFile, signal } = {}) {
+  const env = buildCloneEnv({ caFile });
+  await runGit(
+    ['clone', '--depth', '1', '--single-branch', '--no-tags', '--no-recurse-submodules',
+      '--', url, dest],
+    { env, signal, what: 'clone' }
+  );
+  // Read provenance before the orchestrator removes .git.
+  const commit = (await runGit(
+    ['-C', dest, 'rev-parse', 'HEAD'], { env, signal, what: 'rev-parse' }
+  )).trim();
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(`rev-parse failed: expected a 40-hex commit, got ${JSON.stringify(commit)}`);
+  }
+  return { commit };
+}
+
+export async function acquireSource(source, dest, {
+  caFile,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  growthLimitBytes = DEFAULT_GROWTH_LIMIT_BYTES,
+  pollMs = 1000,
+} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`theme add: acquisition exceeded the ${timeoutMs} ms wall clock`));
+  }, timeoutMs);
+  const checkGrowth = () => {
+    const bytes = stagedBytes(dest);
+    if (bytes > growthLimitBytes) {
+      controller.abort(new Error(
+        `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
+      ));
+    }
+  };
+  const poller = setInterval(checkGrowth, pollMs);
+  try {
+    let provenance;
+    if (source.kind === 'https') {
+      const { commit } = await cloneSource(
+        source.url, dest, { caFile, signal: controller.signal }
+      );
+      provenance = { kind: 'https', url: source.url, commit };
+    } else {
+      const path = realpathSync(source.path);
+      await copySource(path, dest, { signal: controller.signal });
+      provenance = { kind: 'local', path };
+    }
+    checkGrowth();
+    controller.signal.throwIfAborted();
+    return provenance;
+  } catch (error) {
+    throw controller.signal.aborted ? controller.signal.reason : error;
+  } finally {
+    clearTimeout(timer);
+    clearInterval(poller);
+  }
+}
+
+function stagedBytes(dir) {
+  let total = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return total;
+  }
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    let st;
+    try {
+      st = lstatSync(path);
+    } catch {
+      continue;
+    }
+    total += st.size;
+    if (st.isDirectory()) total += stagedBytes(path);
+  }
+  return total;
 }
