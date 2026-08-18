@@ -1,6 +1,7 @@
-import { readdirSync, existsSync } from 'node:fs';
+import { lstatSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertId } from 'familiar-theme';
+import { STAGING_DIR_NAME } from './add.js';
 
 // Enumeration lives here and not in config.js, which resolves exactly ONE id
 // (themeDirFor) and otherwise reads config files. This module walks directories
@@ -16,17 +17,19 @@ import { assertId } from 'familiar-theme';
 // valid theme id is a different case and stays a named error, never silently
 // skipped: a skipped directory looks identical to a theme that was never
 // installed, which would hide a mistake instead of reporting it.
-function idsIn(dir, { readdir, exists }) {
+function idsIn(dir, { readdir, exists }, reserved = new Set()) {
   if (!exists(dir)) return [];
   return readdir(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !reserved.has(entry.name))
     .map((entry) => entry.name);
 }
 
 export function listThemes(paths, { readdir = readdirSync, exists = existsSync } = {}) {
   const io = { readdir, exists };
   const shipped = idsIn(paths.themesDir, io);
-  const user = idsIn(paths.userThemesDir, io);
+  // .staging is the installer's one reserved name; its state is reported by
+  // stagingStatus, not misread as a theme id.
+  const user = idsIn(paths.userThemesDir, io, new Set([STAGING_DIR_NAME]));
 
   // Validate BEFORE joining, exactly as themeDirFor does — a name that cannot
   // be a theme id is reported by name rather than skipped, because a skipped
@@ -51,4 +54,19 @@ export function listThemes(paths, { readdir = readdirSync, exists = existsSync }
   }
 
   return rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+// Read untrusted staging state with lstat first: symlinks and files must never
+// redirect or be traversed.
+export function stagingStatus(paths, { lstat = lstatSync, readdir = readdirSync } = {}) {
+  const dir = join(paths.userThemesDir, STAGING_DIR_NAME);
+  let st;
+  try {
+    st = lstat(dir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return 'absent';
+    throw error;
+  }
+  if (!st.isDirectory()) return 'not-a-directory';
+  return readdir(dir).length > 0 ? 'occupied' : 'empty';
 }

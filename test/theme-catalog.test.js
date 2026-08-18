@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { listThemes } from '../src/theme/catalog.js';
+import { listThemes, stagingStatus } from '../src/theme/catalog.js';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -92,6 +92,26 @@ test('a directory name that is not a valid theme id is refused by name', () => {
 test('a stray file in a themes root is skipped, not treated as a theme id', () => {
   const rows = listThemes(paths, fake(['cats', file('.DS_Store')], [file('theme.tar.gz')]));
   assert.deepEqual(rows.map((r) => r.id), ['cats']);
+});
+
+test('.staging is reserved: excluded from ids, other dot-dirs still error', () => {
+  const rows = listThemes(paths, fake([], ['cats', '.staging']));
+  assert.deepEqual(rows.map((r) => r.id), ['cats']);
+  assert.throws(() => listThemes(paths, fake([], ['.other'])), /\.other/);
+});
+
+test('stagingStatus: absent, empty, occupied', () => {
+  const enoent = () => { throw Object.assign(new Error('gone'), { code: 'ENOENT' }); };
+  const dir = { isDirectory: () => true };
+  assert.equal(stagingStatus(paths, { lstat: enoent, readdir: () => [] }), 'absent');
+  assert.equal(stagingStatus(paths, { lstat: () => dir, readdir: () => [] }), 'empty');
+  assert.equal(stagingStatus(paths, { lstat: () => dir, readdir: () => ['run-x'] }), 'occupied');
+});
+
+test('stagingStatus: a symlink or file is not-a-directory and is never read', () => {
+  const notDir = { isDirectory: () => false };
+  const readdir = () => { throw new Error('must not be called'); };
+  assert.equal(stagingStatus(paths, { lstat: () => notDir, readdir }), 'not-a-directory');
 });
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
