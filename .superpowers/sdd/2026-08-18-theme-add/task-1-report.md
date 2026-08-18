@@ -47,3 +47,30 @@ JSON, invalid source shape, invalid dates, and filename/id mismatch.
 No implementation concerns. Focused and full test commands require
 `TMPDIR=/tmp` in this environment because the system-selected temporary
 directory is read-only.
+
+## Fix round 1
+
+### Changes
+
+- HTTPS sources now parse with `URL` and require the `https:` protocol.
+- `installedAt` now requires an ISO-8601 timestamp with explicit time and
+  timezone, valid calendar/time components, and a parseable date.
+- Added tests for malformed `https://` and parseable non-ISO/normalized dates.
+
+### TDD RED
+
+Command: `TMPDIR=/tmp node --test test/theme-receipt.test.js`
+
+Expected failure: the two new boundary tests received `validated` instead of
+`invalid`, proving the existing checks were too permissive.
+
+### GREEN and regression tests
+
+- `TMPDIR=/tmp node --test test/theme-receipt.test.js`: 10 passed, 0 failed.
+- `TMPDIR=/tmp npm test`: 704 passed, 2 skipped, 0 failed.
+
+### Self-review and concerns
+
+The fix is limited to URL parsing, timestamp validation, and their covering
+tests. `git diff --check` passed. No remaining concerns; `TMPDIR=/tmp` is
+required because the environment's default temporary directory is read-only.

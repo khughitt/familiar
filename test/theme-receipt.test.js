@@ -56,12 +56,30 @@ test('a wrong-shaped source is invalid', () => {
   assert.equal(readReceipt(p, 'gate-fixture').verdict, 'invalid');
 });
 
+test('an https source must contain a valid https URL', () => {
+  const p = scratch();
+  mkdirSync(p.themeReceiptsDir, { recursive: true });
+  writeFileSync(receiptPath(p, 'gate-fixture'),
+    JSON.stringify({ ...VALID, source: { ...VALID.source, url: 'https://' } }));
+  assert.equal(readReceipt(p, 'gate-fixture').verdict, 'invalid');
+});
+
 test('an unparseable installedAt is invalid', () => {
   const p = scratch();
   mkdirSync(p.themeReceiptsDir, { recursive: true });
   writeFileSync(receiptPath(p, 'gate-fixture'),
     JSON.stringify({ ...VALID, installedAt: 'yesterday-ish' }));
   assert.equal(readReceipt(p, 'gate-fixture').verdict, 'invalid');
+});
+
+test('a parseable non-ISO or normalized installedAt is invalid', () => {
+  const p = scratch();
+  mkdirSync(p.themeReceiptsDir, { recursive: true });
+  for (const installedAt of ['08/18/2026', '2026-02-30T00:00:00.000Z']) {
+    writeFileSync(receiptPath(p, 'gate-fixture'),
+      JSON.stringify({ ...VALID, installedAt }));
+    assert.equal(readReceipt(p, 'gate-fixture').verdict, 'invalid');
+  }
 });
 
 test('an embedded id that differs from the filename is invalid', () => {
