@@ -146,7 +146,13 @@ installation-ignorant.
   above **only when it contains an entry**. The parent directory
   outlives every run (each add creates it, cleanup removes only run
   directories), so its mere existence is the steady state after one
-  successful install and reports nothing.
+  successful install and reports nothing. The non-empty check is a new
+  read of untrusted filesystem state, so it is guarded the same way the
+  installer's is: `lstat` first, and only a real directory is ever
+  read. A symlink or non-directory at `.staging` gets its own named row
+  (`.staging is not a directory — remove it`), is never traversed, and
+  never turns into an `ENOTDIR` crash — listing must not be
+  redirectable outside the themes root any more than cleanup may be.
 
 ## 3. Acquisition defenses
 
@@ -192,12 +198,16 @@ Every failure is a named, single-line instruction:
 
 - Transport violations (bad scheme, missing or non-directory local path)
   fail before anything is created, naming the rule.
-- Clone failures surface git's stderr **collapsed to the contract**: a
-  failed clone normally emits several lines (`Cloning into…`, `fatal: …`),
-  so the nonempty lines are sanitized with `util.stripVTControlCharacters`
-  and joined into the one instruction (`clone failed: <lines; joined>`)
-  — stdlib only. Isolation guarantees no prompt can hang, so a private
-  repo fails fast rather than waiting for credentials.
+- Clone failures surface git's stderr **collapsed to the contract**.
+  Remote diagnostics are untrusted terminal input, and ANSI stripping
+  alone is not enough — bare `\r` (git progress uses it), backspace,
+  and BEL survive `util.stripVTControlCharacters` and can rewrite or
+  spoof the visible message. Sanitization is therefore: strip ANSI
+  sequences, normalize CR/LF to line splits, replace every remaining
+  C0/C1 control character, then join the nonempty lines into the one
+  instruction (`clone failed: <lines; joined>`) — stdlib only.
+  Isolation guarantees no prompt can hang, so a private repo fails
+  fast rather than waiting for credentials.
 - A tripped bound names which bound and how much had been fetched.
 - Validation failures are `validateThemePack`'s own messages, staging
   already cleaned.
@@ -224,8 +234,11 @@ Every failure is a named, single-line instruction:
   rejection, receipt round-trip plus the invalid cases (corrupt JSON,
   wrong shape, id/filename mismatch — each yielding `invalid receipt`,
   never `validated`), staging cleanup and the symlinked-`.staging`
-  refusal, catalog `.staging` handling (row for a non-empty `.staging`,
-  no row for an empty one), id-exists refusal (including an empty
+  refusal, stderr sanitization (ANSI, bare `\r`, and `\b` all rendered
+  harmless in the collapsed message), catalog `.staging` handling (row
+  for a non-empty `.staging`, no row for an empty one, named
+  not-a-directory row for a symlink or file — untraversed), id-exists
+  refusal (including an empty
   directory at the target, and proving the refusal leaves no staging
   residue), orphan-receipt refusal (receipt present, theme absent —
   named, nothing installed), and receipt-last ordering via an injected
