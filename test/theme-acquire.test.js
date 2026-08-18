@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
-  readdirSync, readlinkSync, renameSync, rmSync, truncateSync, watch, writeFileSync,
+  readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, watch,
+  writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
@@ -32,6 +33,16 @@ function hasOpenDirectory(target) {
   return readdirSync('/proc/self/fd').some((fd) => {
     try {
       return readlinkSync(`/proc/self/fd/${fd}`) === target;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function hasOpenChildDirectory(target) {
+  return readdirSync('/proc/self/fd').some((fd) => {
+    try {
+      return readlinkSync(`/proc/self/fd/${fd}`).startsWith(`${target}/queued-`);
     } catch {
       return false;
     }
@@ -421,7 +432,7 @@ test('an interval scan error aborts acquisition instead of throwing out of band'
   );
 });
 
-test('acquisition failure waits for the observed active growth scan to close',
+test('acquisition failure aborts and awaits an active queued growth scan',
   { timeout: 5000 }, async (t) => {
   const bin = mkdtempSync(join(tmpdir(), 'fake-git-'));
   const control = mkdtempSync(join(tmpdir(), 'git-control-'));
@@ -442,7 +453,12 @@ process.stderr.write('fixture failure\\n');
 process.exitCode = 1;
 `);
   chmodSync(fakeGit, 0o755);
-  for (let i = 0; i < 5000; i++) writeFileSync(join(dest, `prefill-${i}`), '');
+  const queued = Array.from({ length: 2000 }, (_, i) => join(dest, `queued-${i}`));
+  for (const dir of queued) {
+    mkdirSync(dir);
+    utimesSync(dir, new Date(0), new Date());
+  }
+  const visited = () => queued.filter((dir) => statSync(dir).atimeMs !== 0).length;
   const originalPath = process.env.PATH;
   process.env.PATH = `${bin}:${originalPath}`;
   process.env.FAMILIAR_TEST_RELEASE = release;
@@ -460,12 +476,14 @@ process.exitCode = 1;
     { pollMs: 0, timeoutMs: 2000 }
   );
   acquisition.then(() => { settled = true; }, () => { settled = true; });
-  while (!hasOpenDirectory(dest)) {
-    assert.equal(settled, false, 'acquisition settled before an interval scan opened staging');
+  while (!hasOpenChildDirectory(dest)) {
+    assert.equal(settled, false, 'acquisition settled before a queued directory opened');
     await new Promise((resume) => setImmediate(resume));
   }
   assert.equal(settled, false, 'scan was not active before clone failure');
   writeFileSync(release, 'fail');
   await assert.rejects(acquisition, /clone failed: fixture failure/);
   assert.equal(hasOpenDirectory(dest), false, 'growth scan directory remained open');
+  assert.equal(hasOpenChildDirectory(dest), false, 'queued scan directory remained open');
+  assert.ok(visited() < queued.length, 'aborted scan drained every queued directory');
 });

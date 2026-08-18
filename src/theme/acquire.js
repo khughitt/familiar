@@ -317,6 +317,7 @@ async function stagedBytes(root, signal) {
     openPath: root, displayPath: root, dev: rootStat.dev, ino: rootStat.ino,
   }];
   for (let cursor = 0; cursor < pending.length; cursor++) {
+    signal?.throwIfAborted();
     const task = pending[cursor];
     let handle;
     try {
