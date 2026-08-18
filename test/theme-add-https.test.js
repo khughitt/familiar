@@ -29,8 +29,13 @@ const stagingEntries = (p) => {
   return existsSync(dir) ? readdirSync(dir) : [];
 };
 
+for (const key of [
+  'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+  'http_proxy', 'https_proxy', 'all_proxy',
+]) process.env[key] = '';
+
 const GIT_ENV = {
-  ...process.env,
+  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key))),
   GIT_CONFIG_GLOBAL: devNull,
   GIT_CONFIG_SYSTEM: devNull,
   GIT_AUTHOR_NAME: 'fixture',
