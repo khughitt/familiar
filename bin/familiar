@@ -11,7 +11,7 @@ import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
 import { addTheme } from '../src/theme/add.js';
-import { readReceipt } from '../src/theme/receipt.js';
+import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
@@ -178,7 +178,7 @@ an install receipt records the source. Private repos: clone with git, then
 add the clone's directory.
 
 Examples
-  familiar theme add https://github.com/khughitt/familiar-cats
+  familiar theme add ./familiar-cats
   familiar theme add ./my-theme`,
   'theme validate': `Prove a theme directory conforms.
 
@@ -858,9 +858,9 @@ async function main({ command, args: rest }) {
       minPositionals: 1, maxPositionals: 1, help: 'theme add',
     });
     const paths = resolvePaths();
+    const { themeId: activeId } = await loadConfig({ paths });
     const result = await addTheme({ paths, source: positionals[0] });
     process.stdout.write(`installed theme '${result.id}' (${result.members} members) at ${result.dir}\n`);
-    const { themeId: activeId } = await loadConfig({ paths });
     if (result.id !== activeId) {
       process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
     }
@@ -892,7 +892,7 @@ async function main({ command, args: rest }) {
         const receiptNote = read.verdict === 'validated'
           ? `validated ${read.receipt.installedAt.slice(0, 10)} from ${sanitize(read.receipt.source.kind === 'https' ? read.receipt.source.url : read.receipt.source.path)}`
           : read.verdict === 'invalid'
-            ? `invalid receipt (${read.reason})`
+            ? `invalid receipt at ${sanitize(receiptPath(paths, row.id))} (${sanitize(read.reason)}) — remove it and reinstall the theme`
             : 'never validated (manual install)';
         detail += `\n${' '.repeat(24)}${receiptNote}`;
       }

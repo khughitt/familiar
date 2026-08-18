@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
-  rmSync, truncateSync, writeFileSync,
+  readdirSync, rmSync, truncateSync, writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  acquireSource, buildCloneEnv, classifySource, collapseStderr, copySource,
+  acquireSource, buildCloneEnv, classifySource, cloneSource, collapseStderr, copySource,
   DEFAULT_GROWTH_LIMIT_BYTES,
 } from '../src/theme/acquire.js';
 import { LIMITS } from 'familiar-theme';
@@ -132,6 +132,22 @@ test('an aborted signal stops the copy with its reason', async () => {
     /bound tripped/);
 });
 
+test('a regular file swapped for a symlink is never followed', async () => {
+  const src = writePack();
+  const victim = join(src, 'theme.yaml');
+  const secret = join(mkdtempSync(join(tmpdir(), 'secret-')), 'secret.txt');
+  writeFileSync(secret, 'must not be copied');
+  const dest = destDir();
+  await assert.rejects(copySource(src, dest, {
+    afterLstat: async (path) => {
+      if (path !== victim) return;
+      rmSync(path);
+      symlinkSync(secret, path);
+    },
+  }), /theme\.yaml.*regular file or directory/);
+  assert.equal(existsSync(join(dest, 'theme.yaml')), false);
+});
+
 test('isolation env wins over anything the caller injects', () => {
   const env = buildCloneEnv({ caFile: '/fixture/ca.pem' }, {
     GIT_ALLOW_PROTOCOL: 'file',
@@ -196,6 +212,42 @@ test('a zero-millisecond acquisition cannot outrun the absolute deadline', async
       { timeoutMs: 0, pollMs: 60_000 }),
     /exceeded the 0 ms wall clock/
   );
+});
+
+test('the wall clock interrupts local topology traversal before it finishes', async () => {
+  const src = mkdtempSync(join(tmpdir(), 'src-many-'));
+  for (let i = 0; i < 500; i++) mkdirSync(join(src, `entry-${i}`));
+  const dest = destDir();
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, dest,
+      { timeoutMs: 0, pollMs: 60_000 }),
+    /exceeded the 0 ms wall clock/
+  );
+  assert.ok(readdirSync(dest).length < 500);
+});
+
+test('Git diagnostics are bounded and disclose truncation', async (t) => {
+  const bin = mkdtempSync(join(tmpdir(), 'fake-git-'));
+  const fakeGit = join(bin, 'git');
+  writeFileSync(fakeGit, `#!/usr/bin/env node
+process.stdout.write('o'.repeat(256 * 1024));
+process.stderr.write('remote: ' + 'e'.repeat(256 * 1024));
+process.exitCode = 1;
+`);
+  chmodSync(fakeGit, 0o755);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${bin}:${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  let caught;
+  try {
+    await cloneSource('https://example.test/repo', destDir());
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof Error);
+  assert.match(caught.message, /output truncated/);
+  assert.ok(caught.message.length < 70_000, `diagnostic was ${caught.message.length} chars`);
 });
 
 test('the final growth scan fails closed on an unreadable directory', async (t) => {

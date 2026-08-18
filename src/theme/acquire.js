@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process';
-import {
-  createReadStream, createWriteStream, lstatSync, mkdirSync, readdirSync, realpathSync, statSync,
-} from 'node:fs';
+import { constants, createWriteStream, statSync } from 'node:fs';
+import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -69,39 +68,67 @@ export function collapseStderr(text) {
 // depth is excluded; git is never invoked on the source. Regular files are
 // copied by abortable streaming because fs.copyFile/fs.cp accept no
 // AbortSignal, and the wall clock must be able to stop a stalled file.
-export async function copySource(sourceDir, dest, { signal } = {}) {
-  const sourceReal = realpathSync(sourceDir);
-  const destReal = realpathSync(dest);
+// afterLstat is the narrow test seam that deterministically swaps an entry
+// between inspection and open; production callers leave it undefined.
+export async function copySource(sourceDir, dest, { signal, afterLstat } = {}) {
+  const sourceReal = await realpath(sourceDir);
+  const destReal = await realpath(dest);
   if (destReal === sourceReal || destReal.startsWith(sourceReal + sep)) {
     throw new Error(
       `theme add: staging at ${destReal} lies inside the source ${sourceReal} — a self-copy would never terminate`
     );
   }
-  await copyTree(sourceReal, destReal, signal);
+  const pending = [{ from: sourceReal, to: destReal }];
+  while (pending.length > 0) {
+    signal?.throwIfAborted();
+    const { from, to } = pending.pop();
+    const entries = (await readdir(from, { withFileTypes: true }))
+      .sort((a, b) => (a.name < b.name ? -1 : 1));
+    for (const entry of entries) {
+      signal?.throwIfAborted();
+      if (entry.name === '.git') continue;
+      const src = join(from, entry.name);
+      const out = join(to, entry.name);
+      const st = await lstat(src);
+      await afterLstat?.(src, st);
+      signal?.throwIfAborted();
+      if (st.isDirectory()) {
+        await mkdir(out);
+        pending.push({ from: src, to: out });
+      } else if (st.isFile()) {
+        await copyRegularFile(src, out, signal);
+      } else {
+        throw unsupportedEntry(src);
+      }
+    }
+  }
 }
 
-async function copyTree(from, to, signal) {
-  const entries = readdirSync(from, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : 1));
-  for (const entry of entries) {
-    if (entry.name === '.git') continue;
-    const src = join(from, entry.name);
-    const out = join(to, entry.name);
-    const st = lstatSync(src);
-    if (st.isDirectory()) {
-      mkdirSync(out);
-      await copyTree(src, out, signal);
-    } else if (st.isFile()) {
-      try {
-        await pipeline(createReadStream(src), createWriteStream(out, { flags: 'wx' }), { signal });
-      } catch (error) {
-        throw signal?.aborted ? signal.reason : error;
-      }
-    } else {
-      throw new Error(
-        `theme add: ${src} is not a regular file or directory — the source must contain only files and directories`
-      );
+function unsupportedEntry(path) {
+  return new Error(
+    `theme add: ${path} is not a regular file or directory — the source must contain only files and directories`
+  );
+}
+
+async function copyRegularFile(src, out, signal) {
+  let handle;
+  try {
+    try {
+      handle = await open(src, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (error) {
+      if (error.code === 'ELOOP') throw unsupportedEntry(src);
+      throw error;
     }
+    if (!(await handle.stat()).isFile()) throw unsupportedEntry(src);
+    await pipeline(
+      handle.createReadStream({ autoClose: false }),
+      createWriteStream(out, { flags: 'wx' }),
+      { signal }
+    );
+  } catch (error) {
+    throw signal?.aborted ? signal.reason : error;
+  } finally {
+    await handle?.close();
   }
 }
 
@@ -122,15 +149,40 @@ export function buildCloneEnv({ caFile } = {}, base = process.env) {
   return env;
 }
 
+const GIT_OUTPUT_LIMIT_BYTES = 64 * 1024;
+
+function boundedOutput() {
+  const chunks = [];
+  let bytes = 0;
+  let truncated = false;
+  return {
+    add(chunk) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const keep = buffer.subarray(0, GIT_OUTPUT_LIMIT_BYTES - bytes);
+      if (keep.length > 0) {
+        chunks.push(keep);
+        bytes += keep.length;
+      }
+      if (keep.length < buffer.length) truncated = true;
+    },
+    text() {
+      const output = Buffer.concat(chunks, bytes).toString('utf8');
+      return truncated
+        ? `${output}\n[output truncated after ${GIT_OUTPUT_LIMIT_BYTES} bytes]`
+        : output;
+    },
+  };
+}
+
 function runGit(args, { env, signal, what }) {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn('git', args, {
       env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const stdout = boundedOutput();
+    const stderr = boundedOutput();
+    child.stdout.on('data', (chunk) => stdout.add(chunk));
+    child.stderr.on('data', (chunk) => stderr.add(chunk));
     const onAbort = () => {
       if (process.platform === 'win32') child.kill('SIGKILL');
       else {
@@ -147,9 +199,9 @@ function runGit(args, { env, signal, what }) {
       signal?.removeEventListener('abort', onAbort);
       if (signal?.aborted) return rejectRun(signal.reason);
       if (code !== 0) {
-        return rejectRun(new Error(`${what} failed: ${collapseStderr(stderr)}`));
+        return rejectRun(new Error(`${what} failed: ${collapseStderr(stderr.text())}`));
       }
-      resolveRun(stdout);
+      resolveRun(stdout.text());
     });
     if (signal?.aborted) onAbort();
   });
@@ -184,19 +236,26 @@ export async function acquireSource(source, dest, {
     `theme add: acquisition exceeded the ${timeoutMs} ms wall clock`
   );
   const timer = setTimeout(() => controller.abort(timeoutReason), timeoutMs);
+  let growthCheck = null;
   const checkGrowth = () => {
-    try {
-      const bytes = stagedBytes(dest);
-      if (bytes > growthLimitBytes) {
-        controller.abort(new Error(
-          `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
-        ));
+    if (growthCheck !== null) return growthCheck;
+    growthCheck = (async () => {
+      try {
+        const bytes = await stagedBytes(dest, controller.signal);
+        if (bytes > growthLimitBytes) {
+          controller.abort(new Error(
+            `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
+          ));
+        }
+      } catch (error) {
+        controller.abort(error);
+      } finally {
+        growthCheck = null;
       }
-    } catch (error) {
-      controller.abort(error);
-    }
+    })();
+    return growthCheck;
   };
-  const poller = setInterval(checkGrowth, pollMs);
+  const poller = setInterval(() => { void checkGrowth(); }, pollMs);
   try {
     let provenance;
     if (source.kind === 'https') {
@@ -205,11 +264,11 @@ export async function acquireSource(source, dest, {
       );
       provenance = { kind: 'https', url: source.url, commit };
     } else {
-      const path = realpathSync(source.path);
+      const path = await realpath(source.path);
       await copySource(path, dest, { signal: controller.signal });
       provenance = { kind: 'local', path };
     }
-    checkGrowth();
+    await checkGrowth();
     if (performance.now() >= deadline) controller.abort(timeoutReason);
     controller.signal.throwIfAborted();
     return provenance;
@@ -221,32 +280,38 @@ export async function acquireSource(source, dest, {
   }
 }
 
-function stagedBytes(dir) {
+async function stagedBytes(root, signal) {
   let total = 0;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === 'ENOENT') return total;
-    throw new Error(
-      `theme add: could not measure staging growth at ${dir}: ${error.message}`,
-      { cause: error }
-    );
-  }
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
+  const pending = [root];
+  while (pending.length > 0) {
+    signal?.throwIfAborted();
+    const dir = pending.pop();
+    let entries;
     let st;
     try {
-      st = lstatSync(path);
+      entries = await readdir(dir, { withFileTypes: true });
     } catch (error) {
       if (error.code === 'ENOENT') continue;
       throw new Error(
-        `theme add: could not measure staging growth at ${path}: ${error.message}`,
+        `theme add: could not measure staging growth at ${dir}: ${error.message}`,
         { cause: error }
       );
     }
-    total += st.size;
-    if (st.isDirectory()) total += stagedBytes(path);
+    for (const entry of entries) {
+      signal?.throwIfAborted();
+      const path = join(dir, entry.name);
+      try {
+        st = await lstat(path);
+      } catch (error) {
+        if (error.code === 'ENOENT') continue;
+        throw new Error(
+          `theme add: could not measure staging growth at ${path}: ${error.message}`,
+          { cause: error }
+        );
+      }
+      total += st.size;
+      if (st.isDirectory()) pending.push(path);
+    }
   }
   return total;
 }

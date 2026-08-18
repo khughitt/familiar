@@ -64,6 +64,21 @@ test('an https source must contain a valid https URL', () => {
   assert.equal(readReceipt(p, 'gate-fixture').verdict, 'invalid');
 });
 
+test('an https receipt containing credentials is invalid', () => {
+  const p = scratch();
+  mkdirSync(p.themeReceiptsDir, { recursive: true });
+  for (const url of [
+    'https://user@example.test/repo',
+    'https://user:secret@example.test/repo',
+  ]) {
+    writeFileSync(receiptPath(p, 'gate-fixture'),
+      JSON.stringify({ ...VALID, source: { ...VALID.source, url } }));
+    const read = readReceipt(p, 'gate-fixture');
+    assert.equal(read.verdict, 'invalid');
+    assert.match(read.reason, /credential/);
+  }
+});
+
 test('an unparseable installedAt is invalid', () => {
   const p = scratch();
   mkdirSync(p.themeReceiptsDir, { recursive: true });

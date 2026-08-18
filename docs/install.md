@@ -14,19 +14,18 @@ tone from this input, so Familiar fails loudly if it is missing.
 
 ## 1. Install a theme
 
-Familiar ships no art; a theme pack supplies it. Install one from its
-repository:
+Familiar ships no art; a theme pack supplies it. Until the anonymous HTTPS
+smoke test is complete, clone the pack first and install the local checkout:
 
 ```bash
-familiar theme add https://github.com/khughitt/familiar-cats
+git clone https://github.com/khughitt/familiar-cats
+familiar theme add ./familiar-cats
 ```
 
-The pack is fetched into staging, validated whole, and promoted atomically
-into `~/.config/familiar/themes/<id>`; an install receipt records the source
-and commit. `familiar theme list` shows every installed theme and its receipt
-status. A local directory installs the same way
-(`familiar theme add ./dir`) — for private repos, clone with git first and
-add the clone's directory.
+The pack is copied into staging, validated whole, and promoted atomically
+into `~/.config/familiar/themes/<id>`; an install receipt records the local
+source. `familiar theme list` shows every installed theme and its receipt
+status. Private repositories use the same clone-then-add flow.
 
 ## 2. Claude Code hooks and status line
 

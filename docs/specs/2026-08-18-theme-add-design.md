@@ -52,7 +52,8 @@ the cats cutover on the author's machine, `docs/install.md` rewrite.
   path, as the umbrella already specifies.
 - Success output: `installed theme '<id>' (<n> members) at <dir>`, plus an
   activation hint (`set "theme: <id>" in config.yaml`) when `<id>` is not
-  the active theme.
+  the active theme. The CLI loads the active-theme config before calling the
+  installer, so a config error cannot follow an irreversible successful add.
 - `theme list` rows for user themes gain provenance from the receipt:
   `validated <date> from <url|path>`, or `never validated (manual install)`
   when no receipt exists. Staging is reported as its own line, with
@@ -137,10 +138,15 @@ installation-ignorant.
   every directory there as a theme id. Reading is strict: unparseable
   JSON, a wrong-shaped `source` or `installedAt`, or an embedded `id`
   that differs from the filename makes the receipt **invalid** — the
-  reader returns that verdict with its reason, and `theme list` shows
-  `invalid receipt (<reason>)` for the row. An invalid receipt never
+  reader returns that verdict with its reason, and `theme list` shows an
+  `invalid receipt at <path> (<reason>) — remove it and reinstall the theme`
+  row. An invalid receipt never
   produces a `validated` row, and never collapses into `never validated`
   either — that would make corruption look like a clean manual install.
+  Credentialed HTTPS URLs are invalid here too, so a hand-written or old
+  receipt cannot bypass the add-side secret rejection. Invalid-receipt
+  diagnostics sanitize both reason and receipt path at the terminal boundary
+  and tell the user to remove the receipt and reinstall.
 - `src/theme/catalog.js` — learns exactly one reserved name, `.staging`:
   excluded from id validation, surfaced as the neutral staging row
   above **only when it contains an entry**. The parent directory
@@ -173,8 +179,11 @@ would otherwise copy staging into itself until a bound trips). Then an
 `lstat` walk that never dereferences: regular files and directories only; a
 symlink, FIFO, socket, or device fails acquisition by path; any entry named
 `.git` at any depth is excluded from the copy; git is never invoked on the
-source. The gate remains the authority for anything
-that reaches it anyway.
+source. The traversal is iterative and asynchronous, checking its abort
+signal between entries. A regular source is opened with `O_NOFOLLOW`, then
+checked through the opened handle and streamed from that handle, so replacing
+it with a symlink after `lstat` cannot redirect the copy. The gate remains the
+authority for anything that reaches it anyway.
 
 **Bounds, honestly.** Both paths run under a wall-clock timeout (default
 300 s, kills the child / aborts the walk) and a staging-growth monitor
@@ -202,8 +211,9 @@ Every failure is a named, single-line instruction:
   Remote diagnostics are untrusted terminal input, and ANSI stripping
   alone is not enough — bare `\r` (git progress uses it), backspace,
   and BEL survive `util.stripVTControlCharacters` and can rewrite or
-  spoof the visible message. Sanitization is therefore: strip ANSI
-  sequences, normalize CR/LF to line splits, replace every remaining
+  spoof the visible message. Both stdout and stderr are retained only up to a
+  64 KiB diagnostic budget and marked when truncated. Sanitization is
+  therefore: strip ANSI sequences, normalize CR/LF to line splits, replace every remaining
   C0/C1 control character, then join the nonempty lines into the one
   instruction (`clone failed: <lines; joined>`) — stdlib only.
   Isolation guarantees no prompt can hang, so a private repo fails

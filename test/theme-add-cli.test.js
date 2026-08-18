@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, cpSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +38,17 @@ test('theme add omits the activation hint when the installed theme is active', (
   const r = run(env, 'theme', 'add', writePack());
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stdout, /activate with:/);
+});
+
+test('theme add validates config before installing anything', () => {
+  const env = scratchEnv();
+  writeFileSync(join(env.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'motion: sideways\n');
+  const r = run(env, 'theme', 'add', writePack());
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /motion must be full, reduced, or off/);
+  assert.doesNotMatch(r.stdout, /installed theme/);
+  assert.equal(existsSync(join(env.FAMILIAR_CONFIG_DIR, 'themes')), false);
+  assert.equal(existsSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts')), false);
 });
 
 test('theme add rejects a non-https transport with the rule', () => {
@@ -81,7 +92,46 @@ test('theme list reports an invalid receipt with its reason', () => {
   mkdirSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts'), { recursive: true });
   writeFileSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts', 'gate-fixture.json'), '{broken');
   const r = run(env, 'theme', 'list');
-  assert.match(r.stdout, /invalid receipt \(/);
+  assert.match(r.stdout, /invalid receipt at .*gate-fixture\.json/);
+  assert.match(r.stdout, /remove it and reinstall the theme/);
+});
+
+test('theme list sanitizes corrupt-receipt diagnostics', () => {
+  const env = scratchEnv();
+  const manual = join(env.FAMILIAR_CONFIG_DIR, 'themes', 'gate-fixture');
+  mkdirSync(join(env.FAMILIAR_CONFIG_DIR, 'themes'), { recursive: true });
+  cpSync(writePack(), manual, { recursive: true });
+  mkdirSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts'), { recursive: true });
+  writeFileSync(
+    join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts', 'gate-fixture.json'),
+    '{"x":\x1b]0;pwned\x07}'
+  );
+  const r = run(env, 'theme', 'list');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /invalid receipt at .*gate-fixture\.json/);
+  assert.doesNotMatch(r.stdout, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/u);
+  assert.match(r.stdout, /remove it and reinstall the theme/);
+});
+
+test('theme list never validates or prints credentials from a receipt', () => {
+  const env = scratchEnv();
+  const manual = join(env.FAMILIAR_CONFIG_DIR, 'themes', 'gate-fixture');
+  mkdirSync(join(env.FAMILIAR_CONFIG_DIR, 'themes'), { recursive: true });
+  cpSync(writePack(), manual, { recursive: true });
+  mkdirSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts'), { recursive: true });
+  writeFileSync(join(env.FAMILIAR_CONFIG_DIR, 'theme-receipts', 'gate-fixture.json'), JSON.stringify({
+    id: 'gate-fixture',
+    source: {
+      kind: 'https',
+      url: 'https://user:secret@example.test/repo',
+      commit: 'a'.repeat(40),
+    },
+    installedAt: '2026-08-18T12:00:00Z',
+  }));
+  const r = run(env, 'theme', 'list');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /invalid receipt/);
+  assert.doesNotMatch(r.stdout, /validated|https:\/\/user|secret/);
 });
 
 test('theme list sanitizes receipt provenance into one inert terminal line', () => {

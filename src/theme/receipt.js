@@ -30,6 +30,7 @@ function invalidReason(data, id) {
     let url;
     try { url = new URL(source.url); } catch {}
     if (typeof source.url !== 'string' || !url || url.protocol !== 'https:') return 'source.url is not an https URL';
+    if (url.username !== '' || url.password !== '') return 'source.url contains credentials';
     if (typeof source.commit !== 'string' || !HEX40.test(source.commit)) return 'source.commit is not a 40-hex sha';
   } else if (source.kind === 'local') {
     if (typeof source.path !== 'string' || !isAbsolute(source.path)) return 'source.path is not an absolute path';
