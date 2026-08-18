@@ -1,6 +1,6 @@
 # Phase 4: `theme add`
 
-**Status:** approved design, unimplemented
+**Status:** implemented, cutover pending
 **Date:** 2026-08-18
 
 The engine ships no art. This phase gives it the verb that makes that

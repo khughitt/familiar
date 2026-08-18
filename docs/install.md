@@ -12,7 +12,23 @@ familiar scheme set dark          # or: light, --sat 0.8
 This writes `~/.config/familiar/scheme.json`. Every full-colour render derives its
 tone from this input, so Familiar fails loudly if it is missing.
 
-## 1. Claude Code hooks and status line
+## 1. Install a theme
+
+Familiar ships no art; a theme pack supplies it. Install one from its
+repository:
+
+```bash
+familiar theme add https://github.com/khughitt/familiar-cats
+```
+
+The pack is fetched into staging, validated whole, and promoted atomically
+into `~/.config/familiar/themes/<id>`; an install receipt records the source
+and commit. `familiar theme list` shows every installed theme and its receipt
+status. A local directory installs the same way
+(`familiar theme add ./dir`) — for private repos, clone with git first and
+add the clone's directory.
+
+## 2. Claude Code hooks and status line
 
 Add Familiar's hooks to `~/.claude/settings.json`:
 
@@ -52,7 +68,7 @@ The status line prints a stable cell box; hooks swap the full-colour pose beneat
 it between refreshes. Familiar deliberately does not render graphics inside tmux,
 because it cannot verify that the user's passthrough configuration is safe.
 
-## 2. Codex pets
+## 3. Codex pets
 
 Install the current theme's pets:
 
@@ -77,7 +93,7 @@ cp ~/d/familiar/integrations/codex/hooks.json ~/.codex/hooks.json
 Codex asks for a one-time trust confirmation before it runs hooks. Its native pets
 select the pose; Familiar supplies the generated pet art.
 
-## 3. OpenCode graphics
+## 4. OpenCode graphics
 
 Install the OpenCode integration:
 
@@ -90,7 +106,7 @@ OpenCode after installation. The server plugin forwards lifecycle events to Fami
 the TUI plugin renders the full-colour graphic. If the integration fails, inspect
 `~/.local/state/familiar/opencode-plugin.log`.
 
-## 4. Niri workspace awareness and desktop moments
+## 5. Niri workspace awareness and desktop moments
 
 Start the workspace watcher from `~/.config/niri/config.kdl`:
 
@@ -112,7 +128,7 @@ full-colour animation on the output focused when the state arrived. It needs `qs
 on `PATH`. Set `motion: full`, `reduced`, or `off` in
 `~/.config/familiar/config.yaml` to control moments.
 
-## 5. Keep the scheme aligned with Noctalia
+## 6. Keep the scheme aligned with Noctalia
 
 Set Noctalia's dark-mode hook to exactly:
 
@@ -122,7 +138,7 @@ Set Noctalia's dark-mode hook to exactly:
 
 The adapter reads Noctalia's dark/light setting and writes Familiar's scheme file.
 
-## 6. Reap abandoned sessions
+## 7. Reap abandoned sessions
 
 An agent that exits without `SessionEnd` can leave state behind. Run
 `familiar reap` periodically, for example with a user systemd timer:
