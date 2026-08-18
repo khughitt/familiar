@@ -124,12 +124,23 @@ export function buildCloneEnv({ caFile } = {}, base = process.env) {
 
 function runGit(args, { env, signal, what }) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn('git', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, {
+      env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    const onAbort = () => child.kill('SIGKILL');
+    const onAbort = () => {
+      if (process.platform === 'win32') child.kill('SIGKILL');
+      else {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') child.kill('SIGKILL');
+        }
+      }
+    };
     signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', rejectRun);
     child.on('close', (code) => {
