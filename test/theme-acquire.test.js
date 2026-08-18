@@ -26,6 +26,15 @@ test('non-https transports are rejected by the stated rule', () => {
   }
 });
 
+test('scheme and scp-style transports are rejected before filesystem work', () => {
+  for (const raw of ['file:/tmp/theme', 'ssh:host:path', 'mailto:x',
+    'user@example.test:repo.git']) {
+    assert.throws(() => classifySource(raw, {
+      stat: () => { throw new Error('stat should not run'); },
+    }), /HTTPS URLs or local directories/, raw);
+  }
+});
+
 test('an existing directory classifies as a local source, absolute', () => {
   const dir = mkdtempSync(join(tmpdir(), 'src-'));
   assert.deepEqual(classifySource(dir), { kind: 'local', path: resolve(dir) });

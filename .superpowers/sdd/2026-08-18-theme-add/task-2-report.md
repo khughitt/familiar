@@ -30,3 +30,18 @@ Implemented the source boundary in `src/theme/acquire.js` and its focused tests 
 ## Concerns
 
 The environment's default temporary directory is read-only (`/mnt/ssd3/tmp`), so tests that create temporary directories require `TMPDIR=/tmp` in this worktree.
+
+## Fix round 1
+
+Addressed review findings by rejecting URI schemes with or without `//` and generic scp-style `user@host:path` sources before `stat`, while preserving Windows drive-shaped paths.
+
+### TDD evidence
+
+- RED: after adding the regression test, `TMPDIR=/tmp node --test test/theme-acquire.test.js` failed on `file:/tmp/theme`; the injected stat ran and produced `stat should not run` instead of the named transport error.
+- GREEN: after the classifier guard change, `TMPDIR=/tmp node --test test/theme-acquire.test.js` passed: 10 tests, 10 passed.
+
+### Fix verification
+
+- Focused: `TMPDIR=/tmp node --test test/theme-acquire.test.js` — PASS (10/10).
+- Full: `TMPDIR=/tmp npm test` — PASS (714 passed, 2 skipped, 0 failed; 716 tests).
+- Self-review: the guard rejects `file:/tmp/theme`, `ssh:host:path`, `mailto:x`, and `user@example.test:repo.git` before filesystem work; ordinary local paths remain stat-checked.

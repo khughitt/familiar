@@ -23,7 +23,8 @@ export function classifySource(raw, { stat = statSync } = {}) {
     }
     return { kind: 'https', url: raw };
   }
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^git@/.test(raw)) {
+  if ((/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^[a-z]:[\\/]/i.test(raw))
+    || /^[^/\s:@]+@[^/\s:]+:/.test(raw)) {
     throw new Error(
       `theme add: sources are HTTPS URLs or local directories — got ${JSON.stringify(raw)}`
     );
