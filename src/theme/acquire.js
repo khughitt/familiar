@@ -109,7 +109,9 @@ async function copyTree(from, to, signal) {
 // what an untrusted clone does. Isolation is applied after caller input; the
 // sole TLS seam is caFile -> GIT_SSL_CAINFO.
 export function buildCloneEnv({ caFile } = {}, base = process.env) {
-  const env = { ...base };
+  const env = Object.fromEntries(
+    Object.entries(base).filter(([key]) => !/^GIT_/i.test(key))
+  );
   if (caFile !== undefined) env.GIT_SSL_CAINFO = caFile;
   env.GIT_CONFIG_GLOBAL = devNull;
   env.GIT_CONFIG_SYSTEM = devNull;
@@ -166,15 +168,21 @@ export async function acquireSource(source, dest, {
   pollMs = 1000,
 } = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort(new Error(`theme add: acquisition exceeded the ${timeoutMs} ms wall clock`));
-  }, timeoutMs);
+  const deadline = performance.now() + timeoutMs;
+  const timeoutReason = new Error(
+    `theme add: acquisition exceeded the ${timeoutMs} ms wall clock`
+  );
+  const timer = setTimeout(() => controller.abort(timeoutReason), timeoutMs);
   const checkGrowth = () => {
-    const bytes = stagedBytes(dest);
-    if (bytes > growthLimitBytes) {
-      controller.abort(new Error(
-        `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
-      ));
+    try {
+      const bytes = stagedBytes(dest);
+      if (bytes > growthLimitBytes) {
+        controller.abort(new Error(
+          `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
+        ));
+      }
+    } catch (error) {
+      controller.abort(error);
     }
   };
   const poller = setInterval(checkGrowth, pollMs);
@@ -191,6 +199,7 @@ export async function acquireSource(source, dest, {
       provenance = { kind: 'local', path };
     }
     checkGrowth();
+    if (performance.now() >= deadline) controller.abort(timeoutReason);
     controller.signal.throwIfAborted();
     return provenance;
   } catch (error) {
@@ -206,16 +215,24 @@ function stagedBytes(dir) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return total;
+  } catch (error) {
+    if (error.code === 'ENOENT') return total;
+    throw new Error(
+      `theme add: could not measure staging growth at ${dir}: ${error.message}`,
+      { cause: error }
+    );
   }
   for (const entry of entries) {
     const path = join(dir, entry.name);
     let st;
     try {
       st = lstatSync(path);
-    } catch {
-      continue;
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw new Error(
+        `theme add: could not measure staging growth at ${path}: ${error.message}`,
+        { cause: error }
+      );
     }
     total += st.size;
     if (st.isDirectory()) total += stagedBytes(path);

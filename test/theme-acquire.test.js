@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync, writeFileSync,
+  chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
+  rmSync, truncateSync, writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
@@ -150,6 +151,22 @@ test('isolation env wins over anything the caller injects', () => {
   assert.equal(env.GIT_SSL_CAINFO, '/fixture/ca.pem');
 });
 
+test('uncontrolled Git environment is stripped when no CA file is supplied', () => {
+  const env = buildCloneEnv({}, {
+    PATH: '/fixture/bin',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.sslVerify',
+    GIT_CONFIG_VALUE_0: 'false',
+    GIT_SSL_CAINFO: '/evil/ca.pem',
+    GIT_SSL_NO_VERIFY: '1',
+  });
+  assert.equal(env.PATH, '/fixture/bin');
+  for (const key of [
+    'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0',
+    'GIT_SSL_CAINFO', 'GIT_SSL_NO_VERIFY',
+  ]) assert.equal(key in env, false, key);
+});
+
 test('the default growth limit derives from the contract limit', () => {
   assert.equal(DEFAULT_GROWTH_LIMIT_BYTES, 4 * LIMITS.MAX_TOTAL_BYTES);
 });
@@ -170,4 +187,50 @@ test('a completed local acquisition returns local provenance', async () => {
   const provenance = await acquireSource({ kind: 'local', path: src }, dest);
   assert.deepEqual(provenance, { kind: 'local', path: realpathSync(src) });
   assert.equal(existsSync(join(dest, 'theme.yaml')), true);
+});
+
+test('a zero-millisecond acquisition cannot outrun the absolute deadline', async () => {
+  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, destDir(),
+      { timeoutMs: 0, pollMs: 60_000 }),
+    /exceeded the 0 ms wall clock/
+  );
+});
+
+test('the final growth scan fails closed on an unreadable directory', async (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
+  const dest = destDir();
+  const blocked = join(dest, 'blocked');
+  mkdirSync(blocked);
+  chmodSync(blocked, 0);
+  t.after(() => {
+    chmodSync(blocked, 0o700);
+    rmSync(src, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, dest, { pollMs: 60_000 }),
+    /could not measure staging growth.*blocked/
+  );
+});
+
+test('an interval scan error aborts acquisition instead of throwing out of band', async (t) => {
+  const src = mkdtempSync(join(tmpdir(), 'src-large-'));
+  const bulk = join(src, 'bulk.bin');
+  writeFileSync(bulk, '');
+  truncateSync(bulk, 64 * 1024 * 1024);
+  const dest = destDir();
+  const blocked = join(dest, 'blocked');
+  mkdirSync(blocked);
+  chmodSync(blocked, 0);
+  t.after(() => {
+    chmodSync(blocked, 0o700);
+    rmSync(src, { recursive: true });
+    rmSync(dest, { recursive: true });
+  });
+  await assert.rejects(
+    acquireSource({ kind: 'local', path: src }, dest, { pollMs: 1 }),
+    /could not measure staging growth.*blocked/
+  );
 });
