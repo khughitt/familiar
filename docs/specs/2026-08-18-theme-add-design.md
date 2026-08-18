@@ -44,7 +44,12 @@ the cats cutover on the author's machine, `docs/install.md` rewrite.
   `https://…` is cloned under git isolation; anything else must be an
   existing local directory, copied defensively. `http://`, `ssh://`,
   `git@…`, and `file://` are rejected with a named error stating the
-  HTTPS-or-local-directory rule.
+  HTTPS-or-local-directory rule. An HTTPS URL carrying credentials
+  (`https://user:token@…` — a nonempty username or password after `URL`
+  parsing) is rejected before anything runs: the given URL is persisted
+  in the receipt and printed by `theme list`, so accepting one would
+  store and display a secret. Private repos use the local-directory
+  path, as the umbrella already specifies.
 - Success output: `installed theme '<id>' (<n> members) at <dir>`, plus an
   activation hint (`set "theme: <id>" in config.yaml`) when `<id>` is not
   the active theme.
@@ -63,12 +68,26 @@ Engine-side only; the contract package (`familiar-theme`) stays
 installation-ignorant.
 
 - `src/theme/add.js` — orchestrator `addTheme({ paths, source, ... })`
-  implementing §7's sequence exactly:
-  1. Clear stale entries under `userThemesDir/.staging/`, then create
-     `userThemesDir/.staging/<run>` (random run dir). Stale means older
-     than the wall-clock timeout: no live run can exceed it, so age is a
-     proof of abandonment, and a concurrent add's staging is never
-     touched.
+  implementing §7's sequence exactly. The whole operation runs under
+  `withLock` (`src/bus/lock.js`) on a dedicated
+  `stateDir/theme-add.lock`, so installers are serialized — age proves
+  nothing about liveness (directory mtimes do not track nested writes,
+  and the wall-clock timeout bounds only acquisition), but the lock
+  does: any staging entry observed while holding it is abandoned.
+  `withLock`'s **defaults must be overridden**: its `staleMs` of 10 s is
+  sized for the bus's critical sections and reclaims even a *live*
+  holder past that age, which would break serialization mid-clone. The
+  theme-add lock passes `staleMs` comfortably above the whole
+  operation's ceiling (wall-clock timeout plus validation; 600 s), so
+  reclaim happens only for dead holders (pid liveness already handles
+  those immediately). A lock still held after `withLock`'s retry
+  patience reports `another theme add is running`. Steps:
+  1. Under the lock: create `userThemesDir/.staging` if absent, and
+     verify it is a real directory by `lstat` (a symlink here is a named
+     error, never traversed —
+     cleanup must not be redirectable outside the themes directory),
+     remove any leftover run entries, then create the run directory with
+     `mkdtemp` beneath it.
   2. **Acquire** into it: isolated clone, or `.git`-excluding defensive
      copy.
   3. **Record provenance** in memory: for a clone, the given URL and
@@ -78,8 +97,11 @@ installation-ignorant.
   5. **Validate the staged tree** with `validateThemePack` — the exact
      bytes that will be promoted. The target id is the returned pack's
      `id`.
-  6. Fail if `userThemesDir/<id>` exists — an existing **user** theme is
-     never overwritten; shadowing a **shipped** id remains allowed.
+  6. Fail if `lstat(userThemesDir/<id>)` succeeds — an existing **user**
+     theme (any filesystem object, including an empty directory or a
+     symlink) is never overwritten; shadowing a **shipped** id remains
+     allowed. The check is meaningful because it happens under the lock:
+     `rename` alone would silently replace an empty target directory.
   7. **Rename** into place — atomic and same-filesystem by construction,
      because staging lives beneath the themes directory (a symlinked or
      mounted themes dir cannot introduce a cross-device rename).
@@ -94,7 +116,13 @@ installation-ignorant.
   `{ id, source: { kind: 'https', url, commit } | { kind: 'local', path }, installedAt }`,
   read/write and path resolution. `paths()` gains `themeReceiptsDir`.
   Receipts live **outside** `userThemesDir` because the catalog treats
-  every directory there as a theme id.
+  every directory there as a theme id. Reading is strict: unparseable
+  JSON, a wrong-shaped `source` or `installedAt`, or an embedded `id`
+  that differs from the filename makes the receipt **invalid** — the
+  reader returns that verdict with its reason, and `theme list` shows
+  `invalid receipt (<reason>)` for the row. An invalid receipt never
+  produces a `validated` row, and never collapses into `never validated`
+  either — that would make corruption look like a clean manual install.
 - `src/theme/catalog.js` — learns exactly one reserved name, `.staging`:
   excluded from id validation, surfaced as the stale-staging row above.
 
@@ -110,10 +138,14 @@ the reference machine is the standing proof): an LFS-backed pack arrives as
 pointer files and is rejected legibly by the gate's signature check, which
 is the specified v1 behaviour.
 
-**Local copy.** An `lstat` walk that never dereferences: regular files and
-directories only; a symlink, FIFO, socket, or device fails acquisition by
-path; any entry named `.git` at any depth is excluded from the copy; git is
-never invoked on the source. The gate remains the authority for anything
+**Local copy.** Before the walk, both the source and the staging run
+directory are resolved with `realpath`; a staging destination that lies
+beneath the source is rejected by name (`theme add ~/.config/familiar/themes`
+would otherwise copy staging into itself until a bound trips). Then an
+`lstat` walk that never dereferences: regular files and directories only; a
+symlink, FIFO, socket, or device fails acquisition by path; any entry named
+`.git` at any depth is excluded from the copy; git is never invoked on the
+source. The gate remains the authority for anything
 that reaches it anyway.
 
 **Bounds, honestly.** Both paths run under a wall-clock timeout (default
@@ -136,8 +168,10 @@ Every failure is a named, single-line instruction:
 - Validation failures are `validateThemePack`'s own messages, staging
   already cleaned.
 - `theme '<id>' is already installed at <dir> — remove it first` for an
-  existing user id. A racing concurrent add of the same id loses at the
-  rename (POSIX refuses a non-empty target) and reports the same error.
+  existing user id. Concurrent installers are serialized by the lock; a
+  second add of the same id therefore runs after the first completes and
+  reports the same already-installed error, and a held lock is reported
+  as `another theme add is running` rather than raced.
 - Crash honesty comes from ordering, not cleanup code: before the rename,
   the failure mode is stale staging (visible in `list`, cleared by the next
   add); between rename and receipt, it is an installed-but-unreceipted pack,
@@ -146,20 +180,30 @@ Every failure is a named, single-line instruction:
 
 ## 5. Testing
 
-- **Unit (fast suite):** copy defenses (symlink/FIFO/device rejection by
-  path, nested `.git` exclusion), scheme rejection, receipt shape and
-  round-trip, staging cleanup, catalog `.staging` handling, id-exists
-  refusal, and receipt-last ordering via an injected fault between rename
-  and receipt (pack present, `list` says never validated).
+- **Unit (fast suite):** copy defenses (symlink, FIFO, and Unix-socket
+  rejection by path — devices share the same rejection branch but cannot
+  be created unprivileged, so the fixtures follow the conformance-gate
+  spec's FIFO/socket strategy; nested `.git` exclusion;
+  destination-under-source rejection), scheme and credential-URL
+  rejection, receipt round-trip plus the invalid cases (corrupt JSON,
+  wrong shape, id/filename mismatch — each yielding `invalid receipt`,
+  never `validated`), staging cleanup and the symlinked-`.staging`
+  refusal, catalog `.staging` handling, id-exists refusal (including an
+  empty directory at the target), and receipt-last ordering via an
+  injected fault between rename and receipt (pack present, `list` says
+  never validated).
 - **Hermetic HTTPS integration (fast suite, no network):** a committed
   test-only self-signed certificate and key for `127.0.0.1`, served by a
   node `https` server statically hosting a bare repo built in-test from
   `test/fixtures/theme-pack` (`git update-server-info`, dumb HTTP
-  protocol). `addTheme` exposes an explicit extra-env seam; tests pass
-  `GIT_SSL_CAINFO` pointing at the fixture certificate. The production
-  protocol allowlist is exercised, not bypassed. Cases: successful add
-  end-to-end, LFS-pointer repo rejected legibly, invalid pack rejected
-  with staging cleaned, timeout abort. Known contingency: stock git falls
+  protocol). The test seam is a single `caFile` option — mapped to
+  `GIT_SSL_CAINFO`, nothing else injectable — and the isolation
+  variables are applied after any caller input, so no seam can weaken
+  the protocol allowlist, config nullification, or prompt controls. The
+  production https-only allowlist is exercised, not bypassed. Cases:
+  successful add end-to-end, LFS-pointer repo rejected legibly, invalid
+  pack rejected with staging cleaned, timeout abort, and a second add
+  blocked while the lock is held. Known contingency: stock git falls
   back to the dumb protocol against a static server; if a git version
   quirk breaks that, the hermetic fallback is spawning `git http-backend`
   as a CGI child.
@@ -186,5 +230,8 @@ frozen.
 | receipt home | `configDir/theme-receipts/<id>.json` | must be outside the pack (spec §7) and outside `userThemesDir` (catalog treats every dir there as a theme id) |
 | staging home | reserved `userThemesDir/.staging/<run>` | §7's same-filesystem rename survives a symlinked themes dir; the catalog knows the one reserved name and reports stale runs instead of erroring |
 | install dir name | the validated pack's `id` | one authority for identity; URL and directory names carry none |
-| hermetic HTTPS tests | local TLS with a committed fixture CA, env seam for `GIT_SSL_CAINFO` | exercises the real https-only allowlist instead of injecting a test-only protocol |
+| installer serialization | `withLock` on `stateDir/theme-add.lock`, `staleMs` 600 s | staging-age proves nothing (dir mtimes ignore nested writes); the bus default `staleMs` of 10 s reclaims a live holder mid-clone |
+| credentialed URLs | rejected before cloning | the given URL is persisted and displayed, so accepting one stores and prints a secret; private repos already have the local-directory path |
+| hermetic HTTPS tests | local TLS with a committed fixture CA; the only seam is a `caFile` option, isolation env applied last | exercises the real https-only allowlist; no seam can weaken the clone isolation |
 | fetch bounds | 300 s wall clock; growth abort at 4 × `MAX_TOTAL_BYTES` | git has no client-side fetch-byte limit; bounded overshoot is the honest contract, exact limits apply at validation |
+| invalid receipts | their own `theme list` verdict, with reason | collapsing corruption into `validated` is a false claim; into `never validated`, a hidden defect |
