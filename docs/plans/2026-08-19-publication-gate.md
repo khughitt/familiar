@@ -726,7 +726,10 @@ git commit -m "docs(publication): record cats final-rescan disposition"
 - Modify: `src/bus/pins.js:9-11`
 - Modify: `test/pins.test.js:70-72`
 - Modify: `docs/install.md`
-- Delete: `docs/ref/kitty-graphics-protocol.md`
+- Delete: `docs/ref/kitty-graphics-protocol.md` — **reverted**: this step
+  was carried out as written, but the file is original engineering
+  analysis, not copied spec text (see Step 4 below and the design doc
+  §3/§4); a later fix wave restored it from `2d7c1d0`.
 - Delete: `.superpowers/sdd/` (tracked task reports)
 
 **Interfaces:**
@@ -769,17 +772,25 @@ to:
 - Pre-split history: https://github.com/khughitt/familiar-archive (private archive)
 ```
 
-- [ ] **Step 4: Delete the copied spec text and the process reports**
+- [x] **Step 4: Delete the process reports; the "copied spec text" deletion
+      was reverted**
 
 ```bash
 git rm docs/ref/kitty-graphics-protocol.md
 git rm -r .superpowers
 ```
 
-(No file references `kitty-graphics-protocol.md`, verified at plan time — no
-citation edits needed. The kitty graphics protocol is documented upstream at
-https://sw.kovidgoyal.net/kitty/graphics-protocol/; nothing in the tree needs
-to say so after the deletion.)
+This step ran as written when the task executed. **Correction, added in a
+later fix wave:** `docs/ref/kitty-graphics-protocol.md` is not copied spec
+text. It is a ~1,942-word original engineering reference written against
+familiar's own render paths (per-surface analysis for Claude Code, Codex,
+and OpenCode, with measured figures for this project's own assets), and it
+cites the upstream Kitty graphics protocol by URL
+(https://sw.kovidgoyal.net/kitty/graphics-protocol/) rather than reproducing
+it. It was also the only in-tree context for `src/render/term/placeholder.js`.
+The file has been restored (`git checkout 2d7c1d0 -- docs/ref/kitty-graphics-protocol.md`)
+and is retained under the `docs/` → CC BY 4.0 mapping (§3 of the design
+doc). The `.superpowers` deletion in this step is unaffected and stands.
 
 - [ ] **Step 5: Reword the pins comments**
 
@@ -834,12 +845,17 @@ Dropbox mount, and the `~/d/` symlink layout — not generic `/home/` (test
 fixtures legitimately use synthetic homes like `/home/k`):
 
 ```bash
-grep -rn "home/keith\|mnt/ssd\|~/d/" --include="*.js" --include="*.md" --include="*.yaml" --include="*.json" . \
-  | grep -v node_modules \
-  | grep -v "^\./docs/plans/2026-08-19-publication-gate.md"
+git grep -n "home/keith\|mnt/ssd\|~/d/" -- . ':!docs/plans/2026-08-19-publication-gate.md'
 [ -d node_modules ] || npm ci
 npm test
 ```
+
+(Use `git grep` over tracked files rather than extension-filtered `grep -r`:
+an earlier pass of this sweep filtered on `--include="*.js" --include="*.md"
+--include="*.yaml" --include="*.json"`, which is blind to extensionless
+files — `bin/familiar` and the other `bin/*` entry points, plus `shell.qml`
+and `sprite-plugin.tsx` — and one of those extensionless files shipped a
+personal path in its `--help` text as a result.)
 
 (`npm ci` is needed because the worktree starts without `node_modules`; at
 this task the dependency is still the SSH `v0.1.0` ref, which resolves
