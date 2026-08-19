@@ -17,7 +17,9 @@ WRN leaks found: 3
 
 3 hits, all the same underlying finding: rule `generic-api-key` matched the
 value `a8c54327690f` in a `key` field, duplicated across `manifest.json` and
-`expansion.json` in commit `9f5048a` under `records/cats-v2-concepts/round-03/`.
+`expansion.json` in the exploration branch tip under
+`records/cats-v2-concepts/round-03/`. (The commit's SHA is deliberately not
+reproduced here — see the reachability note below.)
 (This value is written here in prose — value, then field — rather than in
 the JSON key-colon-quoted-value form that appears in the source files
 themselves, so that documenting the finding does not itself reproduce the
@@ -32,19 +34,31 @@ across the generation pipeline's own files. Low entropy consistent with a generi
 regex match, not a credential — no adjacent token, bearer, or auth-header material
 anywhere near the field in either file.
 
-Reachability at the time of the initial scan: commit `9f5048a` was never on `main` —
-it was the tip of `refs/heads/exploration`, a second branch that was live and pushed
-to the public GitHub repo, browsable by anyone with the URL. The "not on `main`"
-fact alone would have understated this: the branch, not just the commit, was
-publicly reachable.
+Reachability at the time of the initial scan: the exploration branch tip was never
+on `main` — it was the tip of `refs/heads/exploration`, a second branch that was
+live and pushed to the public GitHub repo, browsable by anyone with the URL. The
+"not on `main`" fact alone would have understated this: the branch, not just the
+commit, was publicly reachable.
 
 Resolution: escalated to the human, who asked whether the branch's contents were
 preserved elsewhere before agreeing to remove it. Verified: all 407 files under that
 history are byte-identical (same blob hashes) to their counterparts under
 `exploration/` in the private `familiar-archive` repo, which is pushed to its
 private remote. On that basis the human directed removal of the branch from the
-public cats repo; it was deleted from `origin` and pruned locally, so nothing was
-lost and nothing public was left dangling on it.
+public cats repo; the ref was deleted from `origin` and pruned locally, so nothing
+was *lost* — but deleting a branch ref does not remove the objects it pointed to.
+GitHub does not immediately garbage-collect unreferenced commits, and it continues
+to serve them by SHA to anyone who already has it, until (and unless) GitHub runs
+that garbage collection. Verified live, after this "resolution" was first written:
+`gh api repos/khughitt/familiar-cats/commits/<exploration-branch-tip-sha>` on the
+public repo still returns the commit. So removal from the public repo is **not**
+complete — the branch is gone but the commit and its blobs remain retrievable by
+SHA — and this is outstanding. Completing it requires asking GitHub Support to
+garbage-collect the unreachable objects; that request has not yet been made. The
+SHA itself is deliberately not reproduced in this document (it is the one thing
+that makes the still-dangling object easy to find); anyone who needs it to file
+the GitHub Support request can retrieve it from `git log --all` in a clone made
+before this fix, or from `familiar-archive`'s `exploration/` history.
 
 Final scan, over the resulting history (timestamp prefixes stripped):
 
@@ -56,10 +70,15 @@ INF no leaks found
 
 Disposition: initial `generic-api-key` hits were a false positive (per-record
 correlation id, not a credential); separately, the commit that carried them was
-reachable via a live public `exploration` branch (never `main`) and was removed
-from the public repo after its contents were confirmed preserved byte-identical in
-the private `familiar-archive` repo. Current public history (6 commits, `main` only)
-scans clean — no leaks found. No further action.
+reachable via a live public `exploration` branch (never `main`), and its contents
+were confirmed preserved byte-identical in the private `familiar-archive` repo
+before the branch *ref* was deleted from the public repo. Current public history
+(6 commits, `main` only) scans clean — no leaks found. This is **not** the same as
+the commit being gone from the public repo: GitHub retains unreferenced objects
+and continues to serve them by SHA until it garbage-collects, and a live check
+after the ref deletion confirmed the commit is still fetchable that way. Further
+action is required and outstanding: ask GitHub Support to garbage-collect the
+unreachable objects in `familiar-cats`.
 
 ### npm audit
 
@@ -243,7 +262,7 @@ immediately before the repository was flipped public.
 ### gitleaks (post-correction rescan — the count did not drop)
 
 After rewriting the three quotations above to prose form (this file, commit
-`0769847`), re-ran the full-history scan on `main`:
+`6d86067`), re-ran the full-history scan on `main`:
 
 ```
 INF 45 commits scanned.
@@ -251,8 +270,14 @@ INF scanned ~1125924 bytes (1.13 MB) in 181ms
 WRN leaks found: 4
 ```
 
-Still 4 — unchanged from the pre-fix count, and the count is *not* expected
-to drop from any further forward-only commit. The reason: `gitleaks detect`
+Still 4 — unchanged from the count immediately before this fix. That
+pre-fix count of 4 was never itself written down as a scan result: the last
+number recorded in this document (the "final, full merged history before
+the flip" scan above) was 3, before commit `ff26eba8` added a third
+quotation of the same `generic-api-key` value and pushed the count to 4;
+this section is the first place that 4 appears in writing, and it appears
+here as the *post*-fix count. The count is *not* expected to drop from any
+further forward-only commit. The reason: `gitleaks detect`
 scans full git history via `git log -p`, matching each commit's own patch.
 The three `generic-api-key` hits below are each pinned to the specific
 already-pushed, public commit whose diff *added* the JSON-form quotation;
@@ -271,7 +296,7 @@ are permanent, immutable public history:
    throughout, same disposition as above.
 
 Disposition: clean — no action, all 4 already investigated. The prose fix
-(commit `0769847`) was still worth making: it stops the pattern from
+(commit `6d86067`) was still worth making: it stops the pattern from
 recurring in the *current* tree and in any future commit that quotes this
 value again, which is the only thing a forward-only commit can affect. It
 does not and cannot retroactively clear the 3 `generic-api-key` hits already
