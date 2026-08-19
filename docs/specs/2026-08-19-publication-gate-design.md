@@ -40,8 +40,12 @@ cannot read a sibling **private** repository:
 
 1. **Cats, non-CI items:** rights review (§2), licenses, sweep, scan —
    the exposure-driven work lands first, while cats CI waits.
-2. **Theme, full gate + flip:** licenses, sweep, scan, CI; then theme
-   flips public and cuts the **licensed release tag `v0.1.1`** (§3).
+2. **Theme, full gate + release + flip:** licenses, sweep, scan, CI;
+   then the **licensed release `v0.1.1`** is made real *before* the flip —
+   bump `version` to `0.1.1` in theme's `package.json` and
+   `package-lock.json`, commit, tag `v0.1.1`, verify the tag's tree
+   carries the licenses and identifies as 0.1.1 — and only then flip
+   public, so the required consumer ref exists the moment the repo does.
 3. **Cats CI:** now installable — the workflow pins `v0.1.1`.
 4. **Engine:** dependency flip to the public licensed tag, clean-clone
    smoke, flip public.
@@ -148,8 +152,10 @@ re-enumerated at execution time rather than trusted from this spec:
   theme is public, §1). The ref change is not optional: `v0.1.0` resolves
   to theme's root commit, which predates the license files — installed
   copies of the dependency would ship unlicensed bytes forever. `v0.1.1`
-  is a **new** tag cut on theme `main` after its gate items land; the
-  published `v0.1.0` is not retagged. The lockfile carries the SSH URL in
+  is a **new** tag cut on theme `main` after its gate items land, on a
+  commit that bumps `version` to `0.1.1` in theme's `package.json` and
+  `package-lock.json` — the package identifies as its tag; the published
+  `v0.1.0` is not retagged. The lockfile carries the SSH URL in
   both the declaration and the `resolved` field, so the flip regenerates
   it; §6's CI runs `npm ci`, which would fail on the mismatch otherwise.
   Both package.json files keep `"private": true`: it prevents accidental
@@ -205,7 +211,8 @@ order:
 
 1. Cats lands rights, licenses, sweep, scan in place (already public);
    its CI item stays open.
-2. Theme completes its full checklist, flips public, cuts `v0.1.1`.
+2. Theme completes its full checklist, bumps to 0.1.1, tags and
+   verifies `v0.1.1`, then flips public.
 3. Cats CI lands against `v0.1.1`, closing cats' checklist.
 4. Engine flips its dependency to `v0.1.1`, passes the clean-clone
    smoke, flips public.
