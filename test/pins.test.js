@@ -68,9 +68,9 @@ test('parses the three pin forms', () => {
 });
 
 test('a path pin follows symlinks — a lexical compare would silently ignore the pin', () => {
-  // git reports the PHYSICAL repo root. `~/d/familiar` on this machine is
-  // /mnt/ssd/Dropbox/familiar. If matchPin compared strings, the pin the user
-  // wrote would match nothing and they would never be told why.
+  // git reports the PHYSICAL repo root; the user pins the symlink they cd
+  // through. If matchPin compared strings, the pin the user wrote would match
+  // nothing and they would never be told why.
   const catalog = parseIdentities('identities:\n  - path: /link/to/api\n    slot: 6\n');
   const realpath = (p) => (p === '/link/to/api' ? '/physical/api' : p);
 
@@ -139,9 +139,9 @@ test('an unpinned project matches nothing and falls through to its hashed slot',
 });
 
 test('path pins expand ~ so the config can be written the way a human writes it', () => {
-  const catalog = parseIdentities('identities:\n  - path: ~/d/work/api\n    slot: 9\n');
+  const catalog = parseIdentities('identities:\n  - path: ~/code/work/api\n    slot: 9\n');
   const home = process.env.HOME;
-  assert.equal(matchPin(catalog, { remote: null, repoRoot: `${home}/d/work/api`, project: 'api' }).slot, 9);
+  assert.equal(matchPin(catalog, { remote: null, repoRoot: `${home}/code/work/api`, project: 'api' }).slot, 9);
 });
 
 test('member pins are theme-scoped: a pin for an inactive theme is inert', () => {

@@ -80,7 +80,7 @@ test('the shipped Codex hooks invoke Familiar for SessionEnd', () => {
   assert.deepEqual(fixture.hooks.SessionEnd, [{
     hooks: [{
       type: 'command',
-      command: '~/d/familiar/bin/familiar hook --agent codex SessionEnd',
+      command: '/path/to/familiar/bin/familiar hook --agent codex SessionEnd',
     }],
   }]);
 });

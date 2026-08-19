@@ -161,8 +161,8 @@ test('a TIMEOUT is not "not a repo" — a slow disk must never silently re-key t
   await assert.rejects(gitContext('/home/k/d/api', { exec: killedOnRemote }), /git timed out/);
 });
 
-// A real checkout can be reached through a symlink (e.g. `~/d/familiar` pointing
-// somewhere else on disk), and `git rev-parse --show-toplevel` reports the
+// A real checkout can be reached through a symlink (e.g. a `~/projects/x` link
+// pointing somewhere else on disk), and `git rev-parse --show-toplevel` reports the
 // PHYSICAL path, not the symlink a human typed to get there. gitContext must pass
 // that straight through rather than "fixing" it to match whatever cwd string it
 // was given — the fix-up (canonicalizing a *pin's* path to compare against it) is

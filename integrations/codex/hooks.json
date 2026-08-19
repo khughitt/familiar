@@ -1,22 +1,22 @@
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex SessionStart" }] }
+      { "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex SessionStart" }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex UserPromptSubmit" }] }
+      { "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex UserPromptSubmit" }] }
     ],
     "PreToolUse": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex PreToolUse" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex PreToolUse" }] }
     ],
     "PermissionRequest": [
-      { "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex PermissionRequest" }] }
+      { "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex PermissionRequest" }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex Stop" }] }
+      { "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex Stop" }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook --agent codex SessionEnd" }] }
+      { "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook --agent codex SessionEnd" }] }
     ]
   }
 }
