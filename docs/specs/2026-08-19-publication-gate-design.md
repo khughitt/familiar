@@ -1,0 +1,179 @@
+# Publication Gate — Design
+
+**Status:** approved design, unimplemented
+
+Take `familiar-cats`, `familiar-theme`, and `familiar` (the engine) to
+public-ready and public, closing the publication blockers the repository
+split deliberately deferred: asset rights, license files, the machine-path
+sweep, a tooled secret scan, and minimal CI. This re-scopes the surviving
+substance of the July 2026 publication design (archive branch
+`publication`, `docs/specs/2026-07-18-publication-design.md`) to the
+post-split repo family; that spec's repository-layout and history-surgery
+phases are superseded by the split and are not carried here.
+
+## 0. Context and constraints
+
+- `familiar-cats` went public on 2026-08-19 to serve
+  `familiar theme add` over HTTPS — ahead of this gate. Decision: it stays
+  public while the gate runs; the rights review is the gate's first task.
+- `familiar-forge` and `familiar-archive` stay private. Forge's
+  explanatory-value question gets its own later decision; the archive is
+  frozen and private per the July decision.
+- The July in-principle license decisions stand and extend to the art:
+  **MIT** for code, **CC BY 4.0** for docs, **CC BY 4.0** for the cats
+  art — the art grant conditional on the rights review (§2).
+- npm distribution remains deferred. Publication means public GitHub
+  repositories with working anonymous installs, not registry packages.
+- The theme pack validator tolerates arbitrary regular files (it bounds
+  entry count and sizes and rejects only symlinks/FIFOs/sockets), so
+  license and README files added to `familiar-cats` ride through
+  `theme add` and travel with every installed copy. Verified against
+  `familiar-theme` `src/validate.js` preflight.
+
+## 1. Scope and sequencing
+
+Three repos pass a per-repo acceptance checklist — rights, licenses,
+sweep, scan, CI green — and visibility flips only when a repo's checklist
+passes. Order: **cats → theme → engine**, most-exposed first. The order is
+load-bearing: the engine's dependency on `familiar-theme` is pinned as
+`git+ssh://…#v0.1.0`, unusable anonymously; it flips to `git+https://`
+only after theme is public, and the engine's clean-clone CI smoke depends
+on that flip. Cats is already public, so its checklist simply runs first.
+
+Out of scope: forge and archive changes; npm publishing; any CI beyond §6;
+history rewriting (histories are days old; §5's scan is the history
+evidence).
+
+## 2. Asset-rights review (first task; stop point)
+
+Evidence base: the provenance manifests shipped in `familiar-cats`
+(`sprites/<member>/provenance.json`). Every shipped sprite records the
+full generation request: endpoint `openrouter.ai/api/v1/images`, model
+`openai/gpt-5.4-image-2`, `provider.only: ["openai"]` with fallbacks
+disallowed, `is_byok: false`, plus prompt, image digest, and cost.
+
+The review checks, against the **current** OpenAI Terms of Use and
+OpenRouter Terms of Service:
+
+1. **Ownership/assignment** — whether output ownership or assignment to
+   the requesting user permits relicensing under CC BY 4.0.
+2. **Obligations** — any attribution, AI-disclosure, or usage condition
+   that must be carried into `LICENSE-assets`.
+3. **Attribution party** — the CC BY attribution target is Keith Hughitt,
+   as the party who directed creation; the review confirms nothing in the
+   terms requires naming the provider instead of or alongside.
+
+Output: a short review document in `familiar-cats` recording the terms
+versions and the date checked, the findings for each point, and the
+conclusion. `LICENSE-assets` cites it, so the grant is evidenced, not
+asserted.
+
+**Stop point:** if the terms bar relicensing, or impose conditions
+CC BY 4.0 cannot carry, work stops and the art-license decision reopens
+before any `LICENSE-assets` is written. Nothing downstream of §3's cats
+items proceeds past a failed review.
+
+## 3. License files and the path-to-license map
+
+Every public repo: `LICENSE` — MIT, copyright Keith Hughitt.
+
+Engine and theme additionally get `LICENSING.md`, the path-to-license map:
+
+- code and configuration → MIT (the repo `LICENSE`);
+- `docs/` → CC BY 4.0, referenced by canonical URL — no CC license text
+  vendored;
+- vendored or derived data listed explicitly. In the engine that means
+  verifying the July items post-split: if `vendor/rowcolumn-diacritics.txt`
+  (derived from UnicodeData.txt) is present, its entry carries the Unicode
+  license notice; the kitty graphics protocol spec text must remain
+  untracked, cited by upstream URL only.
+
+`familiar-cats` is a three-path repo, so its map is a "Licensing" section
+in its new `README.md` (§4) instead of a separate file:
+
+- `theme.yaml` and `sprites/**/provenance.json` → MIT;
+- `sprites/**` images → CC BY 4.0 per `LICENSE-assets`.
+
+`LICENSE-assets` states the CC BY 4.0 grant, the attribution party, an
+AI-generated disclosure line naming model and provider, and cites the §2
+review document.
+
+No CLA and no contribution agreement: MIT's inbound-equals-outbound is
+sufficient.
+
+## 4. Sweep: machine paths, stray artifacts, claims
+
+The sweep targets the living tree, not history. Known engine hits, to be
+re-enumerated at execution time rather than trusted from this spec:
+
+- `src/bus/pins.js` and `test/pins.test.js` — machine paths in comments;
+  reword neutrally.
+- `docs/install.md` — hook commands hardcode a personal clone path;
+  replace with a placeholder clone path plus one sentence telling readers
+  to substitute where they cloned the repo.
+- `.superpowers/sdd/` process reports — removed from the tree. They are
+  internal scratch, not documentation.
+- `package.json` — the `familiar-theme` dependency flips
+  `git+ssh://` → `git+https://` (after theme is public, §1). Both
+  package.json files keep `"private": true`: it prevents accidental npm
+  publish and does not affect repository visibility.
+
+Theme and cats currently show no machine-path hits; the executing plan
+re-greps all three repos rather than relying on that.
+
+README pass: engine and theme READMEs are checked claim-by-claim against
+post-split reality (dependency count, repo-family description, install
+path). `familiar-cats` gets its first `README.md`: what the pack is, the
+one-line `familiar theme add` install, and the Licensing section (§3).
+
+## 5. Secret scan
+
+`gitleaks` with stock rules over the full history of all three repos.
+Findings are dispositioned in the gate's execution notes — expected clean,
+but the tooled scan is the evidence, per the July revision that replaced
+eyeballing with a real tool. A finding that is a real secret stops the
+flip for that repo until rotated and dispositioned.
+
+## 6. Minimal CI
+
+- **Engine and theme:** one GitHub Actions workflow each — `npm test` on
+  Node 20 and 24, on push and pull request.
+- **Engine, additionally:** a clean-clone install smoke — fresh
+  `npm install` resolving the public `familiar-theme` over HTTPS, then
+  `bin/familiar --help` — doubling as proof the §4 dependency flip works
+  anonymously.
+- **Cats:** a single job that installs `familiar-theme` and runs
+  `validateThemePack` against the repo root. Three lines of job; keeps the
+  public pack provably installable. This is deliberately short of the
+  deferred fuller CI (conformance fixture suite, live HTTPS
+  `theme add` integration).
+
+## 7. Acceptance and flip
+
+Per-repo acceptance checklist: rights (cats only) ∙ licenses ∙ sweep ∙
+scan ∙ CI green. Then, in order:
+
+1. Cats completes in place (already public).
+2. Theme flips public.
+3. Engine flips its dependency, passes the clean-clone smoke, flips
+   public.
+
+Post-flip verification: anonymous clone of each repo; anonymous
+`npm install` of the engine; `familiar theme add` of the public cats URL
+against a scratch config. This spec's status header is corrected in the
+landing change.
+
+## 8. Decisions
+
+| Decision | Choice |
+| --- | --- |
+| Cats posture during the gate | stays public; rights review first |
+| Public set | engine, theme, cats; forge and archive private |
+| Code license | MIT |
+| Docs license | CC BY 4.0 + path-to-license map |
+| Art license | CC BY 4.0, conditional on the §2 review |
+| Attribution party | Keith Hughitt |
+| CI scope | minimal (§6); fuller CI deferred |
+| npm publishing | deferred |
+| History rewriting | none; tooled scan is the history evidence |
+| Structure | one spec, one sweep, cats → theme → engine |
