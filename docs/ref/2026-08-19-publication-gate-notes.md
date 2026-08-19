@@ -15,9 +15,14 @@ INF scanned ~3030176 bytes (3.03 MB) in 324ms
 WRN leaks found: 3
 ```
 
-3 hits, all the same underlying finding: rule `generic-api-key` matched a
-`"key": "a8c54327690f"` field, duplicated across `manifest.json` and
+3 hits, all the same underlying finding: rule `generic-api-key` matched the
+value `a8c54327690f` in a `key` field, duplicated across `manifest.json` and
 `expansion.json` in commit `9f5048a` under `records/cats-v2-concepts/round-03/`.
+(This value is written here in prose — value, then field — rather than in
+the JSON key-colon-quoted-value form that appears in the source files
+themselves, so that documenting the finding does not itself reproduce the
+pattern the `generic-api-key` rule matches and re-trigger the same rule on
+every future scan of this file.)
 
 Investigated and dispositioned a false positive: every character record in that
 manifest (`nekomata`, `maine-coon`, `ginger`, `impostor`, `meerkat`, `spectral-cat`,
@@ -132,8 +137,8 @@ WRN leaks found: 2
 
 2 hits:
 
-1. Rule `generic-api-key` matched `key": "a8c54327690f"` at
-   `docs/ref/2026-08-19-publication-gate-notes.md:19` (this file). That line
+1. Rule `generic-api-key` matched the value `a8c54327690f` in a `key` field
+   at `docs/ref/2026-08-19-publication-gate-notes.md:19` (this file). That line
    is this notes file's own `## familiar-cats` section quoting, as
    documentation, the value of a false positive already investigated and
    dispositioned during the cats scan (a per-record correlation id in
@@ -216,14 +221,14 @@ WRN leaks found: 3
 3 hits — one more than the initial engine scan's 2, all the same two
 underlying non-findings:
 
-1. Rule `generic-api-key` matched `key": "a8c54327690f"` twice: once at
-   `docs/ref/2026-08-19-publication-gate-notes.md:19` (the `## familiar-cats`
-   section quoting the value investigated and dispositioned during the cats
-   scan), and a second time in this file's own `## familiar (engine)`
-   section, where the write-up of that same finding quotes the identical
-   string again. Both are quotations of one already-dispositioned false
-   positive — a per-record correlation id, not a credential — not
-   independent secrets.
+1. Rule `generic-api-key` matched the value `a8c54327690f` in a `key` field
+   twice: once at `docs/ref/2026-08-19-publication-gate-notes.md:19` (the
+   `## familiar-cats` section quoting the value investigated and
+   dispositioned during the cats scan), and a second time in this file's own
+   `## familiar (engine)` section, where the write-up of that same finding
+   quotes the identical value again. Both are quotations of one
+   already-dispositioned false positive — a per-record correlation id, not a
+   credential — not independent secrets.
 2. Rule `private-key` matched the self-signed TLS test fixture at
    `test/fixtures/tls/key.pem`, used only by `test/theme-add-https.test.js`
    to stand up a local HTTPS test server; it authenticates nothing beyond
@@ -234,3 +239,45 @@ already-investigated non-findings (a doc quoting itself quoting a
 dispositioned false positive, and a throwaway test TLS fixture); no new
 secret. Full merged history scans with zero actual credential exposure
 immediately before the repository was flipped public.
+
+### gitleaks (post-correction rescan — the count did not drop)
+
+After rewriting the three quotations above to prose form (this file, commit
+`0769847`), re-ran the full-history scan on `main`:
+
+```
+INF 45 commits scanned.
+INF scanned ~1125924 bytes (1.13 MB) in 181ms
+WRN leaks found: 4
+```
+
+Still 4 — unchanged from the pre-fix count, and the count is *not* expected
+to drop from any further forward-only commit. The reason: `gitleaks detect`
+scans full git history via `git log -p`, matching each commit's own patch.
+The three `generic-api-key` hits below are each pinned to the specific
+already-pushed, public commit whose diff *added* the JSON-form quotation;
+rewriting the text in a later commit changes what the working tree shows,
+but does not and cannot alter an earlier commit's patch. Those three commits
+are permanent, immutable public history:
+
+1. `e4d4c908` (`docs(publication): record cats scan dispositions`) — added
+   line 19 of this file, in the `## familiar-cats` section.
+2. `8f5d2444` (`docs(publication): record engine scan dispositions`) — added
+   the `## familiar (engine)` section's first quotation of the same value.
+3. `ff26eba8` (`docs(publication): record the gate as closed`) — added this
+   section's own quotation of the same value.
+4. `49fd2fc1` (`fix(theme): terminate timed-out HTTPS clones`) — the
+   self-signed TLS test fixture at `test/fixtures/tls/key.pem`, unchanged
+   throughout, same disposition as above.
+
+Disposition: clean — no action, all 4 already investigated. The prose fix
+(commit `0769847`) was still worth making: it stops the pattern from
+recurring in the *current* tree and in any future commit that quotes this
+value again, which is the only thing a forward-only commit can affect. It
+does not and cannot retroactively clear the 3 `generic-api-key` hits already
+baked into public history at `e4d4c908`, `8f5d2444`, and `ff26eba8` — those
+remain permanent, individually-dispositioned artifacts of this document's
+own history, not evidence of an exposed credential. A tool-level allowlist
+(e.g. a gitleaks baseline keyed to these fingerprints) could suppress them
+in future scan output without a history rewrite; none was added here, since
+that is a scanning-policy decision outside this fix's scope.
