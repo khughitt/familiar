@@ -34,11 +34,20 @@ phases are superseded by the split and are not carried here.
 
 Three repos pass a per-repo acceptance checklist — rights, licenses,
 sweep, scan, CI green — and visibility flips only when a repo's checklist
-passes. Order: **cats → theme → engine**, most-exposed first. The order is
-load-bearing: the engine's dependency on `familiar-theme` is pinned as
-`git+ssh://…#v0.1.0`, unusable anonymously; it flips to `git+https://`
-only after theme is public, and the engine's clean-clone CI smoke depends
-on that flip. Cats is already public, so its checklist simply runs first.
+passes. The order is load-bearing and interleaved, because cats CI and the
+engine both install `familiar-theme`, and a workflow's `GITHUB_TOKEN`
+cannot read a sibling **private** repository:
+
+1. **Cats, non-CI items:** rights review (§2), licenses, sweep, scan —
+   the exposure-driven work lands first, while cats CI waits.
+2. **Theme, full gate + flip:** licenses, sweep, scan, CI; then theme
+   flips public and cuts the **licensed release tag `v0.1.1`** (§3).
+3. **Cats CI:** now installable — the workflow pins `v0.1.1`.
+4. **Engine:** dependency flip to the public licensed tag, clean-clone
+   smoke, flip public.
+
+Cats is already public, which is why its rights/licenses/sweep/scan run
+before anything else even though its CI cannot.
 
 Out of scope: forge and archive changes; npm publishing; any CI beyond §6;
 history rewriting (histories are days old; §5's scan is the history
@@ -135,12 +144,16 @@ re-enumerated at execution time rather than trusted from this spec:
 - `docs/ref/kitty-graphics-protocol.md` — tracked copied spec text;
   deleted by the sweep and cited by upstream URL where referenced (§3).
 - `package.json` **and `package-lock.json`** — the `familiar-theme`
-  dependency flips `git+ssh://` → `git+https://` (after theme is public,
-  §1). The lockfile carries the SSH URL in both the declaration and the
-  `resolved` field, so the flip regenerates it; §6's CI runs `npm ci`,
-  which would fail on the mismatch otherwise. Both package.json files
-  keep `"private": true`: it prevents accidental npm publish and does not
-  affect repository visibility.
+  dependency flips `git+ssh://…#v0.1.0` → `git+https://…#v0.1.1` (after
+  theme is public, §1). The ref change is not optional: `v0.1.0` resolves
+  to theme's root commit, which predates the license files — installed
+  copies of the dependency would ship unlicensed bytes forever. `v0.1.1`
+  is a **new** tag cut on theme `main` after its gate items land; the
+  published `v0.1.0` is not retagged. The lockfile carries the SSH URL in
+  both the declaration and the `resolved` field, so the flip regenerates
+  it; §6's CI runs `npm ci`, which would fail on the mismatch otherwise.
+  Both package.json files keep `"private": true`: it prevents accidental
+  npm publish and does not affect repository visibility.
 
 Theme and cats currently show no machine-path hits; the executing plan
 re-greps all three repos rather than relying on that.
@@ -158,6 +171,11 @@ but the tooled scan is the evidence, per the July revision that replaced
 eyeballing with a real tool. A finding that is a real secret stops the
 flip for that repo until rotated and dispositioned.
 
+Alongside it, one `npm audit --omit=dev` run per repo with dependencies,
+dispositioned in the same execution notes (at design time: two low
+findings in the engine, none in theme). A one-time recorded disposition,
+not a permanent workflow.
+
 ## 6. Minimal CI
 
 - **Engine and theme:** one GitHub Actions workflow each — `npm ci` (the
@@ -172,21 +190,25 @@ flip for that repo until rotated and dispositioned.
   resolving the public `familiar-theme` over HTTPS, then
   `bin/familiar --help` — doubling as proof the §4 dependency flip works
   anonymously.
-- **Cats:** a single job that installs `familiar-theme` and runs
+- **Cats:** a single job that installs `familiar-theme` **pinned to the
+  same licensed tag the engine consumes (`v0.1.1`)** and runs
   `validateThemePack` against the repo root. Three lines of job; keeps the
-  public pack provably installable. This is deliberately short of the
-  deferred fuller CI (conformance fixture suite, live HTTPS
-  `theme add` integration).
+  public pack provably installable. Per §1 it can only land after theme is
+  public. This is deliberately short of the deferred fuller CI
+  (conformance fixture suite, live HTTPS `theme add` integration).
 
 ## 7. Acceptance and flip
 
 Per-repo acceptance checklist: rights (cats only) ∙ licenses ∙ sweep ∙
-scan ∙ CI green. Then, in order:
+scan + audit disposition ∙ CI green. Execution follows §1's interleaved
+order:
 
-1. Cats completes in place (already public).
-2. Theme flips public.
-3. Engine flips its dependency, passes the clean-clone smoke, flips
-   public.
+1. Cats lands rights, licenses, sweep, scan in place (already public);
+   its CI item stays open.
+2. Theme completes its full checklist, flips public, cuts `v0.1.1`.
+3. Cats CI lands against `v0.1.1`, closing cats' checklist.
+4. Engine flips its dependency to `v0.1.1`, passes the clean-clone
+   smoke, flips public.
 
 Post-flip verification: anonymous clone of each repo; anonymous
 `npm install` of the engine; `familiar theme add` of the public cats URL
@@ -208,4 +230,6 @@ landing change.
 | Failed rights review | stop + containment: privatize cats if redistribution is barred |
 | npm publishing | deferred |
 | History rewriting | none; tooled scan is the history evidence |
-| Structure | one spec, one sweep, cats → theme → engine |
+| Structure | one spec, one sweep; interleaved order per §1 (cats non-CI → theme + flip + `v0.1.1` → cats CI → engine) |
+| Theme release ref | new licensed tag `v0.1.1`; `v0.1.0` is never retagged |
+| Dependency audit | one-time `npm audit --omit=dev` disposition in execution notes |
