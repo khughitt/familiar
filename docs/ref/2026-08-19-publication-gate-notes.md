@@ -62,6 +62,26 @@ Not applicable — no package.json, no dependencies.
 
 Disposition: not applicable — no package.json, no dependencies.
 
+### gitleaks (final, full history at commit `ab828e4`)
+
+Full-history rescan run at `ab828e4` (`ci: report the pack member count
+correctly`), the current pushed head of `main`, which is the CI workflow
+commit (Task 6) plus its one-word member-count fix — the last two commits
+that closed cats' checklist item now that `familiar-theme` is public
+(timestamp prefixes stripped from the pasted log lines below; the summary
+carries no file paths since this scan produced zero findings, so nothing
+else was stripped):
+
+```
+INF 8 commits scanned.
+INF scanned ~175799 bytes (175.80 KB) in 152ms
+INF no leaks found
+```
+
+Disposition: clean — no action. Full history (8 commits: the six prior, the
+CI-workflow commit, and its member-count fix) scans clean at `ab828e4`,
+the current head of `main`. Cats' public history is now final.
+
 ## familiar-theme
 
 ### gitleaks
