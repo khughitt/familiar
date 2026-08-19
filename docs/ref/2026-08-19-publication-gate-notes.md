@@ -81,3 +81,19 @@ found 0 vulnerabilities
 ```
 
 Disposition: clean — no action.
+
+### gitleaks (final, full history at the v0.1.1 release commit)
+
+Full-history rescan run against the `v0.1.1` release commit, after the licensing
+and CI-workflow commits and before the visibility flip (timestamp prefixes
+stripped from the pasted log lines below):
+
+```
+INF 5 commits scanned.
+INF scanned ~111598 bytes (111.60 KB) in 84.4ms
+INF no leaks found
+```
+
+Disposition: clean — no action. Full history (5 commits, including the licensing,
+CI-workflow, and `v0.1.1` release commits) scans clean immediately before the
+repository was flipped public.
