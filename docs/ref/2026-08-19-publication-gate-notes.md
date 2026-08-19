@@ -117,3 +117,67 @@ INF no leaks found
 Disposition: clean — no action. Full history (5 commits, including the licensing,
 CI-workflow, and `v0.1.1` release commits) scans clean immediately before the
 repository was flipped public.
+
+## familiar (engine)
+
+### gitleaks
+
+Initial scan, full history (timestamp prefixes stripped from the pasted log lines below):
+
+```
+INF 42 commits scanned.
+INF scanned ~1118750 bytes (1.12 MB) in 178ms
+WRN leaks found: 2
+```
+
+2 hits:
+
+1. Rule `generic-api-key` matched `key": "a8c54327690f"` at
+   `docs/ref/2026-08-19-publication-gate-notes.md:19` (this file). That line
+   is this notes file's own `## familiar-cats` section quoting, as
+   documentation, the value of a false positive already investigated and
+   dispositioned during the cats scan (a per-record correlation id in
+   `manifest.json`/`expansion.json`, not a credential). The "finding" here is
+   gitleaks re-matching the same already-explained string inside our own
+   record of it — no new secret, nothing to act on.
+2. Rule `private-key` matched a PEM block in `test/fixtures/tls/key.pem`.
+   This is a self-signed TLS keypair (paired with `test/fixtures/tls/cert.pem`)
+   used only by `test/theme-add-https.test.js` to stand up a local HTTPS test
+   server; it authenticates nothing beyond that in-process test fixture.
+
+Disposition: both accepted as non-findings, no action. (1) is a quotation of
+a previously dispositioned false positive, not an independent secret. (2) is
+a throwaway self-signed test fixture, not a credential for any real service.
+
+### npm audit (--omit=dev)
+
+```
+# npm audit report
+
+@babel/core  <=7.29.0
+@babel/core: Arbitrary File Read via sourceMappingURL Comment - https://github.com/advisories/GHSA-4x5r-pxfx-6jf8
+fix available via `npm audit fix --force`
+Will install @opentui/solid@0.1.10, which is a breaking change
+node_modules/@babel/core
+  @opentui/solid  <=0.0.0-20260812-897d859a || >=0.1.11
+  Depends on vulnerable versions of @babel/core
+  node_modules/@opentui/solid
+
+2 low severity vulnerabilities
+```
+
+Matches the design-time observation of two low findings.
+
+Disposition: both accepted (low, no exposed surface).
+
+- `@babel/core` (transitive, via `@opentui/solid`): GHSA-4x5r-pxfx-6jf8,
+  arbitrary file read via a crafted `sourceMappingURL` comment, CVSS 3.2
+  (low). The path requires babel to transform attacker-controlled source
+  containing a malicious `sourceMappingURL`; `familiar` does not feed
+  untrusted source into babel at runtime — it is pulled in as part of the
+  `@opentui/solid` TUI toolchain. No exposed attack surface.
+- `@opentui/solid` (direct): flagged solely because it depends on the
+  vulnerable `@babel/core` range above; same disposition. The only fix
+  path is `npm audit fix --force`, which downgrades `@opentui/solid` to
+  `0.1.10` — a semver-major, breaking regression from the `0.4.3` currently
+  in use, not warranted for a low-severity finding with no exposed surface.
