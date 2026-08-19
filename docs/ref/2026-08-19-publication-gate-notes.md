@@ -181,3 +181,56 @@ Disposition: both accepted (low, no exposed surface).
   path is `npm audit fix --force`, which downgrades `@opentui/solid` to
   `0.1.10` — a semver-major, breaking regression from the `0.4.3` currently
   in use, not warranted for a low-severity finding with no exposed surface.
+
+### the lockfile's `resolved` field carries `git+ssh`, and that's expected
+
+`package-lock.json` declares `familiar-theme` as
+`git+https://github.com/khughitt/familiar-theme.git#v0.1.1` in both
+`package.json` and the lockfile's root `dependencies` mirror, but the
+per-package entry's `resolved` field reads
+`git+ssh://git@github.com/khughitt/familiar-theme.git#<sha>`. This is not a
+broken or private install path: npm's `pacote` computes a git dependency's
+`resolved` field from the host and prefers the SSH form unless the source
+URL carries embedded credentials, so the only way to get `git+https` into
+`resolved` would be committing a token into this public lockfile, which we
+will not do. A clean `npm ci` with SSH fully disabled (`GIT_TERMINAL_PROMPT=0`,
+no credential helper, no SSH agent, no askpass) was verified to install
+`familiar-theme` `0.1.1` — with its `LICENSE` — entirely over HTTPS, as part
+of the end-to-end anonymous verification that installed `familiar-cats` as a
+theme after a clean `npm install`.
+
+Disposition: clean — no action; `resolved: git+ssh` is a benign artifact of
+how npm computes that field, not evidence of a private dependency.
+
+### gitleaks (final, full merged history before the flip)
+
+Rescan run against the merge commit (`main` after `publication-gate` merged
+in, before the visibility flip):
+
+```
+INF 43 commits scanned.
+INF scanned ~1121470 bytes (1.12 MB) in 177ms
+WRN leaks found: 3
+```
+
+3 hits — one more than the initial engine scan's 2, all the same two
+underlying non-findings:
+
+1. Rule `generic-api-key` matched `key": "a8c54327690f"` twice: once at
+   `docs/ref/2026-08-19-publication-gate-notes.md:19` (the `## familiar-cats`
+   section quoting the value investigated and dispositioned during the cats
+   scan), and a second time in this file's own `## familiar (engine)`
+   section, where the write-up of that same finding quotes the identical
+   string again. Both are quotations of one already-dispositioned false
+   positive — a per-record correlation id, not a credential — not
+   independent secrets.
+2. Rule `private-key` matched the self-signed TLS test fixture at
+   `test/fixtures/tls/key.pem`, used only by `test/theme-add-https.test.js`
+   to stand up a local HTTPS test server; it authenticates nothing beyond
+   that in-process fixture.
+
+Disposition: clean — no action. All 3 hits trace to the same two
+already-investigated non-findings (a doc quoting itself quoting a
+dispositioned false positive, and a throwaway test TLS fixture); no new
+secret. Full merged history scans with zero actual credential exposure
+immediately before the repository was flipped public.

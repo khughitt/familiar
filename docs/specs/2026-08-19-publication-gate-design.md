@@ -1,6 +1,6 @@
 # Publication Gate — Design
 
-**Status:** approved design, unimplemented
+**Status:** implemented; all three repos public, executed per §1's order
 
 Take `familiar-cats`, `familiar-theme`, and `familiar` (the engine) to
 public-ready and public, closing the publication blockers the repository

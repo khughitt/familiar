@@ -890,12 +890,16 @@ to:
 
 ```bash
 npm install
-grep -c "git+ssh" package-lock.json
-grep -n "familiar-theme.git#" package.json package-lock.json | head
+grep -n '"familiar-theme": "git+https' package.json package-lock.json
 ```
 
-Expected: `grep -c git+ssh` prints `0`; the lockfile's `resolved` field for
-familiar-theme is a `git+https` URL pinned to the `v0.1.1` commit SHA.
+Expected: both the manifest and the lockfile's root `dependencies` mirror
+declare `familiar-theme` as `git+https://github.com/khughitt/familiar-theme.git#v0.1.1`.
+The lockfile's per-package `resolved` field for familiar-theme legitimately
+stays `git+ssh` — npm's `pacote` computes `resolved` from the host and
+prefers the SSH form unless the URL carries embedded credentials, so the
+only way to get `git+https` there would be committing a token into a public
+lockfile.
 
 - [ ] **Step 3: Prove the frozen install and the suite**
 
