@@ -131,7 +131,7 @@ test('boxFor REFUSES a height it cannot use, rather than drawing a broken cat', 
 });
 test('compose lays the text beside the cat, and never on top of it', () => {
   const id = imageIdFor('a-session');
-  const lines = compose({ id, cols: 6, rows: 4, text: ['[keith@titan familiar] main'] });
+  const lines = compose({ id, cols: 6, rows: 4, text: ['[user@host familiar] main'] });
 
   assert.equal(lines.length, 4, 'the cat must occupy exactly its rows');
   const withText = lines.filter((l) => l.includes('familiar'));

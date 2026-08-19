@@ -7,8 +7,8 @@ import { assertSlot } from 'familiar-theme';
 
 // A pin path and a git repo root can name the same directory through different
 // routes: `git rev-parse --show-toplevel` reports the PHYSICAL path, while a
-// human writes the symlink they actually `cd` through (`~/d/familiar`, which on
-// this machine is /mnt/ssd/Dropbox/familiar). Compare them lexically and the pin
+// human writes the symlink they actually `cd` through (a `~/projects/x` link
+// to wherever the clone physically lives). Compare them lexically and the pin
 // matches nothing — silently, which is the one outcome this whole system exists
 // to prevent. So canonicalize BOTH sides.
 //

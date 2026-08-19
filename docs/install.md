@@ -1,7 +1,8 @@
 # Install
 
 Familiar needs a scheme before its first hook. The terminal and agent integrations
-are independent; add the ones you use.
+are independent; add the ones you use. Examples below use `/path/to/familiar`;
+substitute the absolute path of your clone.
 
 ## 0. Write a scheme
 
@@ -38,16 +39,16 @@ Add Familiar's hooks to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "SessionStart":     [{ "matcher": "startup|resume", "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook SessionStart" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook UserPromptSubmit" }] }],
-    "PreToolUse":       [{ "matcher": "*", "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook PreToolUse" }] }],
+    "SessionStart":     [{ "matcher": "startup|resume", "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook SessionStart" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook UserPromptSubmit" }] }],
+    "PreToolUse":       [{ "matcher": "*", "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook PreToolUse" }] }],
     "Notification": [
-      { "matcher": "idle_prompt",       "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook Notification:idle_prompt" }] },
-      { "matcher": "permission_prompt", "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook Notification:permission_prompt" }] }
+      { "matcher": "idle_prompt",       "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook Notification:idle_prompt" }] },
+      { "matcher": "permission_prompt", "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook Notification:permission_prompt" }] }
     ],
-    "Stop":        [{ "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook Stop" }] }],
-    "StopFailure": [{ "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook StopFailure" }] }],
-    "SessionEnd":  [{ "hooks": [{ "type": "command", "command": "~/d/familiar/bin/familiar hook SessionEnd" }] }]
+    "Stop":        [{ "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook Stop" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook StopFailure" }] }],
+    "SessionEnd":  [{ "hooks": [{ "type": "command", "command": "/path/to/familiar/bin/familiar hook SessionEnd" }] }]
   }
 }
 ```
@@ -61,7 +62,7 @@ Give Claude Code a status line it owns:
 {
   "statusLine": {
     "type": "command",
-    "command": "~/d/familiar/bin/familiar statusline",
+    "command": "/path/to/familiar/bin/familiar statusline",
     "refreshInterval": 2
   }
 }
@@ -90,7 +91,7 @@ Copy or merge `integrations/codex/hooks.json` into `$CODEX_HOME/hooks.json` so
 Codex lifecycle events reach Familiar:
 
 ```bash
-cp ~/d/familiar/integrations/codex/hooks.json ~/.codex/hooks.json
+cp /path/to/familiar/integrations/codex/hooks.json ~/.codex/hooks.json
 ```
 
 Codex asks for a one-time trust confirmation before it runs hooks. Its native pets
@@ -114,7 +115,7 @@ the TUI plugin renders the full-colour graphic. If the integration fails, inspec
 Start the workspace watcher from `~/.config/niri/config.kdl`:
 
 ```kdl
-spawn-sh-at-startup "~/d/familiar/bin/familiar-niri watch"
+spawn-sh-at-startup "/path/to/familiar/bin/familiar-niri watch"
 ```
 
 It is the sole writer of `niri-windows.json`. It resynchronizes after both agent and
@@ -123,7 +124,7 @@ Niri events, so moving a terminal between workspaces keeps the feed current.
 Optionally start focused-output completion and error moments:
 
 ```kdl
-spawn-sh-at-startup "qs -d -p ~/d/familiar/integrations/niri-desktop"
+spawn-sh-at-startup "qs -d -p /path/to/familiar/integrations/niri-desktop"
 ```
 
 The desktop process reads `intent.json` directly and plays a short, click-through
@@ -136,7 +137,7 @@ on `PATH`. Set `motion: full`, `reduced`, or `off` in
 Set Noctalia's dark-mode hook to exactly:
 
 ```sh
-~/d/familiar/bin/familiar-noctalia scheme-sync
+/path/to/familiar/bin/familiar-noctalia scheme-sync
 ```
 
 The adapter reads Noctalia's dark/light setting and writes Familiar's scheme file.
@@ -150,7 +151,7 @@ An agent that exits without `SessionEnd` can leave state behind. Run
 # ~/.config/systemd/user/familiar-reap.service
 [Service]
 Type=oneshot
-ExecStart=%h/d/familiar/bin/familiar reap
+ExecStart=/path/to/familiar/bin/familiar reap
 ```
 
 ```ini
