@@ -1,6 +1,6 @@
 # Phase 4: `theme add`
 
-**Status:** implemented, local cutover complete; HTTPS smoke pending
+**Status:** implemented; cutover complete, HTTPS smoke passed 2026-08-19
 **Date:** 2026-08-18
 
 The engine ships no art. This phase gives it the verb that makes that

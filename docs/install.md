@@ -14,18 +14,22 @@ tone from this input, so Familiar fails loudly if it is missing.
 
 ## 1. Install a theme
 
-Familiar ships no art; a theme pack supplies it. Until the anonymous HTTPS
-smoke test is complete, obtain a clean local checkout by the method appropriate
-for its repository, then install that checkout:
+Familiar ships no art; a theme pack supplies it. Install one from a public
+HTTPS repository:
+
+```bash
+familiar theme add https://github.com/khughitt/familiar-cats
+```
+
+The pack is cloned into staging, validated whole, and promoted atomically
+into `~/.config/familiar/themes/<id>`; an install receipt records the source
+URL and commit. `familiar theme list` shows every installed theme and its
+receipt status. For a private repository, obtain a clean local checkout by
+the method appropriate for it, then install that checkout:
 
 ```bash
 familiar theme add ./path/to/theme
 ```
-
-The pack is copied into staging, validated whole, and promoted atomically
-into `~/.config/familiar/themes/<id>`; an install receipt records the local
-source. `familiar theme list` shows every installed theme and its receipt
-status. Private repositories use the same local-checkout flow.
 
 ## 2. Claude Code hooks and status line
 
