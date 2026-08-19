@@ -61,3 +61,23 @@ scans clean — no leaks found. No further action.
 Not applicable — no package.json, no dependencies.
 
 Disposition: not applicable — no package.json, no dependencies.
+
+## familiar-theme
+
+### gitleaks
+
+```
+INF 2 commits scanned.
+INF scanned ~109775 bytes (109.78 KB) in 78.7ms
+INF no leaks found
+```
+
+Disposition: clean — no action.
+
+### npm audit (--omit=dev)
+
+```
+found 0 vulnerabilities
+```
+
+Disposition: clean — no action.
