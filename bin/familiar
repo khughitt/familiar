@@ -146,7 +146,7 @@ Arguments:
 
 Examples:
   familiar whoami
-  familiar whoami ~/d/familiar
+  familiar whoami /path/to/project
 `,
   theme: `Browse and inspect themes.
 
