@@ -112,10 +112,13 @@ ones added later — has a license without being individually listed:
   the engine that means verifying the July items post-split: if
   `vendor/rowcolumn-diacritics.txt` (derived from UnicodeData.txt) is
   present, its entry carries the Unicode license notice. The kitty
-  graphics protocol document is handled in §4: it is currently
-  **tracked** at `docs/ref/kitty-graphics-protocol.md` and is deleted by
-  the sweep, cited by upstream URL only — per the July decision not to
-  publish copied spec text.
+  graphics protocol document at `docs/ref/kitty-graphics-protocol.md` is
+  handled in §4: on inspection it is original engineering analysis, not
+  copied spec text, so it is **retained** under the default `docs/` → CC
+  BY 4.0 mapping above, with the upstream protocol cited by URL at its
+  foot as it already was. (An earlier version of this spec directed the
+  sweep to delete it as "copied spec text"; that characterisation was
+  wrong and the deletion was reversed — see §4.)
 
 `familiar-cats` is a small repo, so its map is a "Licensing" section in
 its new `README.md` (§4) instead of a separate file, with the same
@@ -145,8 +148,15 @@ re-enumerated at execution time rather than trusted from this spec:
   to substitute where they cloned the repo.
 - `.superpowers/sdd/` process reports — removed from the tree. They are
   internal scratch, not documentation.
-- `docs/ref/kitty-graphics-protocol.md` — tracked copied spec text;
-  deleted by the sweep and cited by upstream URL where referenced (§3).
+- `docs/ref/kitty-graphics-protocol.md` — originally scoped for deletion
+  here as "copied spec text." That was wrong: it is a ~1,942-word
+  original engineering reference written against familiar's own render
+  paths (per-surface performance analysis for Claude Code, Codex, and
+  OpenCode, with measured figures for this project's own assets), citing
+  the upstream Kitty graphics protocol by URL rather than reproducing it.
+  It contains no copied protocol tables. It is **retained**, under the
+  `docs/` → CC BY 4.0 mapping (§3), and a later fix-wave restored it
+  after this spec's deletion had already been carried out.
 - `package.json` **and `package-lock.json`** — the `familiar-theme`
   dependency flips `git+ssh://…#v0.1.0` → `git+https://…#v0.1.1` (after
   theme is public, §1). The ref change is not optional: `v0.1.0` resolves
