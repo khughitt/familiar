@@ -106,16 +106,25 @@ print('dates:', sorted(dates))
 print('byok:', sorted(byok))
 print('provider.only:', sorted(pins))
 print('allow_fallbacks:', sorted(fallbacks, key=str))
+assert len(paths) == 12, f'expected 12 manifests, found {len(paths)}'
+assert models == {'openai/gpt-5.4-image-2'}, models
+assert endpoints == {'https://openrouter.ai/api/v1/images'}, endpoints
+assert all('2026-07-31' <= d <= '2026-08-02' for d in dates), sorted(dates)
+assert byok == {False}, byok
+assert pins == {('openai',)}, pins
+assert fallbacks == {False}, fallbacks
+print('manifest evidence OK')
 EOF
 ```
 
-Expected: at least one manifest (twelve members); exactly one model
-`openai/gpt-5.4-image-2`; one endpoint `https://openrouter.ai/api/v1/images`;
-dates within 2026-07-31..2026-08-02; `byok: [False]`;
-`provider.only: [('openai',)]`; `allow_fallbacks: [False]` — the last two are
-what makes "the OpenAI Model Terms control" true, so the legal conclusion
-depends on them. If anything else appears, record it — the review must cover
-every model/provider actually used.
+Expected: the printed values followed by `manifest evidence OK`. The asserts
+enforce what §2's legal conclusion relies on — twelve manifests, one model,
+one endpoint, dates inside 2026-07-31..2026-08-02, no BYOK, provider pinned
+to OpenAI with fallbacks disallowed. An `AssertionError` here does NOT mean
+the assert is wrong: it means the evidence base differs from the review's
+scope claim, so the review's Scope section — and possibly its controlling
+documents — must expand to cover what was actually found before legal review
+proceeds.
 
 - [ ] **Step 2: Fetch and read the controlling documents**
 
@@ -523,10 +532,12 @@ the pushed SHA so a scheduling delay cannot select an older run:
 ROOT=$(cd "$(git rev-parse --git-common-dir)/../.."; pwd)
 sha=$(git -C $ROOT/familiar-theme rev-parse main)
 run=""
-until [ -n "$run" ]; do
-  sleep 5
+for i in $(seq 1 60); do
   run=$(gh run list --repo khughitt/familiar-theme --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run" ] && break
+  sleep 5
 done
+[ -n "$run" ] || { echo "no CI run appeared for $sha within 5 minutes — is Actions enabled?"; exit 1; }
 gh run watch --repo khughitt/familiar-theme --exit-status "$run"
 ```
 
@@ -586,10 +597,12 @@ ROOT=$(cd "$(git rev-parse --git-common-dir)/../.."; pwd)
 git -C $ROOT/familiar-theme push --atomic origin main v0.1.1
 sha=$(git -C $ROOT/familiar-theme rev-parse main)
 run=""
-until [ -n "$run" ]; do
-  sleep 5
+for i in $(seq 1 60); do
   run=$(gh run list --repo khughitt/familiar-theme --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run" ] && break
+  sleep 5
 done
+[ -n "$run" ] || { echo "no CI run appeared for $sha within 5 minutes — is Actions enabled?"; exit 1; }
 gh run watch --repo khughitt/familiar-theme --exit-status "$run"
 gitleaks detect --source $ROOT/familiar-theme --no-banner
 gh repo edit khughitt/familiar-theme --visibility public --accept-visibility-change-consequences
@@ -601,6 +614,22 @@ scheduling delay cannot green-light an older run; and the full-history rescan
 covers the workflow and release commits Task 4's scan predates. Expected:
 green run, `no leaks found`, then the flip. A red run or a leak stops the
 flip.
+
+Then record the rescan (engine worktree): append to the `## familiar-theme`
+section of `docs/ref/2026-08-19-publication-gate-notes.md`:
+
+```markdown
+### gitleaks (final, full history at the v0.1.1 release commit)
+
+[paste summary]
+
+Disposition: [clean — no action / dispositions]
+```
+
+```bash
+git add docs/ref/2026-08-19-publication-gate-notes.md
+git commit -m "docs(publication): record theme final-rescan disposition"
+```
 
 - [ ] **Step 5: Verify anonymous access to the exact ref**
 
@@ -656,10 +685,12 @@ git -C $ROOT/familiar-cats commit -m "ci: validate the pack against familiar-the
 git -C $ROOT/familiar-cats push origin main
 sha=$(git -C $ROOT/familiar-cats rev-parse main)
 run=""
-until [ -n "$run" ]; do
-  sleep 5
+for i in $(seq 1 60); do
   run=$(gh run list --repo khughitt/familiar-cats --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run" ] && break
+  sleep 5
 done
+[ -n "$run" ] || { echo "no CI run appeared for $sha within 5 minutes — is Actions enabled?"; exit 1; }
 gh run watch --repo khughitt/familiar-cats --exit-status "$run"
 gitleaks detect --source $ROOT/familiar-cats --no-banner
 ```
@@ -667,6 +698,22 @@ gitleaks detect --source $ROOT/familiar-cats --no-banner
 Expected: exit 0 with the log line `pack ok: 12 members`, then
 `no leaks found` — the rescan covers the commits (Task 2's licenses, this CI
 workflow) that Task 3's scan predates; cats' history is now final.
+
+Then record the rescan (engine worktree): append to the `## familiar-cats`
+section of `docs/ref/2026-08-19-publication-gate-notes.md`:
+
+```markdown
+### gitleaks (final, full history at the CI commit)
+
+[paste summary]
+
+Disposition: [clean — no action / dispositions]
+```
+
+```bash
+git add docs/ref/2026-08-19-publication-gate-notes.md
+git commit -m "docs(publication): record cats final-rescan disposition"
+```
 
 ---
 
@@ -762,13 +809,18 @@ three-line comment with:
 
 - [ ] **Step 6: Sweep `docs/install.md`**
 
+The file's hook and integration examples embed the author's personal clone
+symlink, `~/d/familiar` (13 occurrences at plan time). Neutralize them:
+
 ```bash
-ROOT=$(cd "$(git rev-parse --git-common-dir)/../.."; pwd)
-sed -i 's|$ROOT/familiar|/path/to/familiar|g' docs/install.md
+sed -i 's|~/d/familiar|/path/to/familiar|g' docs/install.md
+grep -c "/path/to/familiar" docs/install.md
 ```
 
-Then add this sentence to the end of the file's opening paragraph (after
-"...add the ones you use."):
+Expected: the count is 13 (or the current occurrence count); a count of 0
+means the sed pattern no longer matches the file and the sweep did nothing —
+stop and inspect. Then add this sentence to the end of the file's opening
+paragraph (after "...add the ones you use."):
 
 ```markdown
 Examples below use `/path/to/familiar`; substitute the absolute path of your
@@ -777,8 +829,14 @@ clone.
 
 - [ ] **Step 7: Verify the sweep and the suite**
 
+Scan for the *real* personal identifiers — the author's home directory, the
+Dropbox mount, and the `~/d/` symlink layout — not generic `/home/` (test
+fixtures legitimately use synthetic homes like `/home/k`):
+
 ```bash
-grep -rn "/home/\|/mnt/\|~/d/" --include="*.js" --include="*.md" --include="*.yaml" --include="*.json" . | grep -v node_modules | grep -v "^\./\.git"
+grep -rn "home/keith\|mnt/ssd\|~/d/" --include="*.js" --include="*.md" --include="*.yaml" --include="*.json" . \
+  | grep -v node_modules \
+  | grep -v "^\./docs/plans/2026-08-19-publication-gate.md"
 [ -d node_modules ] || npm ci
 npm test
 ```
@@ -787,9 +845,12 @@ npm test
 this task the dependency is still the SSH `v0.1.0` ref, which resolves
 locally.)
 
-Expected: grep output contains no machine-specific paths (matches inside
-`docs/ref/2026-08-19-publication-gate-notes.md` quoting scanner output are
-acceptable only if they name no real local path); `npm test` passes
+Expected: the grep prints nothing. This plan document is excluded because its
+only occurrences of those strings are the sweep's own search-and-replace
+expressions above — it contains no actual local-layout reference; if the
+exclusion hides anything else, tighten it rather than widening it. Matches
+inside `docs/ref/2026-08-19-publication-gate-notes.md` quoting scanner output
+are acceptable only if they name no real local path. `npm test` passes
 (771+ tests, the pins tests among them — the comment edits touch no code).
 
 - [ ] **Step 8: Commit**
@@ -979,10 +1040,12 @@ it is closed in Step 5, after the flip and the end-to-end verification.)
 ROOT=$(cd "$(git rev-parse --git-common-dir)/../.."; pwd)
 sha=$(git -C $ROOT/familiar rev-parse main)
 run=""
-until [ -n "$run" ]; do
-  sleep 5
+for i in $(seq 1 60); do
   run=$(gh run list --repo khughitt/familiar --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run" ] && break
+  sleep 5
 done
+[ -n "$run" ] || { echo "no CI run appeared for $sha within 5 minutes — is Actions enabled?"; exit 1; }
 gh run watch --repo khughitt/familiar --exit-status "$run"
 gitleaks detect --source $ROOT/familiar --no-banner
 gh repo edit khughitt/familiar --visibility public --accept-visibility-change-consequences
@@ -991,7 +1054,10 @@ gh repo edit khughitt/familiar --visibility public --accept-visibility-change-co
 The CI wait is pinned to the merge commit's SHA; the rescan covers the full
 merged history including the branch commits Step 1's scan predates. A red
 run or a leak stops the flip: fix on `main` first (a leak also needs its
-disposition appended to the notes before continuing).
+disposition appended to the notes before continuing). Keep this rescan's
+summary — its disposition is recorded on `main` in Step 5, alongside the
+spec-status close (the notes cannot be amended pre-flip without re-running
+CI on yet another commit).
 
 - [ ] **Step 4: End-to-end anonymous verification**
 
@@ -1035,11 +1101,23 @@ to:
 **Status:** implemented; all three repos public, executed per §1's order
 ```
 
+In the same change, record Step 3's final rescan on `main`: append to the
+`## familiar (engine)` section of
+`docs/ref/2026-08-19-publication-gate-notes.md` (primary clone):
+
+```markdown
+### gitleaks (final, full merged history before the flip)
+
+[paste the summary kept from Step 3]
+
+Disposition: [clean — no action / dispositions]
+```
+
 Then:
 
 ```bash
 ROOT=$(cd "$(git rev-parse --git-common-dir)/../.."; pwd)
-git -C $ROOT/familiar add docs/specs/2026-08-19-publication-gate-design.md
+git -C $ROOT/familiar add docs/specs/2026-08-19-publication-gate-design.md docs/ref/2026-08-19-publication-gate-notes.md
 git -C $ROOT/familiar commit -m "docs(publication): record the gate as closed"
 git -C $ROOT/familiar push origin main
 ```
@@ -1052,6 +1130,6 @@ to the human:
 
 | Repo | rights | licenses | sweep | scans | CI | public |
 | --- | --- | --- | --- | --- | --- | --- |
-| familiar-cats | Task 1 | Task 2 | Task 3 | Task 3 | Task 6 | already |
-| familiar-theme | n/a | Task 4 | Task 4 | Task 4 | Task 4 | Task 5 |
-| familiar | n/a | Task 7 | Task 7 | Task 10 | Task 10 | Task 10 |
+| familiar-cats | Task 1 | Task 2 | Task 3 | Task 3 + final Task 6 | Task 6 | already |
+| familiar-theme | n/a | Task 4 | Task 4 | Task 4 + final Task 5 | Task 4 | Task 5 |
+| familiar | n/a | Task 7 | Task 7 | Task 10 Step 1 + final Step 3 (recorded Step 5) | Task 10 | Task 10 |
