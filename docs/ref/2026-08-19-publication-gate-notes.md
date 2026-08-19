@@ -51,14 +51,44 @@ GitHub does not immediately garbage-collect unreferenced commits, and it continu
 to serve them by SHA to anyone who already has it, until (and unless) GitHub runs
 that garbage collection. Verified live, after this "resolution" was first written:
 `gh api repos/khughitt/familiar-cats/commits/<exploration-branch-tip-sha>` on the
-public repo still returns the commit. So removal from the public repo is **not**
-complete — the branch is gone but the commit and its blobs remain retrievable by
-SHA — and this is outstanding. Completing it requires asking GitHub Support to
-garbage-collect the unreachable objects; that request has not yet been made. The
-SHA itself is deliberately not reproduced in this document (it is the one thing
-that makes the still-dangling object easy to find); anyone who needs it to file
-the GitHub Support request can retrieve it from `git log --all` in a clone made
-before this fix, or from `familiar-archive`'s `exploration/` history.
+public repo still returned the commit. So the branch-ref deletion alone did not
+finish the job — the branch was gone but the commit and its blobs remained
+retrievable by SHA to anyone who already had it.
+
+Final resolution: rather than wait on a GitHub Support garbage-collection request,
+the human deleted and recreated the repository outright. Before deleting, a `git
+bundle` backup of `main` was made and `git bundle verify` reported a complete
+history; the remote at that point carried only `refs/heads/main` (the exploration
+ref was already gone, per above), with 0 forks, 0 stars, 0 watchers, 0 issues, 0
+releases, 0 rulesets, and no description or topics, and the repo was not itself a
+fork — so `main` was the only thing that could have been lost. The human then
+deleted the repository; both the repository itself and the exploration branch
+tip's commit returned HTTP 404 immediately afterward. The repository was then
+recreated public and `main` pushed back unchanged: 9 commits, 103 tracked files,
+`refs/heads/main` the only ref, head `0fb0e816fc2729c83897873de40a568851029019`.
+
+The exploration branch tip's commit no longer resolves against the recreated
+repo: querying it by SHA now returns HTTP 422 ("No commit found for SHA") rather
+than the repo-level 404 — a different error because the repository exists again
+but the object does not. A control query against the current `main` head resolves
+normally, confirming the 422 reflects the object's absence rather than a broken
+check. A full-history `gitleaks detect` on the recreated repo reports 9 commits
+scanned and no leaks found: the three `generic-api-key` hits described above lived
+only in the exploration commit and are gone with it. The `validate` CI workflow
+was re-run and passed on the recreated repo's `main` head (run `32314694924`,
+conclusion `success`, log line "pack ok: 12 members"), and an anonymous,
+unauthenticated `familiar theme add` against the recreated repo's public URL
+installed the pack cleanly ("installed theme 'cats' (12 members)"), with
+`LICENSE`, `LICENSE-assets`, `README.md`, and `docs/asset-rights.md` all present
+in the installed copy.
+
+Caveat: GitHub retains a deleted repository for a 90-day restore window before
+permanent purge. Deleting and recreating the repo closes the public-exposure
+problem — the exploration commit no longer resolves for anyone querying the live
+repo — but it is not a guarantee that the underlying bytes are shredded on
+GitHub's infrastructure immediately. No further action is planned or required:
+the GitHub Support garbage-collection route this section previously described as
+outstanding is no longer needed.
 
 Final scan, over the resulting history (timestamp prefixes stripped):
 
@@ -72,13 +102,21 @@ Disposition: initial `generic-api-key` hits were a false positive (per-record
 correlation id, not a credential); separately, the commit that carried them was
 reachable via a live public `exploration` branch (never `main`), and its contents
 were confirmed preserved byte-identical in the private `familiar-archive` repo
-before the branch *ref* was deleted from the public repo. Current public history
-(6 commits, `main` only) scans clean — no leaks found. This is **not** the same as
-the commit being gone from the public repo: GitHub retains unreferenced objects
-and continues to serve them by SHA until it garbage-collects, and a live check
-after the ref deletion confirmed the commit is still fetchable that way. Further
-action is required and outstanding: ask GitHub Support to garbage-collect the
-unreachable objects in `familiar-cats`.
+before the branch *ref* was deleted from the public repo. Ref deletion alone did
+**not** remove the underlying commit and blobs from the public repo — GitHub
+continued to serve them by SHA to anyone who already had it — so the human
+deleted and recreated `familiar-cats` outright, after verifying `main`'s bundle
+backup checked out complete and confirming nothing else on the remote (no forks,
+stars, watchers, issues, releases, or other refs) stood to be lost. The recreated
+repo carries the same `main` (9 commits, 103 tracked files), scans clean end to
+end (9 commits, no leaks found), passes the `validate` CI workflow, and installs
+anonymously via `familiar theme add`; the exploration branch tip's commit now
+returns HTTP 422 ("No commit found for SHA") instead of resolving. GitHub's
+90-day deleted-repo retention window means this is not a guaranteed purge of
+bytes on GitHub's infrastructure, but it does close the public-exposure problem:
+the object is not retrievable by anyone querying the live repo. No further action
+is required — the GitHub Support garbage-collection route previously described
+here as outstanding is no longer needed.
 
 ### npm audit
 
