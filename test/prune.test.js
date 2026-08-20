@@ -40,6 +40,13 @@ test('a record on a RECYCLED pid is pruned — against the REAL isAlive and real
 });
 
 test('the `pid: 1` phantom, which survived every prune there has ever been, is pruned', () => {
-  const initd = { ghost: { sessionId: 'ghost', pid: 1, starttime: 42 } };
+  // NOT A HARDCODED STARTTIME. pid 1's is clock ticks since boot, which makes it a SMALL
+  // INTEGER -- 5 on a workstation -- so any literal picked to mean "wrong" is a value some
+  // machine genuinely has. A CI runner whose init started 42 ticks in judged this ghost
+  // ALIVE and failed the suite: the literal was wrong, not the prune. Derived from the real
+  // value, exactly as the recycled-pid test above derives its own, it cannot collide.
+  const boot = startTimeOf(1);
+  assert.ok(Number.isInteger(boot), 'no starttime for pid 1 — the assertion below proves nothing');
+  const initd = { ghost: { sessionId: 'ghost', pid: 1, starttime: boot + 1 } };
   assert.deepEqual(pruneDead(initd, { isAlive }), {});
 });
