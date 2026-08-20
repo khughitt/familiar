@@ -2,7 +2,7 @@
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { adapterFor, AGENTS } from '../src/adapters/index.js';
@@ -390,6 +390,37 @@ function readStdin() {
   });
 }
 
+// THE WRAPPED COMMAND IS NOT OBLIGED TO READ THE PAYLOAD. It is handed the same stdin
+// claude-code sent us, because a status-line script may want the session id or the context
+// percentage -- but most of them print and exit without ever looking. When the child exits
+// with the payload still undelivered, the parent's write fails with EPIPE.
+//
+// EPIPE HERE IS NOT A FAILURE OF THE COMMAND, and execSync could not say so: it throws on
+// `error` before ever consulting `status`, so an undrained stdin arrived at the boundary
+// looking exactly like a command that had died. The status line went blank and printed
+// `familiar: spawnSync /bin/sh EPIPE` for a command that ran to completion and exited 0.
+// It is a race -- the parent usually wins the write at the few hundred bytes claude-code
+// sends -- which is why it showed as an intermittent CI failure and never once locally.
+//
+// SO THE TWO ARE READ SEPARATELY, which is the whole reason this is spawnSync and not
+// execSync: `error` is the PARENT's IO with the child, `status` is the child's own verdict.
+// EPIPE is the one parent-side error that says nothing about whether the command worked --
+// and it is unambiguous, since the parent writes to no other pipe. Every other error still
+// throws, and a nonzero exit or a killing signal is still a failure, reported through the
+// boundary as one line.
+//
+// The command is quoted into the message rather than interpolated raw: a --with is an
+// arbitrary shell string and may span lines, and the boundary above promises the failure
+// is reported ONCE, ON ONE LINE.
+function runWrapped(command, input) {
+  const result = spawnSync(command, { input, encoding: 'utf8', shell: '/bin/sh' });
+  if (result.error && result.error.code !== 'EPIPE') throw result.error;
+  const named = JSON.stringify(command);
+  if (result.signal) throw new Error(`--with command was killed by ${result.signal}: ${named}`);
+  if (result.status !== 0) throw new Error(`--with command exited ${result.status}: ${named}`);
+  return result.stdout;
+}
+
 // Everything the resolver needs, assembled once. This is the composition root:
 // the only place that knows where files live.
 async function context({ paths = resolvePaths(), config } = {}) {
@@ -661,9 +692,7 @@ async function main({ command, args: rest }) {
     }
 
     const wrapped = values.with ?? null;
-    const rawOutput = wrapped
-      ? execSync(wrapped, { input: stdin, encoding: 'utf8', shell: '/bin/sh' })
-      : null;
+    const rawOutput = wrapped ? runWrapped(wrapped, stdin) : null;
 
     // NO CAT IS NOT A FALLBACK, IT IS THE TRUTH. A session not on the bus has no identity yet
     // — the first hook has not fired, or it was evicted.

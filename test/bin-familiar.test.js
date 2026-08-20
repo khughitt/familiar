@@ -219,6 +219,62 @@ test('statusline with --with and NO intent prints the wrapped output in full —
   assert.doesNotMatch(out.stdout, /\u{10EEEE}/u, 'it invented placeholder cells for a cat that does not exist');
 });
 
+// A WRAPPED COMMAND IS NOT OBLIGED TO READ THE PAYLOAD. Most status-line scripts print
+// and exit; claude-code's JSON is there for the ones that want it. When the command exits
+// without draining stdin, the parent's handoff write fails with EPIPE -- and execSync
+// reported that as the COMMAND having failed. The user's status line went blank and the
+// boundary printed `familiar: spawnSync /bin/sh EPIPE`, for a command that had in fact
+// run to completion, exited 0, and printed everything it meant to.
+//
+// THE PAYLOAD HERE IS DELIBERATELY LARGER THAN A PIPE BUFFER. At the few hundred bytes
+// claude-code actually sends, the same defect is a RACE -- the parent usually wins the
+// write, which is why this only ever surfaced on loaded CI runners, intermittently, and
+// never once locally. A megabyte makes the parent lose the race every time, so this pins
+// the contract instead of sampling it.
+test('statusline --with renders a wrapped command that never reads its stdin', () => {
+  const e = env();
+  const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
+  assert.equal(seed.status, 0, seed.stderr);
+
+  const out = spawnSync(process.execPath, [bin, 'statusline', '--with', `printf 'L1\nL2\n'`], {
+    input: JSON.stringify({ pad: 'x'.repeat(1024 * 1024) }),
+    encoding: 'utf8',
+    env: e,
+  });
+
+  assert.equal(out.stderr, '', 'an undrained stdin was reported as the wrapped command failing');
+  assert.equal(out.status, 0);
+  assert.match(out.stdout, /(^|\n)L1(\n|$)/);
+  assert.match(out.stdout, /(^|\n)L2(\n|$)/);
+});
+
+// The other half of that boundary, and the reason the fix cannot simply swallow the error:
+// a wrapped command that genuinely FAILS must still be reported as failed -- and it must be,
+// even with the same undrained-stdin EPIPE riding along beside its exit status. `statusline`
+// is a COSMETIC command, so the report is one stderr line and an exit-zero protocol kept
+// intact; what must not happen is the failure passing silently, or being named EPIPE.
+test('statusline --with reports a failing wrapped command, not its undrained stdin', () => {
+  const e = env();
+  const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
+  assert.equal(seed.status, 0, seed.stderr);
+
+  // Two lines, so a raw interpolation of the command would break the boundary's
+  // one-line promise -- the failing command is a shell string and may span lines.
+  const failing = 'echo partial\nexit 3';
+  const out = spawnSync(process.execPath, [bin, 'statusline', '--with', failing], {
+    input: JSON.stringify({ pad: 'x'.repeat(1024 * 1024) }),
+    encoding: 'utf8',
+    env: e,
+  });
+
+  assert.equal(out.status, 0, 'a cosmetic command must not fail the tool it decorates');
+  assert.equal(out.stdout, '', 'it printed a status line built from a failed command');
+  const lines = out.stderr.split('\n').filter((line) => line !== '');
+  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${out.stderr}`);
+  assert.equal(lines[0], `familiar: --with command exited 3: ${JSON.stringify(failing)}`);
+  assert.doesNotMatch(out.stderr, /EPIPE/, 'the stdin handoff was reported instead of the real failure');
+});
+
 test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', () => {
   const e = env();
   mkdirSync(e.FAMILIAR_CONFIG_DIR, { recursive: true });
