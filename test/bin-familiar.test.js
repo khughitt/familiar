@@ -528,7 +528,7 @@ function codexProjectSyncFixture(t) {
 }
 
 test('pets --sync-projects creates a managed project config and excludes it locally', (t) => {
-  const { runEnv, project } = codexProjectSyncFixture(t);
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
     encoding: 'utf8', env: runEnv,
   });
@@ -541,7 +541,10 @@ test('pets --sync-projects creates a managed project config and excludes it loca
       + '[tui]\npet = "custom:familiar-pip"\n',
   );
   assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
-  assert.match(result.stdout, /synced 1 project pet config/);
+  assert.equal(
+    result.stdout,
+    `wrote 1 pets to ${join(codexHome, 'pets')}\nsynced 1 project pet config\n`,
+  );
 });
 
 test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {

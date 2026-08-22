@@ -799,13 +799,15 @@ async function main({ command, args: rest }) {
 
     if (projectSync) applyCodexProjectSync(projectSync);
 
-    const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
-    process.stdout.write(
-      `wrote ${written} pets to ${out}\n` +
-      'enable one with:  [tui] pet = "custom:familiar-<member>"\n' +
-      `user-wide: ${userConfig}\n` +
-      'project (trusted): <project>/.codex/config.toml\n',
-    );
+    process.stdout.write(`wrote ${written} pets to ${out}\n`);
+    if (!projectSync) {
+      const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
+      process.stdout.write(
+        'enable one with:  [tui] pet = "custom:familiar-<member>"\n' +
+        `user-wide: ${userConfig}\n` +
+        'project (trusted): <project>/.codex/config.toml\n',
+      );
+    }
     if (projectSync) {
       process.stdout.write(
         `synced ${projectSync.configs.length} project pet config`
