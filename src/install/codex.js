@@ -1,5 +1,5 @@
 import {
-  appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync,
+  appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, unlinkSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -27,8 +27,8 @@ function git(root, args) {
   return result;
 }
 
-function tracked(root) {
-  const result = git(root, ['ls-files', '--error-unmatch', '--', EXCLUDE]);
+function tracked(root, path = EXCLUDE) {
+  const result = git(root, ['ls-files', '--error-unmatch', '--', path]);
   if (result.status === 0) return true;
   if (result.status === 1) return false;
   throw new Error(`git ls-files failed in ${root}: ${result.stderr.trim()}`);
@@ -52,15 +52,21 @@ const lstatIfPresent = (path) => {
   }
 };
 
-function assertConfigTarget(root, target) {
+function assertConfigTarget(root, target, allowEmptyMarker = false) {
   const configDir = join(root, '.codex');
   const dir = lstatIfPresent(configDir);
   if (dir?.isSymbolicLink()) throw new Error(`refusing symlinked Codex config directory ${configDir}`);
-  if (dir && !dir.isDirectory()) throw new Error(`Codex config path is not a directory: ${configDir}`);
+  const emptyMarker = Boolean(dir?.isFile() && dir.size === 0);
+  if (dir && !dir.isDirectory() && !(allowEmptyMarker && emptyMarker)) {
+    throw new Error(`Codex config path is not a directory: ${configDir}`);
+  }
 
-  const file = lstatIfPresent(target);
-  if (file?.isSymbolicLink()) throw new Error(`refusing symlinked project config ${target}`);
-  if (file && !file.isFile()) throw new Error(`Codex project config is not a regular file: ${target}`);
+  if (!emptyMarker) {
+    const file = lstatIfPresent(target);
+    if (file?.isSymbolicLink()) throw new Error(`refusing symlinked project config ${target}`);
+    if (file && !file.isFile()) throw new Error(`Codex project config is not a regular file: ${target}`);
+  }
+  return emptyMarker;
 }
 
 function assertExcludeTarget(path) {
@@ -96,7 +102,9 @@ export async function planCodexProjectSync({ catalog, pack }) {
     if (seen.has(target)) continue;
     seen.add(target);
     const isTracked = repoRoot ? tracked(root) : false;
-    if (!isTracked) assertConfigTarget(root, target);
+    const replaceEmptyMarker = !isTracked && assertConfigTarget(
+      root, target, !repoRoot || !tracked(root, '.codex'),
+    );
 
     const projectKey = projectKeyFor({ remote, repoRoot, cwd: path });
     const project = displayProject({ repoRoot, cwd: path });
@@ -115,7 +123,14 @@ export async function planCodexProjectSync({ catalog, pack }) {
       conflicts.push(target);
       continue;
     }
-    configs.push({ root, path: target, before: current, text: configText(identity.member) });
+    configs.push({
+      root,
+      path: target,
+      before: current,
+      text: configText(identity.member),
+      replaceEmptyMarker,
+      gitBacked: Boolean(repoRoot),
+    });
 
     if (repoRoot) {
       const path = excludePath(root);
@@ -132,8 +147,14 @@ export async function planCodexProjectSync({ catalog, pack }) {
 }
 
 export function applyCodexProjectSync(plan) {
-  const assertUnchanged = ({ root, path, before }) => {
-    assertConfigTarget(root, path);
+  const assertUnchanged = ({ root, path, before, replaceEmptyMarker, gitBacked }) => {
+    if (gitBacked && (tracked(root) || (replaceEmptyMarker && tracked(root, '.codex')))) {
+      throw new Error(`project config changed after preflight: ${path}`);
+    }
+    const currentEmptyMarker = assertConfigTarget(root, path, true);
+    if (currentEmptyMarker !== replaceEmptyMarker) {
+      throw new Error(`project config changed after preflight: ${path}`);
+    }
     if (readIfPresent(path) !== before) {
       throw new Error(`project config changed after preflight: ${path}`);
     }
@@ -152,6 +173,7 @@ export function applyCodexProjectSync(plan) {
   for (const config of plan.configs) {
     assertUnchanged(config);
     const { path, text } = config;
+    if (config.replaceEmptyMarker) unlinkSync(dirname(path));
     mkdirSync(dirname(path), { recursive: true });
     writeAtomicSync(path, text);
   }

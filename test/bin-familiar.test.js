@@ -544,6 +544,21 @@ test('pets --sync-projects creates a managed project config and excludes it loca
   assert.match(result.stdout, /synced 1 project pet config/);
 });
 
+test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  writeFileSync(join(project, '.codex'), '');
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
+    /pet = "custom:familiar-pip"/,
+  );
+});
+
 test('pets --sync-projects replaces only its managed config and does not duplicate the exclusion', (t) => {
   const { runEnv, project } = codexProjectSyncFixture(t);
   const first = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
@@ -674,6 +689,23 @@ test('project sync refuses a config created after preflight before changing any 
 
   assert.throws(() => applyCodexProjectSync(plan), /project config changed after preflight/);
   assert.equal(readFileSync(configPath, 'utf8'), '[tui]\npet = "custom:concurrent"\n');
+  assert.equal(readFileSync(excludePath, 'utf8'), originalExclude);
+});
+
+test('project sync refuses an empty marker tracked after preflight', async (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const marker = join(project, '.codex');
+  const excludePath = join(project, '.git', 'info', 'exclude');
+  writeFileSync(marker, '');
+  const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
+  const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
+  const plan = await planCodexProjectSync({ catalog, pack });
+  const originalExclude = readFileSync(excludePath, 'utf8');
+  const added = spawnSync('git', ['add', '-f', '.codex'], { cwd: project, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+
+  assert.throws(() => applyCodexProjectSync(plan), /project config changed after preflight/);
+  assert.equal(readFileSync(marker, 'utf8'), '');
   assert.equal(readFileSync(excludePath, 'utf8'), originalExclude);
 });
 
