@@ -586,6 +586,27 @@ test('pets --sync-projects leaves a tracked project config untouched and prints 
   assert.doesNotMatch(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
 });
 
+test('pets --sync-projects leaves a tracked config symlink untouched as project convention', (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const configDir = join(project, '.codex');
+  const configPath = join(configDir, 'config.toml');
+  const target = join(project, 'tracked-codex.toml');
+  const original = '[features]\njs_repl = true\n';
+  mkdirSync(configDir);
+  writeFileSync(target, original);
+  symlinkSync('../tracked-codex.toml', configPath);
+  const added = spawnSync('git', ['add', '-f', '.codex/config.toml'], { cwd: project, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(target, 'utf8'), original);
+  assert.match(result.stdout, new RegExp(`tracked project config left unchanged: ${configPath}`));
+  assert.doesNotMatch(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
+});
+
 test('pets --sync-projects refuses an unmanaged untracked config before writing pets', (t) => {
   const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
   const configDir = join(project, '.codex');

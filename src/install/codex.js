@@ -95,7 +95,8 @@ export async function planCodexProjectSync({ catalog, pack }) {
     const target = join(root, EXCLUDE);
     if (seen.has(target)) continue;
     seen.add(target);
-    assertConfigTarget(root, target);
+    const isTracked = repoRoot ? tracked(root) : false;
+    if (!isTracked) assertConfigTarget(root, target);
 
     const projectKey = projectKeyFor({ remote, repoRoot, cwd: path });
     const project = displayProject({ repoRoot, cwd: path });
@@ -104,7 +105,7 @@ export async function planCodexProjectSync({ catalog, pack }) {
     });
     const wanted = selectionText(identity.member);
 
-    if (repoRoot && tracked(root)) {
+    if (isTracked) {
       manual.push({ path: target, setting: wanted });
       continue;
     }
