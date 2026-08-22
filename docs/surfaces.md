@@ -35,6 +35,40 @@ member and supplies the full-colour spritesheet; Codex drives the visible pet fr
 its own state. Familiar's Codex hooks still publish lifecycle state for the shared
 intent, but they do not draw the pet.
 
+### Project-specific selection
+
+The earlier global-only limitation no longer applies. Codex resolves `[tui] pet`
+through its normal configuration layers, so a trusted project's
+`.codex/config.toml` overrides the user-wide `~/.codex/config.toml`. This was first
+measured on Codex 0.146 and reproduced on 0.149 on 2026-08-22 with an app-server
+`config/read` probe: the effective value was `custom:project-specific`, and its
+reported origin was the project `.codex` directory.
+
+Familiar already writes one stable `custom:familiar-<member>` pet id per theme
+member. `familiar whoami <project>` reports the assigned member; placing that id in
+the project's config is sufficient. Selection is read at session startup rather
+than changed dynamically, and the project must be trusted. A separate Claude-style
+renderer is therefore unnecessary.
+
+Official OpenAI documentation now covers [terminal pets][codex-pets] and confirms
+that trusted projects can supply [project-scoped configuration][codex-config], but
+the configuration reference still omits `tui.pet`. The focused documentation issue
+[openai/codex#36758][codex-project-pet-issue] remains open with no comments or
+updates since 2026-08-03.
+
+### Upstream activity since 2026-08-03
+
+- No functional terminal-pet code changed through 2026-08-22. The only merged PR
+  touching `codex-rs/tui/src/pets` was [#39028][codex-pet-test-cache], which only
+  caches a test fixture.
+- The terminal lifecycle bug [#33458][codex-pet-lifetime] remains open with no
+  activity after Familiar's 2026-08-03 reproduction. The newer desktop report
+  [#38998][codex-desktop-pet-lifetime] describes the same visible symptom—returning
+  to idle while work continues—but does not affect project selection.
+- The custom-animation proposal [#20863][codex-pet-animation] remains open. Its
+  August discussion adds evidence for richer state playback and more than eight
+  frames per state; it does not add or remove project-scoped pets.
+
 ## OpenCode
 
 OpenCode uses two plugins. Its server plugin turns OpenCode events into Familiar
@@ -65,3 +99,11 @@ The current product is the full-colour graphics and the Niri workspace and deskt
 integrations above. The 2026-08-08 retirement design records why earlier
 project-identity surfaces were removed; it is historical decision context, not setup
 guidance.
+
+[codex-config]: https://learn.chatgpt.com/docs/config-file/config-reference
+[codex-desktop-pet-lifetime]: https://github.com/openai/codex/issues/38998
+[codex-pet-animation]: https://github.com/openai/codex/issues/20863
+[codex-pet-lifetime]: https://github.com/openai/codex/issues/33458
+[codex-pet-test-cache]: https://github.com/openai/codex/pull/39028
+[codex-pets]: https://learn.chatgpt.com/docs/pets
+[codex-project-pet-issue]: https://github.com/openai/codex/issues/36758

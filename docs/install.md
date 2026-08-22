@@ -80,12 +80,28 @@ Install the current theme's pets:
 familiar install pets
 ```
 
-Choose a member in `~/.codex/config.toml`:
+Choose a user-wide default in `~/.codex/config.toml`:
 
 ```toml
 [tui]
 pet = "custom:familiar-ginger"
 ```
+
+For a project-specific familiar, first find the member Familiar assigns:
+
+```bash
+familiar whoami /path/to/project
+```
+
+Then put that member in the trusted project's `.codex/config.toml`:
+
+```toml
+[tui]
+pet = "custom:familiar-<member>"
+```
+
+Codex reads the project override when the session starts. It ignores project
+configuration until the project is trusted.
 
 Copy or merge `integrations/codex/hooks.json` into `$CODEX_HOME/hooks.json` so
 Codex lifecycle events reach Familiar:
