@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,9 +15,10 @@ import { adapterFor } from '../src/adapters/index.js';
 import { projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { applyHookEvent } from '../src/bus/transaction.js';
 import { parseIdentities } from '../src/bus/pins.js';
+import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER } from '../src/render/term/placeholder.js';
-import { STATES, parseThemePack } from 'familiar-theme';
+import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
   appendHookTrace, makePrepareSprites, reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar';
@@ -620,6 +622,52 @@ test('pets --sync-projects reports and skips an identity path that is not presen
   assert.match(result.stdout, new RegExp(`skipped missing identity path: ${missing}`));
   assert.equal(existsSync(join(missing, '.codex', 'config.toml')), false);
   assert.equal(existsSync(join(codexHome, 'pets', 'familiar-pip', 'pet.json')), true);
+});
+
+test('pets --sync-projects refuses a symlinked .codex directory before writing outside the project', (t) => {
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
+  const outside = join(project, '..', 'outside');
+  mkdirSync(outside);
+  symlinkSync(outside, join(project, '.codex'), 'dir');
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /refusing symlinked Codex config directory/);
+  assert.equal(existsSync(join(outside, 'config.toml')), false);
+  assert.equal(existsSync(join(codexHome, 'pets')), false);
+});
+
+test('project sync refuses a config created after preflight before changing any project metadata', async (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
+  const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
+  const plan = await planCodexProjectSync({ catalog, pack });
+  const configDir = join(project, '.codex');
+  const configPath = join(configDir, 'config.toml');
+  const excludePath = join(project, '.git', 'info', 'exclude');
+  const originalExclude = readFileSync(excludePath, 'utf8');
+  mkdirSync(configDir);
+  writeFileSync(configPath, '[tui]\npet = "custom:concurrent"\n');
+
+  assert.throws(() => applyCodexProjectSync(plan), /project config changed after preflight/);
+  assert.equal(readFileSync(configPath, 'utf8'), '[tui]\npet = "custom:concurrent"\n');
+  assert.equal(readFileSync(excludePath, 'utf8'), originalExclude);
+});
+
+test('project sync preserves an exclusion edited after preflight', async (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
+  const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
+  const plan = await planCodexProjectSync({ catalog, pack });
+  const excludePath = join(project, '.git', 'info', 'exclude');
+  writeFileSync(excludePath, `${readFileSync(excludePath, 'utf8')}# concurrent edit\n`);
+
+  applyCodexProjectSync(plan);
+  const exclude = readFileSync(excludePath, 'utf8');
+  assert.match(exclude, /^# concurrent edit$/m);
+  assert.equal(exclude.split('\n').filter((line) => line === '.codex/config.toml').length, 1);
 });
 
 test('pets with motion off writes no install output and mutates neither pets nor config', () => {

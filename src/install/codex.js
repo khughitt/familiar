@@ -1,4 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -42,10 +44,30 @@ function excludePath(root) {
 
 const readIfPresent = (path) => existsSync(path) ? readFileSync(path, 'utf8') : null;
 
-const withExclude = (text) => {
-  if (text.split(/\r?\n/).includes(EXCLUDE)) return text;
-  return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${EXCLUDE}\n`;
+const lstatIfPresent = (path) => {
+  try { return lstatSync(path); }
+  catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
 };
+
+function assertConfigTarget(root, target) {
+  const configDir = join(root, '.codex');
+  const dir = lstatIfPresent(configDir);
+  if (dir?.isSymbolicLink()) throw new Error(`refusing symlinked Codex config directory ${configDir}`);
+  if (dir && !dir.isDirectory()) throw new Error(`Codex config path is not a directory: ${configDir}`);
+
+  const file = lstatIfPresent(target);
+  if (file?.isSymbolicLink()) throw new Error(`refusing symlinked project config ${target}`);
+  if (file && !file.isFile()) throw new Error(`Codex project config is not a regular file: ${target}`);
+}
+
+function assertExcludeTarget(path) {
+  const file = lstatIfPresent(path);
+  if (file?.isSymbolicLink()) throw new Error(`refusing symlinked Git exclude file ${path}`);
+  if (file && !file.isFile()) throw new Error(`Git exclude path is not a regular file: ${path}`);
+}
 
 const selectionText = (member) => `[tui]\npet = "custom:familiar-${member}"\n`;
 const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member)}`;
@@ -56,6 +78,7 @@ export async function planCodexProjectSync({ catalog, pack }) {
   const manual = [];
   const missing = [];
   const seen = new Set();
+  const seenExcludes = new Set();
   const conflicts = [];
 
   for (const pin of catalog.identities) {
@@ -72,6 +95,7 @@ export async function planCodexProjectSync({ catalog, pack }) {
     const target = join(root, EXCLUDE);
     if (seen.has(target)) continue;
     seen.add(target);
+    assertConfigTarget(root, target);
 
     const projectKey = projectKeyFor({ remote, repoRoot, cwd: path });
     const project = displayProject({ repoRoot, cwd: path });
@@ -90,13 +114,13 @@ export async function planCodexProjectSync({ catalog, pack }) {
       conflicts.push(target);
       continue;
     }
-    configs.push({ path: target, text: configText(identity.member) });
+    configs.push({ root, path: target, before: current, text: configText(identity.member) });
 
     if (repoRoot) {
       const path = excludePath(root);
-      const currentExclude = readIfPresent(path) ?? '';
-      const text = withExclude(currentExclude);
-      if (text !== currentExclude) excludes.push({ path, text });
+      assertExcludeTarget(path);
+      if (!seenExcludes.has(path)) excludes.push({ path });
+      seenExcludes.add(path);
     }
   }
 
@@ -107,11 +131,26 @@ export async function planCodexProjectSync({ catalog, pack }) {
 }
 
 export function applyCodexProjectSync(plan) {
-  for (const { path, text } of plan.configs) {
+  const assertUnchanged = ({ root, path, before }) => {
+    assertConfigTarget(root, path);
+    if (readIfPresent(path) !== before) {
+      throw new Error(`project config changed after preflight: ${path}`);
+    }
+  };
+  for (const config of plan.configs) assertUnchanged(config);
+
+  for (const { path } of plan.excludes) {
+    assertExcludeTarget(path);
     mkdirSync(dirname(path), { recursive: true });
-    writeAtomicSync(path, text);
+    const current = readIfPresent(path) ?? '';
+    if (!current.split(/\r?\n/).includes(EXCLUDE)) {
+      appendFileSync(path, `${current === '' || current.endsWith('\n') ? '' : '\n'}${EXCLUDE}\n`);
+    }
   }
-  for (const { path, text } of plan.excludes) {
+
+  for (const config of plan.configs) {
+    assertUnchanged(config);
+    const { path, text } = config;
     mkdirSync(dirname(path), { recursive: true });
     writeAtomicSync(path, text);
   }
