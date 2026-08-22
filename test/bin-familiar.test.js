@@ -479,11 +479,147 @@ test('install pets --help documents the full, reduced, and off policies without 
   });
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
-  assert.match(result.stdout, /^  familiar install pets \[--out DIR\]$/m);
+  assert.match(result.stdout, /^  familiar install pets \[--out DIR\] \[--sync-projects\]$/m);
+  assert.match(result.stdout, /--sync-projects.*identities\.yaml/);
   assert.match(result.stdout, /full.*canonical animation clips/);
   assert.match(result.stdout, /reduced.*static state roots/);
   assert.match(result.stdout, /off.*refuses installation/);
-  assert.match(result.stdout, /does not change.*\[tui\] pet/);
+  assert.match(result.stdout, /Without --sync-projects.*does not change.*\[tui\] pet/);
+});
+
+test('pets refuses --sync-projects with --out before loading config or writing output', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-codex-out-'));
+  const out = join(root, 'pets');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync(
+    process.execPath,
+    [bin, 'install', 'pets', '--sync-projects', '--out', out],
+    { encoding: 'utf8', env: env() },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /--sync-projects cannot be combined with --out/);
+  assert.match(result.stderr, /familiar install pets --help/);
+  assert.equal(existsSync(out), false);
+});
+
+function codexProjectSyncFixture(t) {
+  const runEnv = env();
+  const root = mkdtempSync(join(tmpdir(), 'familiar-codex-sync-'));
+  const project = join(root, 'project');
+  const codexHome = join(root, 'codex-home');
+  mkdirSync(project);
+  mkdirSync(codexHome);
+  const initialized = spawnSync('git', ['init', '-q'], { cwd: project, encoding: 'utf8' });
+  assert.equal(initialized.status, 0, initialized.stderr);
+
+  runEnv.CODEX_HOME = codexHome;
+  mkdirSync(runEnv.FAMILIAR_CONFIG_DIR, { recursive: true });
+  writeFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: full\n');
+  writeFileSync(
+    join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
+    `identities:\n  - path: ${project}\n    slot: 0\n`,
+  );
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return { runEnv, project, codexHome };
+}
+
+test('pets --sync-projects creates a managed project config and excludes it locally', (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(
+    readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
+    '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
+      + '[tui]\npet = "custom:familiar-pip"\n',
+  );
+  assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
+  assert.match(result.stdout, /synced 1 project pet config/);
+});
+
+test('pets --sync-projects replaces only its managed config and does not duplicate the exclusion', (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const first = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(first.status, 0, first.stderr);
+  writeFileSync(
+    join(project, '.codex', 'config.toml'),
+    '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
+      + '[tui]\npet = "custom:familiar-old"\n',
+  );
+
+  const second = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-pip/);
+  const exclusions = readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8')
+    .split('\n').filter((line) => line === '.codex/config.toml');
+  assert.equal(exclusions.length, 1);
+});
+
+test('pets --sync-projects leaves a tracked project config untouched and prints the required setting', (t) => {
+  const { runEnv, project } = codexProjectSyncFixture(t);
+  const configDir = join(project, '.codex');
+  const configPath = join(configDir, 'config.toml');
+  const original = '[features]\njs_repl = true\n';
+  mkdirSync(configDir);
+  writeFileSync(configPath, original);
+  const added = spawnSync('git', ['add', '-f', '.codex/config.toml'], { cwd: project, encoding: 'utf8' });
+  assert.equal(added.status, 0, added.stderr);
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(configPath, 'utf8'), original);
+  assert.match(result.stdout, new RegExp(`tracked project config left unchanged: ${configPath}`));
+  assert.match(result.stdout, /add manually:\n\[tui\]\npet = "custom:familiar-pip"/);
+  assert.doesNotMatch(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
+});
+
+test('pets --sync-projects refuses an unmanaged untracked config before writing pets', (t) => {
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
+  const configDir = join(project, '.codex');
+  const configPath = join(configDir, 'config.toml');
+  const original = '[tui]\npet = "custom:mine"\n';
+  mkdirSync(configDir);
+  writeFileSync(configPath, original);
+  const excludePath = join(project, '.git', 'info', 'exclude');
+  const originalExclude = readFileSync(excludePath, 'utf8');
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, new RegExp(`refusing unmanaged project config ${configPath}`));
+  assert.equal(readFileSync(configPath, 'utf8'), original);
+  assert.equal(readFileSync(excludePath, 'utf8'), originalExclude);
+  assert.equal(existsSync(join(codexHome, 'pets')), false);
+});
+
+test('pets --sync-projects reports and skips an identity path that is not present', (t) => {
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
+  const missing = join(project, 'not-cloned');
+  writeFileSync(
+    join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
+    `identities:\n  - path: ${missing}\n    slot: 0\n`,
+  );
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`skipped missing identity path: ${missing}`));
+  assert.equal(existsSync(join(missing, '.codex', 'config.toml')), false);
+  assert.equal(existsSync(join(codexHome, 'pets', 'familiar-pip', 'pet.json')), true);
 });
 
 test('pets with motion off writes no install output and mutates neither pets nor config', () => {

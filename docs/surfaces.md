@@ -44,11 +44,14 @@ measured on Codex 0.146 and reproduced on 0.149 on 2026-08-22 with an app-server
 `config/read` probe: the effective value was `custom:project-specific`, and its
 reported origin was the project `.codex` directory.
 
-Familiar already writes one stable `custom:familiar-<member>` pet id per theme
-member. `familiar whoami <project>` reports the assigned member; placing that id in
-the project's config is sufficient. Selection is read at session startup rather
-than changed dynamically, and the project must be trusted. A separate Claude-style
-renderer is therefore unnecessary.
+Familiar writes one stable `custom:familiar-<member>` pet id per theme member.
+`familiar install pets --sync-projects` installs that roster and materializes every
+`path:` identity pin into a Familiar-managed project config, excluded locally from
+Git. Tracked project configs remain project-owned and receive a printed manual
+setting instead. `familiar whoami <project>` reports the assigned member for manual
+configuration. Selection is read at session startup rather than changed
+dynamically, and the project must be trusted. A separate Claude-style renderer is
+therefore unnecessary.
 
 Official OpenAI documentation now covers [terminal pets][codex-pets] and confirms
 that trusted projects can supply [project-scoped configuration][codex-config], but

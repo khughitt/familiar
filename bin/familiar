@@ -11,6 +11,7 @@ import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
 import { addTheme } from '../src/theme/add.js';
+import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
@@ -289,20 +290,22 @@ Examples:
   'install pets': `Compile the active theme into Codex native pets.
 
 Usage:
-  familiar install pets [--out DIR]
+  familiar install pets [--out DIR] [--sync-projects]
 
 Options:
-  --out DIR        Write pets to DIR
+  --out DIR          Write pets to DIR
+  --sync-projects    Sync path entries from identities.yaml into project Codex configs
 
 Motion policies:
   full             Duration-sample canonical animation clips where available
   reduced          Install static state roots in every occupied cell
   off              refuses installation and writes no pet files
 
-This command does not change the user-owned [tui] pet setting; select with /pets.
+Without --sync-projects, this command does not change the user-owned [tui] pet setting.
 
 Examples:
   familiar install pets
+  familiar install pets --sync-projects
   familiar install pets --out ./pets
 `,
   hook: `Record an agent lifecycle event.
@@ -731,16 +734,23 @@ async function main({ command, args: rest }) {
     process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
   } else if (command === 'install pets') {
     const { values } = parseLeaf(rest, {
-      options: { out: { type: 'string' } }, help: 'install pets',
+      options: {
+        out: { type: 'string' },
+        'sync-projects': { type: 'boolean' },
+      },
+      help: 'install pets',
     });
+    if (values.out !== undefined && values['sync-projects']) {
+      throw usageError('--sync-projects cannot be combined with --out', 'install pets');
+    }
     // AN OFFLINE GENERATOR THAT HAPPENS TO LIVE IN THE CLI, like the compositor integration's own
     // rule generator.
     // It runs once, at install; nothing on the hook path imports it.
     //
     // ONE PET PER MEMBER. Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
     // user-wide default and an override in a trusted project's `.codex/config.toml` can choose
-    // different members. We write only the roster; config remains user-owned and project selection
-    // remains an explicit edit.
+    // different members. Config remains user-owned unless --sync-projects explicitly opts into
+    // Familiar-managed local files; tracked project config is never rewritten.
     const paths = resolvePaths();
     const config = await loadConfig({ paths });
     if (config.motionPolicy === 'off') {
@@ -753,6 +763,9 @@ async function main({ command, args: rest }) {
       : join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets');
 
     const ctx = await context({ paths, config });
+    const projectSync = values['sync-projects']
+      ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack })
+      : null;
 
     let written = 0;
     for (const [memberId, member] of ctx.pack.members) {
@@ -784,6 +797,8 @@ async function main({ command, args: rest }) {
       written++;
     }
 
+    if (projectSync) applyCodexProjectSync(projectSync);
+
     const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
     process.stdout.write(
       `wrote ${written} pets to ${out}\n` +
@@ -791,6 +806,18 @@ async function main({ command, args: rest }) {
       `user-wide: ${userConfig}\n` +
       'project (trusted): <project>/.codex/config.toml\n',
     );
+    if (projectSync) {
+      process.stdout.write(
+        `synced ${projectSync.configs.length} project pet config`
+        + `${projectSync.configs.length === 1 ? '' : 's'}\n`,
+      );
+      for (const { path, setting } of projectSync.manual) {
+        process.stdout.write(`tracked project config left unchanged: ${path}\nadd manually:\n${setting}`);
+      }
+      for (const path of projectSync.missing) {
+        process.stdout.write(`skipped missing identity path: ${path}\n`);
+      }
+    }
   } else if (command === 'reap') {
     parseLeaf(rest, { help: 'reap' });
     const ctx = await context();

@@ -74,11 +74,22 @@ because it cannot verify that the user's passthrough configuration is safe.
 
 ## 3. Codex pets
 
-Install the current theme's pets:
+Install the current theme's pets and sync every `path:` entry in
+`~/.config/familiar/identities.yaml` into its project:
 
 ```bash
-familiar install pets
+familiar install pets --sync-projects
 ```
+
+Familiar creates a small managed `.codex/config.toml` in each project and adds
+that path to the repository's local `.git/info/exclude`. Re-running the command
+updates those managed files when the active theme or identity assignments change.
+Missing project paths are reported and skipped.
+
+Familiar never rewrites an existing tracked `.codex/config.toml`; it prints the
+exact setting for you to review and add manually. It also refuses an existing
+untracked config that it did not create. Run `familiar install pets` without the
+flag when you only want to compile the pet assets.
 
 Choose a user-wide default in `~/.codex/config.toml`:
 
@@ -87,7 +98,7 @@ Choose a user-wide default in `~/.codex/config.toml`:
 pet = "custom:familiar-ginger"
 ```
 
-For a project-specific familiar, first find the member Familiar assigns:
+For a manual project-specific selection, first find the member Familiar assigns:
 
 ```bash
 familiar whoami /path/to/project
@@ -101,7 +112,8 @@ pet = "custom:familiar-<member>"
 ```
 
 Codex reads the project override when the session starts. It ignores project
-configuration until the project is trusted.
+configuration until the project is trusted. Restart existing Codex sessions after
+syncing.
 
 Copy or merge `integrations/codex/hooks.json` into `$CODEX_HOME/hooks.json` so
 Codex lifecycle events reach Familiar:
