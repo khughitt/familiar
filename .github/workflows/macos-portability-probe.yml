@@ -82,13 +82,28 @@ jobs:
             echo "--- $agent executable ---"
             ls -l "$bin"
             file "$bin"
-            script -q "$RUNNER_TEMP/$agent.typescript" "$bin" >/dev/null 2>&1 &
+            tail -f /dev/null | script -q "$RUNNER_TEMP/$agent.typescript" \
+              /usr/bin/env TERM=xterm-kitty COLORTERM=truecolor "$bin" >/dev/null 2>&1 &
             script_pid=$!
             sleep 3
+            echo "--- $agent transcript ---"
+            sed -n '1,20p' "$RUNNER_TEMP/$agent.typescript" || true
+            pids="$script_pid"
+            frontier="$script_pid"
+            for _depth in 1 2 3 4; do
+              next=''
+              for parent in $frontier; do
+                children=$(pgrep -P "$parent" || true)
+                next="$next $children"
+              done
+              [ -n "${next// /}" ] || break
+              pids="$pids $next"
+              frontier="$next"
+            done
             echo "--- $agent process rows: comm last ---"
-            ps -axo pid=,ppid=,tty=,lstart=,comm= | grep -E "($agent|script)" || true
+            for pid in $pids; do ps -p "$pid" -o pid=,ppid=,tty=,lstart=,comm= || true; done
             echo "--- $agent process rows: command last ---"
-            ps -axo pid=,ppid=,tty=,lstart=,command= | grep -E "($agent|script)" || true
+            for pid in $pids; do ps -p "$pid" -o pid=,ppid=,tty=,lstart=,command= || true; done
             kill "$script_pid" 2>/dev/null || true
             pkill -f "$bin" 2>/dev/null || true
             wait "$script_pid" 2>/dev/null || true
