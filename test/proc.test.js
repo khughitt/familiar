@@ -4,11 +4,13 @@ import {
   createProcessOps,
   parseDarwinRow,
   normalizeDarwinTty,
+  runDarwinPs,
   parseStat,
-  ancestors,
   isAlive,
   startTimeOf,
 } from '../src/bus/proc.js';
+
+const requiresLinuxProc = process.platform !== 'linux' ? 'requires Linux /proc' : false;
 
 // A real /proc/<pid>/stat line, fields 3..22 in order, so field 22 (starttime)
 // lands where the parser looks for it. Anything shorter is a truncated fixture,
@@ -64,7 +66,14 @@ test('Darwin rows reject malformed identities, dates, and commands', () => {
   for (const row of [
     '0 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
     '20 -1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+    '9007199254740992 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+    '20 9007199254740992 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
     '20 1 ?? not-a-date /usr/bin/node',
+    '20 1 ?? Tue Feb 31 23:24:46 2026 /usr/bin/node',
+    '20 1 ?? Sat Aug 22 24:24:46 2026 /usr/bin/node',
+    '20 1 ?? Sat Aug 22 23:60:46 2026 /usr/bin/node',
+    '20 1 ?? Sat Aug 22 23:24:60 2026 /usr/bin/node',
+    '20 1 ?? Sun Aug 22 23:24:46 2026 /usr/bin/node',
     '20 1 ?? Sat Aug 22 23:24:46 2026    ',
   ]) {
     assert.throws(() => parseDarwinRow(row), /Darwin ps: malformed row/);
@@ -119,13 +128,33 @@ test('Darwin liveness treats EPERM as existing and other kill errors as absent',
   assert.equal(absent.isAlive(20, { starttime }), false);
 });
 
-test('Darwin ps failures stay named and unsupported platforms fail explicitly', () => {
-  const ops = createProcessOps({
-    platform: 'darwin',
-    runPs: () => { throw new Error('Darwin ps: exited with status 1'); },
-  });
-  assert.throws(() => ops.recordOf(1), /Darwin ps: exited with status 1/);
+test('Darwin empty ps output and unsupported platforms fail explicitly', () => {
+  const ops = createProcessOps({ platform: 'darwin', runPs: () => '' });
+  assert.throws(() => ops.recordOf(1), /Darwin ps: malformed output/);
   assert.throws(() => createProcessOps({ platform: 'win32' }), /unsupported process platform: win32/);
+});
+
+test('Darwin ps maps spawn, signal, and nonzero failures to named errors', () => {
+  for (const [result, message] of [
+    [{ error: new Error('missing') }, /Darwin ps: spawn failed: missing/],
+    [{ signal: 'SIGKILL' }, /Darwin ps: terminated by signal SIGKILL/],
+    [{ signal: null, status: 7 }, /Darwin ps: exited with status 7/],
+  ]) {
+    assert.throws(() => runDarwinPs([], () => result), message);
+  }
+});
+
+test('Darwin ps uses the fixed binary, arguments, locale, and returns stdout', () => {
+  let call;
+  const output = runDarwinPs(['-axo', 'fields'], (...args) => {
+    call = args;
+    return { signal: null, status: 0, stdout: 'rows' };
+  });
+  assert.equal(output, 'rows');
+  assert.equal(call[0], '/bin/ps');
+  assert.deepEqual(call[1], ['-axo', 'fields']);
+  assert.equal(call[2].encoding, 'utf8');
+  assert.equal(call[2].env.LC_ALL, 'C');
 });
 
 test('parses starttime — field 22, the thing that makes a pid an identity', () => {
@@ -147,15 +176,17 @@ test('walks the ancestor chain, self first, and stops at pid 1', () => {
     300: '300 (claude) S 1 0 0 0 0 0 0 0 0 0 0 0 0 0',
   };
   const readStat = (pid) => table[pid] ?? null;
+  const ops = createProcessOps({ platform: 'linux' });
   assert.deepEqual(
-    ancestors(500, { readStat }).map((p) => p.comm),
+    ops.ancestors(500, { readStat }).map((p) => p.comm),
     ['node', 'zsh', 'claude']
   );
 });
 
 test('a vanished ancestor truncates the chain rather than throwing', () => {
   const readStat = (pid) => (pid === 500 ? '500 (node) S 999 0 0 0 0 0 0 0 0 0 0 0 0 0' : null);
-  assert.deepEqual(ancestors(500, { readStat }).map((p) => p.pid), [500]);
+  const ops = createProcessOps({ platform: 'linux' });
+  assert.deepEqual(ops.ancestors(500, { readStat }).map((p) => p.pid), [500]);
 });
 
 // --- A PID IS NOT AN IDENTITY ----------------------------------------------
@@ -165,7 +196,9 @@ test('a vanished ancestor truncates the chain rather than throwing', () => {
 // forever and could never be reaped — a record with `pid: 1` survived every
 // prune there has ever been. starttime is what settles it.
 
-test('isAlive is true for THIS process — with its real starttime, read from real /proc', () => {
+test('isAlive is true for THIS process — with its real starttime, read from real /proc', {
+  skip: requiresLinuxProc,
+}, () => {
   // No injected readStat: the real /proc, this real process, its real starttime.
   const mine = startTimeOf(process.pid);
   assert.ok(Number.isInteger(mine), 'this process must have a readable starttime');
@@ -173,10 +206,13 @@ test('isAlive is true for THIS process — with its real starttime, read from re
 });
 
 test('isAlive is false for an impossible pid', () => {
-  assert.equal(isAlive(0x7fffffff, { starttime: 123 }), false);
+  const ops = createProcessOps({ platform: 'linux' });
+  assert.equal(ops.isAlive(0x7fffffff, { starttime: 123 }), false);
 });
 
-test('a RECYCLED pid is a different process, and is NOT alive — kill(pid, 0) cannot see this', () => {
+test('a RECYCLED pid is a different process, and is NOT alive — kill(pid, 0) cannot see this', {
+  skip: requiresLinuxProc,
+}, () => {
   // The pid is live (it is ours, so process.kill(pid, 0) returns cleanly), but the
   // process wearing it now started at a different time than the record claims.
   // This is the phantom: without starttime it is "alive" forever.
@@ -190,8 +226,9 @@ test('a record with NO starttime is unverifiable, and unverifiable is treated as
   // is made of — the one that outlives its process — and there is no way to tell
   // it apart from one that does not. Self-healing: a genuinely live session
   // rewrites its own record, with a starttime, on its very next hook.
-  assert.equal(isAlive(process.pid), false);
-  assert.equal(isAlive(process.pid, { starttime: null }), false);
+  const ops = createProcessOps({ platform: 'linux', kill: () => {} });
+  assert.equal(ops.isAlive(process.pid), false);
+  assert.equal(ops.isAlive(process.pid, { starttime: null }), false);
 });
 
 test('a pid recycled into ANOTHER USER\'S process is caught too — EPERM is not proof of identity', () => {
@@ -199,6 +236,8 @@ test('a pid recycled into ANOTHER USER\'S process is caught too — EPERM is not
   // old check read as "alive" and stopped there. /proc/<pid>/stat stays
   // world-readable, so the starttime comparison still runs — and still says no.
   const readStat = () => '1 (systemd) S 0 1 1 0 -1 4194560 100 0 0 0 1 2 3 4 20 0 1 0 5';
-  assert.equal(isAlive(1, { starttime: 999, readStat }), false, 'pid 1 exists; it is not our agent');
-  assert.equal(isAlive(1, { starttime: 5, readStat }), true, 'pid 1 IS the process the record names');
+  const kill = () => { const error = new Error('denied'); error.code = 'EPERM'; throw error; };
+  const ops = createProcessOps({ platform: 'linux', kill });
+  assert.equal(ops.isAlive(1, { starttime: 999, readStat }), false, 'pid 1 exists; it is not our agent');
+  assert.equal(ops.isAlive(1, { starttime: 5, readStat }), true, 'pid 1 IS the process the record names');
 });

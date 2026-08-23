@@ -26,7 +26,10 @@ export function parseStat(text) {
   return { pid, ppid, comm, tty: ttyNr === 0 ? null : true, starttime };
 }
 
-const DARWIN_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/;
+const DARWIN_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})\s+(.+)$/;
+const DARWIN_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DARWIN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function normalizeDarwinTty(raw) {
   if (raw === '??') return null;
@@ -40,15 +43,28 @@ export function parseDarwinRow(line) {
   if (!match) throw new Error(`Darwin ps: malformed row ${JSON.stringify(line)}`);
   const pid = Number(match[1]);
   const ppid = Number(match[2]);
-  const starttime = Date.parse(match[4]) / 1000;
-  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(ppid) || ppid < 0
-      || !Number.isInteger(starttime) || match[5].trim() === '') {
+  const day = Number(match[6]);
+  const hour = Number(match[7]);
+  const minute = Number(match[8]);
+  const second = Number(match[9]);
+  const year = Number(match[10]);
+  const month = DARWIN_MONTHS.indexOf(match[5]);
+  const started = new Date(0);
+  started.setFullYear(year, month, day);
+  started.setHours(hour, minute, second, 0);
+  const starttime = started.getTime() / 1000;
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(ppid) || ppid < 0
+      || started.getFullYear() !== year || started.getMonth() !== month
+      || started.getDate() !== day || started.getHours() !== hour
+      || started.getMinutes() !== minute || started.getSeconds() !== second
+      || DARWIN_WEEKDAYS[started.getDay()] !== match[4]
+      || !Number.isInteger(starttime) || match[11].trim() === '') {
     throw new Error(`Darwin ps: malformed row ${JSON.stringify(line)}`);
   }
   return {
     pid,
     ppid,
-    comm: basename(match[5]),
+    comm: basename(match[11]),
     tty: normalizeDarwinTty(match[3]),
     starttime,
   };
@@ -64,8 +80,8 @@ const defaultReadStat = (pid) => {
 
 const defaultKill = (pid, signal) => process.kill(pid, signal);
 
-const runDarwinPs = (args) => {
-  const result = spawnSync('/bin/ps', args, {
+export const runDarwinPs = (args, spawn = spawnSync) => {
+  const result = spawn('/bin/ps', args, {
     encoding: 'utf8',
     env: { ...process.env, LC_ALL: 'C' },
   });

@@ -76,12 +76,12 @@ test('resolveAgentPid finds the opencode process with a tty, and skips the hook 
     { pid: 300, comm: 'opencode', tty: null },    // a daemon: right name, no terminal
     { pid: 200, comm: 'opencode', tty: true },// the agent
   ];
-  assert.equal(resolveAgentPid({ startPid: 400, ancestors: () => chain }), 200);
+  assert.equal(resolveAgentPid({ platform: 'linux', startPid: 400, ancestors: () => chain }), 200);
 });
 
 test('no opencode among the ancestors names the whole chain', () => {
   assert.throws(
-    () => resolveAgentPid({ startPid: 9, ancestors: () => [{ pid: 9, comm: 'node', tty: null }] }),
+    () => resolveAgentPid({ platform: 'linux', startPid: 9, ancestors: () => [{ pid: 9, comm: 'node', tty: null }] }),
     /could not find the opencode process among the ancestors of 9/,
   );
 });

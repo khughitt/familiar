@@ -121,7 +121,7 @@ test('the agent is the codex process WITH a terminal — not the hook, and not i
     { pid: 8, comm: 'codex', tty: null },          // same comm, NO terminal: a daemon. Not our agent.
     { pid: 7, comm: 'codex', tty: true },          // the real one
   ];
-  assert.equal(resolveAgentPid({ startPid: 10, ancestors: () => chain }), 7);
+  assert.equal(resolveAgentPid({ platform: 'linux', startPid: 10, ancestors: () => chain }), 7);
 });
 
 test('no codex process among the ancestors is a named failure with the whole chain in it', () => {
@@ -130,7 +130,7 @@ test('no codex process among the ancestors is a named failure with the whole cha
     { pid: 9, comm: 'claude', tty: true },     // a claude-code session: the wrong --agent flag
   ];
   assert.throws(
-    () => resolveAgentPid({ startPid: 10, ancestors: () => chain }),
+    () => resolveAgentPid({ platform: 'linux', startPid: 10, ancestors: () => chain }),
     /could not find the codex process.*10\(node\) -> 9\(claude\)/s,
   );
 });

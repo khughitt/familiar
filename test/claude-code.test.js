@@ -63,7 +63,7 @@ test('interactive session: the agent is the immediate parent, one level up', () 
     { pid: 200, comm: 'zsh', ppid: 100, tty: true },
     { pid: 100, comm: 'kitty', ppid: 1, tty: null },
   ];
-  assert.equal(resolveAgentPid({ startPid: 500, ancestors: () => chain }), 450);
+  assert.equal(resolveAgentPid({ platform: 'linux', startPid: 500, ancestors: () => chain }), 450);
 });
 
 test('background/daemon-hosted session: a claude process with no tty (the daemon) is skipped for the real terminal-owning agent four levels up', () => {
@@ -78,7 +78,7 @@ test('background/daemon-hosted session: a claude process with no tty (the daemon
     { pid: 200, comm: 'claude', ppid: 100, tty: true },        // the real, terminal-attached agent
     { pid: 100, comm: 'zsh', ppid: 1, tty: true },
   ];
-  assert.equal(resolveAgentPid({ startPid: 500, ancestors: () => chain }), 200);
+  assert.equal(resolveAgentPid({ platform: 'linux', startPid: 500, ancestors: () => chain }), 200);
 });
 
 test('a claude process with no terminal anywhere in the chain is a hard error, not a silent daemon match', () => {
@@ -87,7 +87,7 @@ test('a claude process with no terminal anywhere in the chain is a hard error, n
     { pid: 300, comm: 'claude', ppid: 1, tty: null },   // daemon only — must not match
   ];
   assert.throws(
-    () => resolveAgentPid({ startPid: 500, ancestors: () => chain }),
+    () => resolveAgentPid({ platform: 'linux', startPid: 500, ancestors: () => chain }),
     /could not find the claude-code process/
   );
 });
@@ -95,7 +95,7 @@ test('a claude process with no terminal anywhere in the chain is a hard error, n
 test('no agent in the ancestor chain is a hard error — a record keyed to a dead pid is worse than none', () => {
   const chain = [{ pid: 500, comm: 'node', ppid: 1, tty: null }];
   assert.throws(
-    () => resolveAgentPid({ startPid: 500, ancestors: () => chain }),
+    () => resolveAgentPid({ platform: 'linux', startPid: 500, ancestors: () => chain }),
     /could not find the claude-code process/
   );
 });
