@@ -20,9 +20,12 @@ familiar theme add <theme-url-or-directory>
 checkout. It validates the complete pack before atomically installing it into
 `~/.config/familiar/themes/<id>`.
 
-The portable macOS core is CI-backed, but agent lifecycle hooks on Darwin remain
-inactive until the physical-Mac ancestry gate is complete. The setup and install
-commands below prepare configuration; they are not a macOS lifecycle-support claim.
+macOS agent lifecycle is supported. The portable core is CI-backed, and the
+Darwin agent resolver was activated on live-hook evidence captured on a physical
+Mac on 2026-08-23 (`docs/ref/2026-08-23-macos-agent-process-spike.md`), covering
+Claude Code, Codex, and OpenCode in both Kitty and Ghostty. What remains
+provisional on macOS is Familiar's own terminal rendering — graphics, tint, and
+bell — which waits on the physical terminal checklist below.
 
 ### Claude Code
 

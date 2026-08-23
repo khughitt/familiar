@@ -23,7 +23,11 @@ test('Claude setup contains every lifecycle hook and the status line', () => {
   );
 });
 
-test('setupDocument rejects Codex until its executor boundary is verified', () => {
+// Codex's executor boundary IS verified now -- `/bin/zsh -c`, measured on a real Mac and recorded
+// in docs/ref/2026-08-23-macos-agent-process-spike.md -- so the reason for this refusal has
+// changed: `setup codex` is authorized and simply not written yet. The refusal stays until it is,
+// because a half-built target that emits nothing is worse than one that says so.
+test('setupDocument rejects Codex, which is authorized but not yet implemented', () => {
   assert.throws(
     () => setupDocument('codex', '/bin/familiar'),
     /unknown setup target "codex"/,

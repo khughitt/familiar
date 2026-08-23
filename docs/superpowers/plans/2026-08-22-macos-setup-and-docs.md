@@ -63,7 +63,7 @@ omitted and remain gated; the fixture is retained for review, not installation.
   `'codex'` branch remains deferred.
 - Consumes: no filesystem or environment state; callers supply the resolved binary path.
 
-- [ ] **Step 1: Write failing quoting and document tests**
+- [x] **Step 1: Write failing quoting and document tests**
 
 The Claude assertions below are complete. The original Codex assertion remains
 deferred, so this mixed step stays unchecked.
@@ -122,7 +122,7 @@ node --test test/setup.test.js
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/install/setup.js`.
 
-- [ ] **Step 3: Implement the pure generator**
+- [x] **Step 3: Implement the pure generator**
 
 The Claude generator below is complete. The originally proposed Codex branch
 remains deferred, so this mixed step stays unchecked.
@@ -188,9 +188,13 @@ export function setupDocument(agent, binPath) {
 
 - [ ] **Step 4: Replace the Codex fixture after executor evidence**
 
-Deferred by the approved physical-Mac gate. Until its executor boundary is
-measured, retain `integrations/codex/hooks.json` as a review-only fixture and do
-not expose or document it as installable configuration.
+UNBLOCKED 2026-08-23, still unimplemented. The executor boundary is measured:
+Codex runs its single-string hook command through `/bin/zsh -c`, confirmed in
+both the Kitty and Ghostty captures with a deliberately unquoted path and a
+`; :` canary (docs/ref/2026-08-23-macos-agent-process-spike.md). Single-quote
+shell quoting is correct there. Until `setup codex` is written,
+`integrations/codex/hooks.json` remains a review-only fixture and is not
+documented as installable configuration.
 
 - [x] **Step 5: Run focused tests**
 
@@ -204,8 +208,8 @@ Expected: both files pass.
 
 - [ ] **Step 6: Commit the complete two-agent task**
 
-The Claude-only commit exists as `8bd16a8`; the original two-agent commit is
-gated with the unchecked Codex work above.
+The Claude-only commit exists as `8bd16a8`. The original two-agent commit now
+waits only on writing Step 4, not on evidence.
 
 ```bash
 git add src/install/setup.js test/setup.test.js test/codex.test.js integrations/codex/hooks.json

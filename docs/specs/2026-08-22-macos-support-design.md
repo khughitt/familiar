@@ -23,6 +23,20 @@ The target support claim is deliberately split:
 
 Linux behavior and its Node 22/26 CI remain supported unchanged.
 
+**Remaining work**, in the order it unblocks things:
+
+1. **The physical terminal promotion gate (§11).** Claude Code, Codex, and
+   OpenCode rendering in current Kitty and Ghostty on a real Mac, including
+   loading the OpenCode sprite plugin. This is what holds every provisional
+   label. No runbook exists for it yet; the process-runtime plan's Task 7 is its
+   specification.
+2. **`setup codex` (§7).** Authorized by the measured `/bin/zsh -c` boundary and
+   not implemented. Until it exists, `integrations/codex/hooks.json` stays a
+   review-only fixture.
+3. **A background or daemon-hosted Claude Code session on Darwin.** The
+   `tty !== null` half of the resolver predicate rests on Linux evidence; that
+   case has never been observed on a Mac. It belongs to the §11 pass.
+
 ## 1. Scope
 
 **In:**
