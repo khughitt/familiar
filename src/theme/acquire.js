@@ -70,7 +70,11 @@ export function collapseStderr(text) {
 // depth is excluded; git is never invoked on the source.
 // Regular files are copied by abortable streaming because fs.copyFile/fs.cp
 // accept no AbortSignal, and the wall clock must stop a stalled file.
-export async function copySource(sourceDir, dest, { signal } = {}) {
+export async function copySource(sourceDir, dest, {
+  signal,
+  platform = process.platform,
+  beforeDirectoryRecheck = () => {},
+} = {}) {
   const sourceReal = await realpath(sourceDir);
   const destReal = await realpath(dest);
   if (destReal === sourceReal || destReal.startsWith(sourceReal + sep)) {
@@ -89,13 +93,14 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
     try {
       handle = await openVerifiedDirectory(task);
       signal?.throwIfAborted();
-      const bound = `/proc/self/fd/${handle.fd}`;
-      const entries = (await readdir(bound, { withFileTypes: true }))
+      const traversal = traversalRoot(task, handle, platform);
+      if (platform === 'darwin') await verifyPathIdentity(task);
+      const entries = (await readdir(traversal, { withFileTypes: true }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       for (const entry of entries) {
         signal?.throwIfAborted();
         if (entry.name === '.git') continue;
-        const src = join(bound, entry.name);
+        const src = join(traversal, entry.name);
         const openPath = join(task.openPath, entry.name);
         const display = join(task.displayPath, entry.name);
         const out = join(task.to, entry.name);
@@ -112,9 +117,34 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
           throw unsupportedEntry(display);
         }
       }
+      if (platform === 'darwin') {
+        beforeDirectoryRecheck(task);
+        await verifyPathIdentity(task);
+      }
     } finally {
       await handle?.close();
     }
+  }
+}
+
+function traversalRoot(task, handle, platform) {
+  if (platform === 'linux') return `/proc/self/fd/${handle.fd}`;
+  if (platform === 'darwin') return task.openPath;
+  throw new Error(`theme add: unsupported platform ${JSON.stringify(platform)}`);
+}
+
+async function verifyPathIdentity(task) {
+  let st;
+  try {
+    st = await lstat(task.openPath);
+  } catch (error) {
+    if (['ENOENT', 'ELOOP', 'ENOTDIR'].includes(error.code)) {
+      throw changedEntry(task.displayPath);
+    }
+    throw error;
+  }
+  if (!st.isDirectory() || st.dev !== task.dev || st.ino !== task.ino) {
+    throw changedEntry(task.displayPath);
   }
 }
 
@@ -239,6 +269,7 @@ export async function acquireSource(source, dest, {
   timeoutMs = DEFAULT_TIMEOUT_MS,
   growthLimitBytes = DEFAULT_GROWTH_LIMIT_BYTES,
   pollMs = 1000,
+  platform = process.platform,
 } = {}) {
   const controller = new AbortController();
   const deadline = performance.now() + timeoutMs;
@@ -251,7 +282,7 @@ export async function acquireSource(source, dest, {
     if (growthCheck !== null) return growthCheck;
     growthCheck = (async () => {
       try {
-        const bytes = await stagedBytes(dest, controller.signal);
+        const bytes = await stagedBytes(dest, controller.signal, { platform });
         if (bytes > growthLimitBytes) {
           controller.abort(new Error(
             `theme add: staging grew past the ${growthLimitBytes}-byte bound (${bytes} bytes fetched)`
@@ -275,7 +306,7 @@ export async function acquireSource(source, dest, {
       provenance = { kind: 'https', url: source.url, commit };
     } else {
       const path = await realpath(source.path);
-      await copySource(path, dest, { signal: controller.signal });
+      await copySource(path, dest, { signal: controller.signal, platform });
       provenance = { kind: 'local', path };
     }
     await checkGrowth();
@@ -293,7 +324,7 @@ export async function acquireSource(source, dest, {
   }
 }
 
-async function stagedBytes(root, signal) {
+async function stagedBytes(root, signal, { platform = process.platform } = {}) {
   let total = 0;
   let rootStat;
   try {
@@ -314,11 +345,12 @@ async function stagedBytes(root, signal) {
     let handle;
     try {
       handle = await openVerifiedDirectory(task);
-      const bound = `/proc/self/fd/${handle.fd}`;
-      const entries = await readdir(bound, { withFileTypes: true });
+      const traversal = traversalRoot(task, handle, platform);
+      if (platform === 'darwin') await verifyPathIdentity(task);
+      const entries = await readdir(traversal, { withFileTypes: true });
       for (const entry of entries) {
         signal?.throwIfAborted();
-        const path = join(bound, entry.name);
+        const path = join(traversal, entry.name);
         const openPath = join(task.openPath, entry.name);
         const display = join(task.displayPath, entry.name);
         let st;
@@ -336,6 +368,7 @@ async function stagedBytes(root, signal) {
           pending.push({ openPath, displayPath: display, dev: st.dev, ino: st.ino });
         }
       }
+      if (platform === 'darwin') await verifyPathIdentity(task);
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       if (error.message.startsWith('theme add: could not measure staging growth')) throw error;

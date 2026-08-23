@@ -20,6 +20,9 @@ import { writePack } from './helpers/fixture.js';
 const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
 const acquireModule = new URL('../src/theme/acquire.js', import.meta.url).href;
 const fileCopyModule = new URL('../src/theme/copy-regular-file.js', import.meta.url).href;
+const requiresDarwin = process.platform !== 'darwin' ? 'requires Darwin' : false;
+const requiresLinuxProc = process.platform !== 'linux'
+  ? 'requires Linux /proc fd traversal' : false;
 
 function makeDeepTree(root, depth) {
   let dir = root;
@@ -171,6 +174,74 @@ test('a pack copies byte-for-byte, excluding any .git', async () => {
     readFileSync(join(src, 'theme.yaml')));
   assert.deepEqual(readFileSync(join(dest, 'sprites', 'solo', 'idle.png')),
     readFileSync(join(src, 'sprites', 'solo', 'idle.png')));
+});
+
+test('Darwin copies a stable local pack through its pathname walker',
+  { skip: requiresDarwin }, async (t) => {
+    const source = writePack();
+    const dest = destDir();
+    t.after(() => {
+      rmSync(source, { recursive: true, force: true });
+      rmSync(dest, { recursive: true, force: true });
+    });
+    await copySource(source, dest);
+    assert.equal(readFileSync(join(dest, 'theme.yaml'), 'utf8'),
+      readFileSync(join(source, 'theme.yaml'), 'utf8'));
+  });
+
+test('Darwin rejects a queued parent whose pathname identity changes',
+  { skip: requiresDarwin }, async (t) => {
+    const source = writePack();
+    const held = `${source}-held`;
+    const dest = destDir();
+    t.after(() => {
+      rmSync(source, { recursive: true, force: true });
+      rmSync(held, { recursive: true, force: true });
+      rmSync(dest, { recursive: true, force: true });
+    });
+    await assert.rejects(
+      copySource(source, dest, {
+        beforeDirectoryRecheck(task) {
+          if (task.openPath !== realpathSync(source)) return;
+          renameSync(source, held);
+          mkdirSync(source);
+        },
+      }),
+      (error) => error.code === 'THEME_ENTRY_CHANGED'
+    );
+  });
+
+test('the injected Darwin walker rejects a queued parent pathname swap', async (t) => {
+  const source = writePack();
+  const held = `${source}-held`;
+  const dest = destDir();
+  t.after(() => {
+    rmSync(source, { recursive: true, force: true });
+    rmSync(held, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+  });
+  await assert.rejects(
+    copySource(source, dest, {
+      platform: 'darwin',
+      beforeDirectoryRecheck(task) {
+        if (task.openPath !== realpathSync(source)) return;
+        renameSync(source, held);
+        mkdirSync(source);
+      },
+    }),
+    (error) => error.code === 'THEME_ENTRY_CHANGED'
+  );
+});
+
+test('copy rejects an unsupported traversal platform', async (t) => {
+  const source = writePack();
+  const dest = destDir();
+  t.after(() => {
+    rmSync(source, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+  });
+  await assert.rejects(copySource(source, dest, { platform: 'freebsd' }),
+    /unsupported platform "freebsd"/);
 });
 
 test('a symlink in the source fails acquisition by path, undereferenced', async () => {
@@ -454,7 +525,7 @@ test('an interval scan error aborts acquisition instead of throwing out of band'
 });
 
 test('acquisition failure aborts and awaits an active queued growth scan',
-  { timeout: 5000 }, async (t) => {
+  { skip: requiresLinuxProc, timeout: 5000 }, async (t) => {
   const bin = mkdtempSync(join(tmpdir(), 'fake-git-'));
   const control = mkdtempSync(join(tmpdir(), 'git-control-'));
   const fakeGit = join(bin, 'git');
