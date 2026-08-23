@@ -62,9 +62,12 @@ export function collapseStderr(text) {
 }
 
 // The defensive copy (spec §3). Validation runs only AFTER acquisition, so
-// the copy itself must refuse what it cannot safely materialize. Directories
-// are opened no-follow and traversed through their /proc fd identity, so a
-// pathname swap cannot redirect a queued walk. Static symlinks, FIFOs, sockets
+// the copy itself must refuse what it cannot safely materialize. On Linux,
+// directories are opened no-follow and traversed through their /proc fd
+// identity, so a pathname swap cannot redirect a queued walk. On Darwin,
+// traversal uses the verified pathname with parent identity checks; a hostile
+// writer can still swap a directory away and back between those checks, the
+// accepted Darwin race ceiling (spec §§5, 12). Static symlinks, FIFOs, sockets
 // and devices are rejected by lstat before open; a raced file replacement is
 // opened no-follow/nonblocking and rejected through the handle. `.git` at any
 // depth is excluded; git is never invoked on the source.

@@ -32,7 +32,7 @@
 - Consumes: the `lstat` result already read for each source entry.
 - Produces: `copyRegularFile(src, display, out, signal, expected)` where `expected` is `{ dev, ino }`; `changedEntry(path)` remains the named `THEME_ENTRY_CHANGED` error used for both files and directories.
 
-- [ ] **Step 1: Add a failing opened-file identity test**
+- [x] **Step 1: Add a failing opened-file identity test**
 
 Import `copyRegularFile` from `src/theme/copy-regular-file.js`, then add a focused test. Inject an `open` seam so the test can return a handle whose `stat()` identity differs from the expected identity without racing the host filesystem:
 
@@ -58,7 +58,7 @@ test('a regular file replaced between lstat and open is rejected by identity', a
 });
 ```
 
-- [ ] **Step 2: Run the test and confirm the identity check is absent**
+- [x] **Step 2: Run the test and confirm the identity check is absent**
 
 Run:
 
@@ -68,7 +68,7 @@ node --test --test-name-pattern='regular file replaced between lstat and open' t
 
 Expected: FAIL because `copyRegularFile` neither accepts the expected identity/open seam nor rejects the mismatch.
 
-- [ ] **Step 3: Add the minimum identity check**
+- [x] **Step 3: Add the minimum identity check**
 
 Move the shared named error to `src/theme/copy-regular-file.js` and export it:
 
@@ -109,7 +109,7 @@ Import `changedEntry` into `src/theme/acquire.js`, delete its local duplicate, a
 await copyRegularFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
 ```
 
-- [ ] **Step 4: Run the focused and full acquisition tests**
+- [x] **Step 4: Run the focused and full acquisition tests**
 
 Run:
 
@@ -119,7 +119,7 @@ node --test test/theme-acquire.test.js
 
 Expected: all theme-acquisition tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/theme/copy-regular-file.js src/theme/acquire.js test/theme-acquire.test.js
@@ -138,7 +138,7 @@ git commit -m "fix(theme): verify source file identity at open"
 - Consumes: `openVerifiedDirectory(task)` and the queued `{ openPath, displayPath, dev, ino }` task shape.
 - Produces: `traversalRoot(task, handle, platform)` and `verifyPathIdentity(task)` used by both `copySource` and `stagedBytes`; both functions accept an injected `platform = process.platform`.
 
-- [ ] **Step 1: Add Darwin tests with visible Linux skips**
+- [x] **Step 1: Add Darwin tests with visible Linux skips**
 
 Register, rather than conditionally define, these tests:
 
@@ -183,7 +183,7 @@ test('Darwin rejects a queued parent whose pathname identity changes',
 
 Add only the smallest test seam needed to deterministically trigger the parent swap; do not add a general hook registry.
 
-- [ ] **Step 2: Run the tests on Linux and confirm named skips**
+- [x] **Step 2: Run the tests on Linux and confirm named skips**
 
 Run:
 
@@ -193,7 +193,7 @@ node --test test/theme-acquire.test.js
 
 Expected: the two new test names appear as `# SKIP requires Darwin`; existing Linux tests pass.
 
-- [ ] **Step 3: Implement explicit traversal selection and parent checks**
+- [x] **Step 3: Implement explicit traversal selection and parent checks**
 
 Add these helpers in `src/theme/acquire.js`:
 
@@ -236,7 +236,7 @@ if (platform === 'darwin') {
 
 Use the same `root` selection and before/after checks in `stagedBytes`. Do not catch a Darwin failure and retry via another root.
 
-- [ ] **Step 4: Mark Linux `/proc` race probes explicitly**
+- [x] **Step 4: Mark Linux `/proc` race probes explicitly**
 
 The existing tests that inspect `/proc/self/fd` must stay registered on Darwin but skip with a reason:
 
@@ -251,7 +251,7 @@ test('queued directory remains handle-bound during a pathname swap',
 
 Do not skip ordinary copy, symlink, FIFO, socket, abort, deadline, or growth tests; those must exercise the selected walker on both operating systems.
 
-- [ ] **Step 5: Run acquisition tests and the fast suite**
+- [x] **Step 5: Run acquisition tests and the fast suite**
 
 Run:
 
@@ -262,7 +262,7 @@ npm test
 
 Expected on Linux: all existing assertions pass; Darwin-only tests are named skips; no platform test group is absent.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/theme/acquire.js test/theme-acquire.test.js
@@ -280,7 +280,7 @@ git commit -m "feat(theme): add verified Darwin pathname traversal"
 - Consumes: the normal `npm test` inventory and named platform skips from Task 2.
 - Produces: temporary branch evidence that the Darwin test IDs run rather than skip; the permanent macOS job belongs to the final integration plan.
 
-- [ ] **Step 1: Add a temporary branch-only macOS job**
+- [x] **Step 1: Add a temporary branch-only macOS job**
 
 Add this job while implementing the theme plan:
 
@@ -297,7 +297,7 @@ Add this job while implementing the theme plan:
       - run: node --test test/theme-acquire.test.js
 ```
 
-- [ ] **Step 2: Push and inspect the test report**
+- [x] **Step 2: Push and inspect the test report**
 
 Run:
 
@@ -310,7 +310,7 @@ gh run watch --exit-status
 
 Expected: the job succeeds and neither Darwin test is reported as skipped.
 
-- [ ] **Step 3: Remove the temporary job after recording the run URL in the implementation notes**
+- [x] **Step 3: Remove the temporary job after recording the run URL in the implementation notes**
 
 Use `apply_patch` to remove only `macos-theme`; the final integration plan adds the permanent job after every subsystem is ready.
 
