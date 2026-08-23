@@ -82,8 +82,13 @@ jobs:
             echo "--- $agent executable ---"
             ls -l "$bin"
             file "$bin"
-            tail -f /dev/null | script -q "$RUNNER_TEMP/$agent.typescript" \
-              /usr/bin/env TERM=xterm-kitty COLORTERM=truecolor "$bin" >/dev/null 2>&1 &
+            input="$RUNNER_TEMP/$agent.input"
+            mkfifo "$input"
+            tail -f /dev/null >"$input" &
+            feeder_pid=$!
+            script -q "$RUNNER_TEMP/$agent.typescript" \
+              /usr/bin/env TERM=xterm-kitty COLORTERM=truecolor "$bin" \
+              <"$input" >/dev/null 2>&1 &
             script_pid=$!
             sleep 3
             echo "--- $agent transcript ---"
@@ -104,7 +109,9 @@ jobs:
             for pid in $pids; do ps -p "$pid" -o pid=,ppid=,tty=,lstart=,comm= || true; done
             echo "--- $agent process rows: command last ---"
             for pid in $pids; do ps -p "$pid" -o pid=,ppid=,tty=,lstart=,command= || true; done
-            kill "$script_pid" 2>/dev/null || true
+            kill -KILL $pids "$feeder_pid" 2>/dev/null || true
             pkill -f "$bin" 2>/dev/null || true
             wait "$script_pid" 2>/dev/null || true
+            wait "$feeder_pid" 2>/dev/null || true
+            rm -f "$input"
           done
