@@ -77,29 +77,6 @@ function transmitPose({ intent, readSprite, env }) {
   return env?.TMUX ? wrapForTmux(escapes) : escapes;
 }
 
-// Finding A of the Task 1 spike: `/dev/tty` fails with ENXIO from a hook
-// subprocess in 1507 of 1507 samples — it has no controlling terminal — and
-// must never be attempted. `/proc/<agentPid>/fd/1` is the only path that can
-// reach the user's screen.
-const ttyFdPath = (agentPid) => `/proc/${agentPid}/fd/1`;
-
-// The AGENT's environment, not the hook's. intent.pid is the process whose fd 1 we
-// write to, so its environment is the terminal's by definition. The hook is merely
-// a grandchild that may or may not have inherited it -- and the Task 1 spike is the
-// reason we do not assume which.
-//
-// A value may itself contain '=' (LS_COLORS is the everyday case), so the split is
-// on the FIRST '=' only. `kv.split('=')` truncates those, and would do it silently.
-export function envOf(pid, read = readFileSync) {
-  const raw = read(`/proc/${pid}/environ`, 'utf8');
-  return Object.fromEntries(
-    raw.split('\0').filter(Boolean).map((kv) => {
-      const eq = kv.indexOf('=');
-      return [kv.slice(0, eq), kv.slice(eq + 1)];
-    }),
-  );
-}
-
 function hasConsistentBindingEvidence(prev, priorIntent) {
   return prev !== null
     && priorIntent !== null
@@ -111,20 +88,18 @@ function hasConsistentBindingEvidence(prev, priorIntent) {
 // `transmitSprite: false` means only tint and bell bytes go out.
 export function emit({
   prev, next, priorIntent, intent, readSprite = (p) => readFileSync(p), transmitSprite = true,
+  terminal,
   loadAnimation = loadAnimationRefSync,
   plan = planAnimation,
   encode = encodeKittyProgram,
   readFrame = readSprite,
-  readEnviron = readFileSync,
   open = openSync, write = writeSync, close = closeSync, checkTty = isatty,
 }) {
-  // An unreadable environ degrades to no sprite; tint and bell remain usable.
-  let capability = GRAPHICS_CAPABILITY.NONE;
-  let env;
-  try {
-    env = envOf(intent.pid, readEnviron);
-    capability = graphicsCapability(env);
-  } catch { /* no environ -> no graphics. The rest of the transition still goes out. */ }
+  if (!terminal || typeof terminal.path !== 'string') {
+    throw new Error('emit requires terminal { path, env }');
+  }
+  const { env } = terminal;
+  const capability = env === undefined ? GRAPHICS_CAPABILITY.NONE : graphicsCapability(env);
 
   // BOTH env AND capability. The answer is already computed and must not be recomputed
   // from a different environment; the environment itself is still needed, because whether we are
@@ -207,15 +182,9 @@ export function emit({
 
   if (presentation.length === 0 && graphics.length === 0) return false;
 
-  // UNCHANGED BELOW -- and the symmetry is the argument for reading the environ at
-  // all. `envOf` reads /proc/<agentPid>/environ; `ttyFdPath` opens
-  // /proc/<agentPid>/fd/1. Same process, two facts: what terminal it is, and where
-  // its screen is. If the second path is the only one that can reach the user
-  // (spike Finding A: /dev/tty failed 1507 of 1507), then the first is the only one
-  // that can describe them.
   let fd;
   try {
-    fd = open(ttyFdPath(intent.pid), 'a');
+    fd = open(terminal.path, 'a');
   } catch {
     return;   // no such process, or no fd 1 to open — nothing to paint, not an error
   }

@@ -149,6 +149,26 @@ test('a hook invocation that throws internally still exits 0 and prints exactly 
   assert.match(lines[0], /^familiar: no scheme at .* — run: familiar scheme set dark\|light$/);
 });
 
+test('an unresolved terminal owner is one exit-zero hook diagnostic', () => {
+  const runEnv = env();
+  const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(seeded.status, 0, seeded.stderr);
+
+  const result = spawnSync(process.execPath, [bin, 'hook', 'UserPromptSubmit'], {
+    input: JSON.stringify({ session_id: 's1', cwd: '/tmp' }),
+    encoding: 'utf8',
+    env: runEnv,
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
+  const lines = result.stderr.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${result.stderr}`);
+  assert.match(lines[0], /^familiar: .*process.*ancestors|^familiar: .*resolver.*inactive/);
+});
+
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
   const e = env();
   const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart', '--bogus'], {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renderTransition, emit, envOf } from '../src/render/term/emit.js';
+import { renderTransition, emit } from '../src/render/term/emit.js';
 import { GRAPHICS_CAPABILITY } from '../src/render/term/capability.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { imageIdFor } from '../src/render/term/placeholder.js';
@@ -61,14 +61,12 @@ const FAKE_PNG = encodeRgba({
 });
 const readSprite = () => FAKE_PNG;
 
-// The agent's environ, as emit() will read it from /proc/<pid>/environ. Injected in
-// EVERY emit() test: without it the real readFileSync runs against a real pid 4242,
-// which may or may not exist on the machine running the suite, and whose TERM nobody
-// controls. A capability check that reads the ambient machine is not a test.
 const ANIMATION = GRAPHICS_CAPABILITY.ANIMATION;
 const NO_GRAPHICS = GRAPHICS_CAPABILITY.NONE;
-
-const KITTY_ENVIRON = () => 'TERM=xterm-kitty\0KITTY_WINDOW_ID=1\0';
+const KITTY_TERMINAL = {
+  path: '/proc/4242/fd/1',
+  env: { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1' },
+};
 
 const agentAt = (state, { pid = 4242, starttime = 987654 } = {}) => ({
   sessionId: 's1', state, pid, starttime,
@@ -103,7 +101,7 @@ function captureEmission(overrides = {}) {
     next: agentAt('working'),
     priorIntent: null,
     intent: clipsIntent(),
-    readEnviron: KITTY_ENVIRON,
+    terminal: KITTY_TERMINAL,
     loadAnimation: () => clipsSet,
     readFrame: () => FAKE_PNG,
     open: (path) => { opens.push(path); return 7; },
@@ -451,27 +449,6 @@ test('renderTransition given neither env nor capability throws — it does not a
   );
 });
 
-// --- envOf(): the AGENT's environment ---------------------------------------
-
-test('envOf parses NUL-separated pairs, and a value containing "=" survives intact', () => {
-  // KILLS: `kv.split('=')` and its `[k, v]` destructure, which truncates LS_COLORS —
-  // and every other value with an '=' in it — silently. Also KILLS a filter that drops
-  // empty VALUES rather than empty entries: `EMPTY=` is a set variable, not an absent one.
-  const parsed = envOf(9, () => 'TERM=xterm-kitty\0LS_COLORS=di=01;34:ln=01;36\0EMPTY=\0');
-  assert.deepEqual(parsed, { TERM: 'xterm-kitty', LS_COLORS: 'di=01;34:ln=01;36', EMPTY: '' });
-});
-
-test('envOf reads the REAL /proc environ by default — the parsing is not the only part that must work', () => {
-  // No injected reader: the real readFileSync runs, against a real /proc entry (this
-  // process's own, which certainly exists).
-  //
-  // KILLS: any stubbed default — `read = () => ''` (every agent looks unrecognisable,
-  // no cat renders anywhere) or a canned kitty environ (every agent looks like kitty,
-  // escapes fired at terminals that cannot parse them). BOTH leave every other envOf
-  // and emit test green, because all of them inject their reader.
-  assert.equal(envOf(process.pid).PATH, process.env.PATH, 'the environment this process was started with');
-});
-
 // --- emit(): the tty gate (spike Finding A) ---------------------------------
 //
 // The spike found /dev/tty is ENXIO from a hook subprocess in 1507 of 1507
@@ -481,17 +458,28 @@ test('envOf reads the REAL /proc environ by default — the parsing is not the o
 // false. These tests inject open/write/close/checkTty so nothing here ever
 // touches a real fd.
 
-test('emit opens /proc/<agentPid>/fd/1 — never /dev/tty, which is always ENXIO from a hook', () => {
+test('emit opens the explicit terminal path', () => {
   const opened = [];
   emit({
     prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-    readSprite, readEnviron: KITTY_ENVIRON,
+    readSprite, terminal: { ...KITTY_TERMINAL, path: '/dev/ttys003' },
     open: (path) => { opened.push(path); return 7; },
     write: (_fd, _bytes, _offset, length) => length,
     close: () => {},
     checkTty: () => true,
   });
-  assert.deepEqual(opened, ['/proc/4242/fd/1']);
+  assert.deepEqual(opened, ['/dev/ttys003']);
+});
+
+test('emit requires an explicit terminal target', () => {
+  assert.throws(() => emit({
+    prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+    readSprite,
+    open: () => 7,
+    write: (_fd, _bytes, _offset, length) => length,
+    close: () => {},
+    checkTty: () => true,
+  }), /emit requires terminal/);
 });
 
 test('a non-tty fd produces no output at all — open() succeeding is not evidence of a terminal', () => {
@@ -499,7 +487,7 @@ test('a non-tty fd produces no output at all — open() succeeding is not eviden
   let closed = false;
   emit({
     prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-    readSprite, readEnviron: KITTY_ENVIRON,
+    readSprite, terminal: KITTY_TERMINAL,
     open: () => 99,
     write: () => { wrote = true; },
     close: (fd) => { assert.equal(fd, 99); closed = true; },
@@ -514,7 +502,7 @@ test('a tty fd receives the complete update and presentation bytes, then is clos
   let closed = false;
   emit({
     prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-    readSprite, readEnviron: KITTY_ENVIRON,
+    readSprite, terminal: KITTY_TERMINAL,
     open: () => 7,
     write: (fd, bytes, _offset, length) => { written = { fd, bytes }; return length; },
     close: (fd) => { assert.equal(fd, 7); closed = true; },
@@ -535,7 +523,7 @@ test('no transition leaves the terminal fd unopened', () => {
   let opened = false;
   emit({
     prev: agentAt('working'), next: agentAt('working'), priorIntent: intentAt('working'), intent: intentAt('working'),
-    readSprite, readEnviron: KITTY_ENVIRON,
+    readSprite, terminal: KITTY_TERMINAL,
     open: () => { opened = true; return 7; },
     write: () => { throw new Error('must not write'); },
     close: () => {},
@@ -548,7 +536,7 @@ test('a failure to open the fd (no such process, no controlling terminal) is sil
   assert.doesNotThrow(() => {
     emit({
       prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-      readSprite, readEnviron: KITTY_ENVIRON,
+      readSprite, terminal: KITTY_TERMINAL,
       open: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
       write: () => { throw new Error('must not be called'); },
       close: () => {},
@@ -567,7 +555,7 @@ test('emit defaults isatty to the real node:tty.isatty, and stays silent against
   try {
     emit({
       prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-      readSprite, readEnviron: KITTY_ENVIRON,
+      readSprite, terminal: KITTY_TERMINAL,
       open: () => openSync(path, 'a'),
       write: () => { wrote = true; },
       // checkTty and close are NOT injected here: real node:tty.isatty and
@@ -581,46 +569,37 @@ test('emit defaults isatty to the real node:tty.isatty, and stays silent against
 
 // --- emit(): the capability check reads the AGENT, not the hook --------------
 //
-// emit() writes to /proc/<agentPid>/fd/1. The question that decides whether a
-// graphics escape is safe is "what terminal is THAT fd attached to?" — and the only
-// process that can answer it is the agent. The hook is a grandchild that may or may
-// not have inherited the answer, and the Task 1 spike (/dev/tty: ENXIO in 1507 of
-// 1507 samples) is the reason we do not assume which. Two /proc paths, one pid, one
-// question.
+// emit() receives the path and environment as one target, so capability cannot be
+// computed from a different process than the fd that receives the bytes.
 
-test('graphics capability is read from the AGENT process, not from the hook', () => {
+test('graphics capability is read from the explicit terminal environment', () => {
   const written = [];
-  const reads = [];
   emit({
     prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
     readSprite,
-    readEnviron: (p) => { reads.push(p); return 'TERM=xterm-kitty\0KITTY_WINDOW_ID=3\0'; },
+    terminal: { path: '/proc/4242/fd/1', env: { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '3' } },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
   });
 
-  assert.deepEqual(reads, ['/proc/4242/environ']);
-  // AND THE BYTES. Asserting only that /proc was read leaves this test green if
-  // graphicsCapability() always returned NONE, or if `capability` were computed and then
-  // never threaded into renderTransition() -- which is the precise bug this wiring
-  // exists to prevent. Read the path, then prove it CHANGED THE OUTPUT.
   assert.ok(written[0].includes('\x1b_G'), 'a recognised terminal must actually get graphics');
   assert.ok(written[0].includes('a=c'), 'the existing graphical binding must update in place');
 });
 
-test('an unreadable agent environ degrades to no sprite, not to no output', () => {
+test('an unavailable terminal environment degrades to no sprite, not to no output', () => {
   const written = [];
   emit({
     prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
     readSprite,
-    readEnviron: () => { throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' }); },
+    terminal: { path: '/proc/4242/fd/1', env: undefined },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
   });
   assert.ok(!written[0].includes('\x1b_G'), 'no graphics escape without a known terminal');
   assert.match(written[0].toString(), /\x1b\]11;/, 'the background tint still goes out');
   assert.doesNotMatch(written[0].toString(), /\x1b\]2;/);
+  assert.ok(written[0].includes('\x07'), 'the bell still rings');
 });
 
-// KILLS: `graphics = !!envOf(intent.pid, readEnviron)` — a truthy environ OBJECT,
+// KILLS: `graphics = !!terminal.env` — a truthy environ OBJECT,
 // with graphicsCapability() bypassed entirely. That mutation passes both tests above:
 // the recognised environ is truthy (sprite fires) and the throwing one is caught
 // (no sprite). Only a READABLE environ describing a terminal we do NOT support can
@@ -632,7 +611,7 @@ test('a readable environ for a terminal we do NOT support suppresses the sprite'
   emit({
     prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
     readSprite,
-    readEnviron: () => 'TERM=xterm-256color\0',
+    terminal: { path: '/proc/4242/fd/1', env: { TERM: 'xterm-256color' } },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
   });
   assert.ok(!written[0].includes('\x1b_G'), 'the environ was read, and it said no');
@@ -685,7 +664,9 @@ test('reduced Kitty creates a root first and uses staged root composition later'
 });
 
 test('full Ghostty emits only a static root and never animation frame controls', () => {
-  const { bytes } = captureEmission({ readEnviron: () => 'TERM_PROGRAM=ghostty\0' });
+  const { bytes } = captureEmission({
+    terminal: { path: '/proc/4242/fd/1', env: { TERM_PROGRAM: 'ghostty' } },
+  });
   const out = bytes.toString();
   assert.match(out, /a=T,U=1/);
   assert.doesNotMatch(out, /a=f/);
@@ -697,7 +678,7 @@ test('later Ghostty transitions send a fresh static root, never Kitty update con
     prev: agentAt('idle'),
     next: agentAt('working'),
     priorIntent: clipsIntent('idle'),
-    readEnviron: () => 'TERM_PROGRAM=ghostty\0',
+    terminal: { path: '/proc/4242/fd/1', env: { TERM_PROGRAM: 'ghostty' } },
   });
   const out = bytes.toString();
   assert.match(out, /a=T,U=1/);
@@ -706,14 +687,14 @@ test('later Ghostty transitions send a fresh static root, never Kitty update con
 });
 
 test('off and no-graphics load no animation and preserve independent OSC output', () => {
-  for (const [label, intent, readEnviron] of [
-    ['off', clipsIntent('working', 'off'), KITTY_ENVIRON],
-    ['none', clipsIntent('working', 'full'), () => 'TERM=xterm-256color\0'],
+  for (const [label, intent, terminal] of [
+    ['off', clipsIntent('working', 'off'), KITTY_TERMINAL],
+    ['none', clipsIntent('working', 'full'), { path: '/proc/4242/fd/1', env: { TERM: 'xterm-256color' } }],
   ]) {
     let loads = 0;
     const { bytes } = captureEmission({
       intent,
-      readEnviron,
+      terminal,
       loadAnimation: () => { loads += 1; throw new Error('must not load'); },
     });
     const out = bytes.toString();

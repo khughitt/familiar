@@ -24,6 +24,7 @@ import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.j
 import { loadIdentities } from '../src/bus/pins.js';
 import { displayedIntent } from '../src/protocol/intent.js';
 import { emit } from '../src/render/term/emit.js';
+import { terminalTarget } from '../src/render/term/target.js';
 import { composeForIntent, textLines } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
@@ -668,18 +669,26 @@ async function main({ command, args: rest }) {
     // The emitter throws a named error rather than a TypeError if you do, and
     // test/emit.test.js asserts on exactly that mistake.
     const transmitSprite = adapter.printsPlaceholderCells;
-    if (next !== null) {
-      emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite });
-    } else if (prev !== null) {
-      // A cleared session has no intent left to read — synthesize just enough
-      // to reset the terminal it borrowed.
-      emit({
-        prev,
-        next: null,
-        priorIntent,
-        intent: { identity: { project: prev.project }, pid: prev.pid },
-        transmitSprite,
+    const intentPid = next?.pid ?? prev?.pid;
+    if (intentPid !== undefined) {
+      const terminal = terminalTarget(intentPid, {
+        record: defaultProcessOps.recordOf(intentPid),
+        hookEnv: process.env,
       });
+      if (next !== null) {
+        emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite, terminal });
+      } else {
+        // A cleared session has no intent left to read — synthesize just enough
+        // to reset the terminal it borrowed.
+        emit({
+          prev,
+          next: null,
+          priorIntent,
+          intent: { identity: { project: prev.project }, pid: prev.pid },
+          transmitSprite,
+          terminal,
+        });
+      }
     }
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, {
