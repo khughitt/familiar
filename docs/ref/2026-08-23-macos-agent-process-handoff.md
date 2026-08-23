@@ -144,7 +144,9 @@ for config_path in \
   "$HOME/.claude/settings.json" \
   "$FAMILIAR_CODEX_DIR/hooks.json" \
   "$FAMILIAR_OPENCODE_DIR/tui.json" \
-  "$FAMILIAR_OPENCODE_DIR/opencode.json"
+  "$FAMILIAR_OPENCODE_DIR/opencode.json" \
+  "$FAMILIAR_OPENCODE_DIR/tui.jsonc" \
+  "$FAMILIAR_OPENCODE_DIR/opencode.jsonc"
 do
   if [ -L "$config_path" ]; then
     printf 'stop: configuration is a symlink: %s\n' "$config_path" >&2
@@ -178,7 +180,7 @@ else
   : > "$FAMILIAR_BACKUP_DIR/codex/hooks.absent"
 fi
 
-for name in tui.json opencode.json; do
+for name in tui.json opencode.json tui.jsonc opencode.jsonc; do
   if [ -f "$FAMILIAR_OPENCODE_DIR/$name" ]; then
     cp -p "$FAMILIAR_OPENCODE_DIR/$name" "$FAMILIAR_BACKUP_DIR/opencode/$name"
   else
@@ -318,11 +320,30 @@ and is non-empty. If it does not, preserve the exact Codex diagnostic in
 ## 6. Capture OpenCode
 
 Install Familiar's two OpenCode registrations into the existing config. The
-backups above make this reversible:
+backups above make this reversible — they now cover the `.jsonc` variants too:
 
 ```sh
 "$FAMILIAR_HANDOFF_BIN" install opencode
 ```
+
+**If it refuses, that is the correct behaviour, not a failure.** `install
+opencode` writes `tui.json` and `opencode.json` only. If you keep a `tui.jsonc`
+or `opencode.jsonc`, it now refuses and prints the plugin path to add, instead
+of creating a `.json` sibling that shadows the file opencode actually reads —
+which is what happened on the 2026-08-23 run and went unnoticed until restore.
+Add each printed path to that file's `"plugin"` array by hand:
+
+```jsonc
+{
+  // your existing configuration, untouched
+  "plugin": ["/Users/<you>/familiar-macos-handoff/integrations/opencode/plugin.js"]
+}
+```
+
+`opencode.jsonc` takes `integrations/opencode/plugin.js`; `tui.jsonc` takes
+`integrations/opencode/sprite-plugin.tsx`. The refusal message names the right
+one for each file. Record in `notes.md` which files you edited by hand; step 10
+restores them from the backups and verifies each with `cmp`.
 
 Launch a fresh authenticated session:
 
@@ -556,7 +577,7 @@ elif [ -f "$FAMILIAR_BACKUP_DIR/codex/hooks.absent" ]; then
 fi
 
 mkdir -p "$FAMILIAR_OPENCODE_DIR"
-for name in tui.json opencode.json; do
+for name in tui.json opencode.json tui.jsonc opencode.jsonc; do
   if [ -f "$FAMILIAR_BACKUP_DIR/opencode/$name" ]; then
     cp -p "$FAMILIAR_BACKUP_DIR/opencode/$name" "$FAMILIAR_OPENCODE_DIR/$name"
     cmp -s "$FAMILIAR_BACKUP_DIR/opencode/$name" "$FAMILIAR_OPENCODE_DIR/$name"
