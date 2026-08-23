@@ -108,19 +108,33 @@ The temporary atomic replacements below do not preserve a configuration-file
 symlink. Stop before making any change if one of the affected files is a
 symlink:
 
+Do not name the loop variable `path`: zsh ties lowercase `path` to `PATH`, so
+`for path in ...` destroys `PATH` for the rest of the session and every later
+command fails with `command not found`. Run this exactly as written.
+
 ```sh
-for path in \
+familiar_symlink_found=
+for config_path in \
   "$HOME/.claude/settings.json" \
   "$FAMILIAR_CODEX_DIR/hooks.json" \
   "$FAMILIAR_OPENCODE_DIR/tui.json" \
   "$FAMILIAR_OPENCODE_DIR/opencode.json"
 do
-  if [ -L "$path" ]; then
-    printf 'stop: configuration is a symlink: %s\n' "$path" >&2
-    exit 1
+  if [ -L "$config_path" ]; then
+    printf 'stop: configuration is a symlink: %s\n' "$config_path" >&2
+    familiar_symlink_found=1
   fi
 done
+if [ -n "$familiar_symlink_found" ]; then
+  printf 'symlink check: FAILED — stop here and do not continue\n' >&2
+else
+  printf 'symlink check: passed\n'
+fi
 ```
+
+It reports every offending file rather than the first, and it deliberately does
+not call `exit`: pasted into an interactive shell that would close the session
+and discard every `FAMILIAR_*` variable exported above.
 
 Back up each present file; create the corresponding `.absent` marker when it
 does not exist:
@@ -531,23 +545,33 @@ confirm that all five attachments were saved intact.
 After confirmation, validate every deletion target before removing the local
 copies and clone:
 
+Every guard is chained to the deletion with `&&`, inside a subshell. Written as
+a flat sequence the three `test` lines print nothing and stop nothing —
+execution falls straight through to `rm -rf`. `set -e` does not fix that either:
+a shell disables errexit inside a compound command used as the left operand of
+`||`, so the deletion still runs. Only the explicit chain below is safe, and the
+subshell keeps `exit 1` from closing the tester's session.
+
 ```sh
-case "$FAMILIAR_BACKUP_DIR" in
-  "$FAMILIAR_NODE_TMP"/familiar-macos-config.*) ;;
-  *) printf 'refusing unexpected backup path: %s\n' "$FAMILIAR_BACKUP_DIR" >&2; exit 1 ;;
-esac
-test "$FAMILIAR_PROBE_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-spike"
-test "$FAMILIAR_RETURN_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-return"
-test "$FAMILIAR_HANDOFF_ROOT" = "$HOME/familiar-macos-handoff"
-cd "$HOME"
-rm -rf -- \
-  "$FAMILIAR_BACKUP_DIR" \
-  "$FAMILIAR_PROBE_DIR" \
-  "$FAMILIAR_RETURN_DIR" \
-  "$FAMILIAR_HANDOFF_ROOT"
+(
+  case "$FAMILIAR_BACKUP_DIR" in
+    "$FAMILIAR_NODE_TMP"/familiar-macos-config.*) ;;
+    *) printf 'refusing unexpected backup path: %s\n' "$FAMILIAR_BACKUP_DIR" >&2; exit 1 ;;
+  esac
+  test "$FAMILIAR_PROBE_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-spike" \
+    && test "$FAMILIAR_RETURN_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-return" \
+    && test "$FAMILIAR_HANDOFF_ROOT" = "$HOME/familiar-macos-handoff" \
+    && cd "$HOME" \
+    && rm -rf -- \
+      "$FAMILIAR_BACKUP_DIR" \
+      "$FAMILIAR_PROBE_DIR" \
+      "$FAMILIAR_RETURN_DIR" \
+      "$FAMILIAR_HANDOFF_ROOT"
+) || printf 'cleanup refused: nothing was deleted\n' >&2
 ```
 
 Delete the Signal direct-message thread after both sides confirm their required
 local copy is safely stored. Do not merge this branch. Its only durable output
-is the later reviewed and redacted
-`docs/ref/2026-08-22-macos-agent-process-spike.md` evidence note.
+is the reviewed and redacted evidence note
+`docs/ref/2026-08-23-macos-agent-process-spike.md`, committed on the design
+branch on 2026-08-23.
