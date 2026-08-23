@@ -192,14 +192,18 @@ test('the macOS handoff probe runs before hook parsing', (t) => {
       rmSync(MACOS_WITNESS_PATH, { force: true });
     });
   }
-  const result = spawnSync(process.execPath, [bin, 'hook', 'PreToolUse', ';', ':'], {
-    encoding: 'utf8',
-    env: env({
-      FAMILIAR_MACOS_SPIKE: 'codex',
-      FAMILIAR_MACOS_PROBE_DIR: outDir,
-      TMPDIR: join(root, 'wrong-output'),
-    }),
-  });
+  const result = spawnSync(
+    process.execPath,
+    [bin, 'hook', 'PreToolUse', '--agent', 'codex', ';', ':'],
+    {
+      encoding: 'utf8',
+      env: env({
+        FAMILIAR_MACOS_SPIKE: 'codex',
+        FAMILIAR_MACOS_PROBE_DIR: outDir,
+        TMPDIR: join(root, 'wrong-output'),
+      }),
+    },
+  );
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
