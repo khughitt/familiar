@@ -464,7 +464,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
 | Familiar paths | existing `~/.config` and `~/.local/state` paths |
-| Agent configuration | generated JSON only; never auto-merge Claude/Codex files |
+| Agent configuration | generated Claude Code JSON; committed Codex fixture pending executor evidence; never auto-merge either |
 | Process source | Linux `/proc`; one memoized Darwin `/bin/ps` snapshot on the normal path, plus the two §3 targeted-read exceptions |
 | Linux `tty` | presence marker only; never a path component |
 | Darwin TTY | strict normalization to `ttys<hex>` and `/dev/<tty>` |

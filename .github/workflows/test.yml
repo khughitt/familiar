@@ -45,6 +45,7 @@ jobs:
           grep -F 'Darwin copies a stable local pack through its pathname walker' "$RUNNER_TEMP/familiar-tests.log"
       - name: linked command smoke
         run: |
+          set -o pipefail
           npm link
           familiar --help
           familiar setup claude-code | node -e '

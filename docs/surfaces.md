@@ -6,6 +6,10 @@ core independent of frontend and desktop integrations.
 
 ## Shipped surfaces
 
+The lifecycle and Familiar-rendered surface claims below currently describe
+Linux. macOS has a CI-backed portable core; Darwin agent lifecycle and physical
+terminal rendering remain provisional pending their gates.
+
 | surface | state source | current contract |
 | --- | --- | --- |
 | terminal | Familiar hooks | Kitty-graphics-capable terminals receive the current full-colour image. |
