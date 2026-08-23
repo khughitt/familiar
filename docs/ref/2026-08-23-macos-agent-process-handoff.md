@@ -87,9 +87,19 @@ test -x "$FAMILIAR_KITTY_BIN"
   printf 'codex='; codex --version
   printf 'opencode='; opencode --version
   printf 'familiar-commit='; git rev-parse HEAD
+  printf 'tty-tokens='; LC_ALL=C /bin/ps -axo tty= | sort -u | tr '\n' ' '; printf '\n'
 } > "$FAMILIAR_PROBE_DIR/versions.txt"
 chmod 600 "$FAMILIAR_PROBE_DIR/versions.txt"
 ```
+
+`tty-tokens` is the distinct set of TTY tokens on the whole machine, and it is
+the one line here that is about Familiar's parser rather than about versions.
+Familiar's Darwin snapshot reads `ps -axo` over every process, so it meets every
+token in that set. It accepts `??`, `ttys<hex>`, and `s<hex>`; anything else —
+`console` is the documented BSD name to watch for — is a named error. A row it
+cannot parse now fails only for that one PID, so an unexpected token can no
+longer disable the machine, but the real inventory decides whether the accepted
+set is complete. Token names carry no path, user, or session content.
 
 ## 3. Back up configuration
 
