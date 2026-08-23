@@ -223,6 +223,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
     'familiar theme (?!list\\b|add\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
     'u',
   );
+  const retiredClaudeSetup = /\/path\/to\/familiar\/bin\/familiar (?:hook|statusline)/u;
   const textExtensions = new Set(['.js', '.mjs', '.ts', '.tsx', '.md', '.yaml', '.yml']);
   const failures = [];
 
@@ -236,7 +237,9 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
         const name = relative(repoRoot, file);
         if (name === 'test/cli-help.test.js') continue;
         readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
-          if (retired.test(line)) failures.push(`${name}:${index + 1}: ${line.trim()}`);
+          if (retired.test(line) || (extname(name) === '.md' && retiredClaudeSetup.test(line))) {
+            failures.push(`${name}:${index + 1}: ${line.trim()}`);
+          }
         });
       }
     }
@@ -255,7 +258,9 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
     }
     if (extname(path)) {
       readFileSync(path, 'utf8').split('\n').forEach((line, index) => {
-        if (retired.test(line)) failures.push(`${surface}:${index + 1}: ${line.trim()}`);
+        if (retired.test(line) || (extname(surface) === '.md' && retiredClaudeSetup.test(line))) {
+          failures.push(`${surface}:${index + 1}: ${line.trim()}`);
+        }
       });
     } else inspect(path);
   }
