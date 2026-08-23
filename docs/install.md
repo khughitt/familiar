@@ -37,22 +37,11 @@ prints JSON; it does not edit your settings file.
 
 ### Codex lifecycle hooks
 
-Codex lifecycle configuration remains the committed fixture at
-`integrations/codex/hooks.json` while its generated setup path awaits the
-physical-Mac gate. Review the fixture and merge it into an existing hooks file;
-do not replace that file. When `CODEX_HOME` is unset, the destination is
-`$HOME/.codex/hooks.json`.
-
-Only if no hooks file exists, copy the fixture from this checkout:
-
-```sh
-if [ ! -e "${CODEX_HOME:-$HOME/.codex}/hooks.json" ]; then
-  cp integrations/codex/hooks.json "${CODEX_HOME:-$HOME/.codex}/hooks.json"
-fi
-```
-
-This is distinct from Claude Code's generated JSON; no Codex generation
-behavior is documented until the physical-Mac gate has been completed.
+`integrations/codex/hooks.json` is a review-only fixture. It contains a literal
+path placeholder, and its executor encoding remains unresolved until the
+physical-Mac gate is complete. Do not copy, merge, or install it. No Codex
+generation or installation behavior is documented until that gate has been
+completed.
 
 ## macOS integration
 
@@ -97,8 +86,10 @@ provisional pending the physical-Mac gate.
 
 ### Reap abandoned sessions
 
-An agent that exits without `SessionEnd` can leave state behind. To reap those
-sessions every minute, replace only the binary path below, then save it as
+An agent that exits without `SessionEnd` can leave state behind. First run
+`command -v node` and record its absolute output. To reap abandoned sessions
+every minute, replace both absolute paths below—the Node executable and this
+checkout's `bin/familiar`—then save the file as
 `~/Library/LaunchAgents/dev.familiar.reap.plist`:
 
 ```xml
@@ -110,6 +101,7 @@ sessions every minute, replace only the binary path below, then save it as
   <string>dev.familiar.reap</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/absolute/path/to/node</string>
     <string>/absolute/path/to/familiar/bin/familiar</string>
     <string>reap</string>
   </array>

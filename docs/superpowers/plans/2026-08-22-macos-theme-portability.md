@@ -10,6 +10,10 @@
 
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§1, 2, 5, 9, 10, 12.
 
+**Implementation evidence:** The temporary `macos-theme` probe succeeded on
+real Darwin in [GitHub Actions run 32614398893](https://github.com/khughitt/familiar/actions/runs/32614398893)
+before the branch-only job was removed as planned.
+
 ## Global Constraints
 
 - Linux traversal remains `/proc/self/fd/N`; do not replace it with `/dev/fd`.

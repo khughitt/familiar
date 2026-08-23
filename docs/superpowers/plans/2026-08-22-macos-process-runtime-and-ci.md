@@ -10,6 +10,11 @@
 
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§2–4, 6, 9–11, 14.
 
+**Implementation status (2026-08-23):** Tasks 2–6 are complete for the portable
+core and permanent CI. Task 1's physical ancestry evidence, the Task 2 Darwin
+adapter activation it gates, and Task 7's physical terminal matrix remain
+pending; no macOS agent lifecycle or terminal-rendering support is claimed.
+
 ## Global Constraints
 
 - Task 1 requires a physical Mac and gates all resolver-name implementation.
@@ -130,7 +135,7 @@ git commit -m "docs(macos): record live agent ancestry"
 - Record: `{ pid, ppid, comm, tty, starttime }`; Linux `tty` is `true|null`, Darwin `tty` is `string|null`.
 - Test seams: `platform`, `runPs(args): string`, and `kill(pid, 0)`.
 
-- [ ] **Step 1: Write failing normalization/parser tests**
+- [x] **Step 1: Write failing normalization/parser tests**
 
 Change Linux expectations and adapter fixtures from `ttyNr: 0|number` to `tty: null|true`. Add to `test/proc.test.js`:
 
@@ -180,7 +185,7 @@ test('one Darwin snapshot serves ancestry, start time, and liveness', () => {
 
 Also test malformed PID/PPID, invalid `lstart`, empty `comm`, nonzero `ps`, missing identity, and start-time mismatch.
 
-- [ ] **Step 2: Run focused tests and verify failure**
+- [x] **Step 2: Run focused tests and verify failure**
 
 ```bash
 node --test test/proc.test.js test/claude-code.test.js test/codex.test.js test/opencode.test.js
@@ -188,7 +193,7 @@ node --test test/proc.test.js test/claude-code.test.js test/codex.test.js test/o
 
 Expected: missing Darwin exports and old adapter predicates fail.
 
-- [ ] **Step 3: Implement strict parsing**
+- [x] **Step 3: Implement strict parsing**
 
 Change Linux output to `tty: ttyNr === 0 ? null : true`. Add:
 
@@ -219,7 +224,7 @@ export function parseDarwinRow(line) {
 }
 ```
 
-- [ ] **Step 4: Implement `createProcessOps`**
+- [x] **Step 4: Implement `createProcessOps`**
 
 Keep explicit `linux`, `darwin`, and unsupported branches. The Darwin branch lazily caches `new Map(records.map(record => [record.pid, record]))`; `ancestors`, `recordOf`, `startTimeOf`, and `isAlive` share it. Default full-table execution is exactly:
 
@@ -243,9 +248,11 @@ export const isAlive = (...args) => defaultProcessOps.isAlive(...args);
 export const pidExists = (...args) => defaultProcessOps.pidExists(...args);
 ```
 
-- [ ] **Step 5: Update evidence-backed adapter predicates**
+- [ ] **Step 5: Activate evidence-backed Darwin adapter predicates**
 
-Use the Task 1 basenames and:
+Pending Task 1's physical ancestry evidence. The adapters currently fail
+explicitly on Darwin instead of applying unverified basenames. After the gate,
+use the measured Task 1 basenames and:
 
 ```js
 const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
@@ -253,7 +260,7 @@ const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== n
 
 Link the Darwin claim in each adapter comment to the committed spike note.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit the portable process core**
 
 ```bash
 node --test test/proc.test.js test/claude-code.test.js test/codex.test.js test/opencode.test.js
@@ -277,7 +284,7 @@ git commit -m "feat(process): add Darwin process snapshots"
 - Consumes: `createProcessOps()` from Task 2.
 - Produces: `processOps.lockHolderAlive`; `withLock` options `startTimeOf` and `isAlive`; transaction dependency `processOps`.
 
-- [ ] **Step 1: Write failing injection tests**
+- [x] **Step 1: Write failing injection tests**
 
 In `test/lock.test.js`, assert minting uses the supplied identity:
 
@@ -306,7 +313,7 @@ processOps: {
 },
 ```
 
-- [ ] **Step 2: Run focused tests and confirm the old imports bypass the seams**
+- [x] **Step 2: Run focused tests and confirm the old imports bypass the seams**
 
 ```bash
 node --test test/lock.test.js test/transaction.test.js
@@ -314,7 +321,7 @@ node --test test/lock.test.js test/transaction.test.js
 
 Expected: injected token identity and transaction process view are not used.
 
-- [ ] **Step 3: Make lock identity explicit**
+- [x] **Step 3: Make lock identity explicit**
 
 In `src/bus/lock.js`:
 
@@ -339,7 +346,7 @@ If `kill(pid, 0)` says absent, return false. If PID existence is established but
 
 Expose the targeted reader as `freshRecordOf(pid)` and `freshStartTimeOf(pid)` on both platform objects. Linux performs one fresh `/proc/<pid>/stat` read; Darwin performs the targeted `ps` above. `lockHolderAlive` reuses `freshRecordOf` rather than implementing a second parser path.
 
-- [ ] **Step 4: Use one view in both transaction entry points**
+- [x] **Step 4: Use one view in both transaction entry points**
 
 In `src/bus/transaction.js`:
 
@@ -360,11 +367,11 @@ Use `processOps.startTimeOf` for new records and `processOps.isAlive` for prunin
 
 Pass the default lazy process view from `bin/familiar` to `hook` and `reap`; do not construct a second view in the emitter.
 
-- [ ] **Step 5: Add the N-record spawn-count assertion**
+- [x] **Step 5: Add the N-record spawn-count assertion**
 
 Create three bus records in a transaction test, inject Darwin `runPs` with a counter, perform one hook transaction, and assert exactly one full-table call. The uncontended test must inject lock-holder behavior so it cannot add a targeted read.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 node --test test/proc.test.js test/lock.test.js test/lock-multiprocess.test.js test/transaction.test.js
@@ -384,7 +391,7 @@ git commit -m "refactor(process): share one invocation snapshot"
 - Consumes: existing `withLock` and default process ops from Task 3.
 - Produces: `withSuiteLease(fn, deps)`; version-2 owner records retain `pidNamespace`, with Darwin returning `darwin-host`.
 
-- [ ] **Step 1: Write failing platform tests**
+- [x] **Step 1: Write failing platform tests**
 
 Add to `test/test-runner.test.js`:
 
@@ -413,7 +420,7 @@ test('Darwin owner scope keeps the v2 pidNamespace field', () => {
 
 Also inject a `withLock` rejection and assert `test runner: could not acquire suite lease`, without claiming a live suite was found.
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 ```bash
 node --test test/test-runner.test.js
@@ -421,7 +428,7 @@ node --test test/test-runner.test.js
 
 Expected: missing exports and the unconditional `/proc/self/ns/pid` read fail.
 
-- [ ] **Step 3: Wrap the suite in one platform lease**
+- [x] **Step 3: Wrap the suite in one platform lease**
 
 Rename existing socket helpers to `acquireSocketLease`/`releaseSocketLease`, then add:
 
@@ -475,7 +482,7 @@ const starttime = processOps.freshStartTimeOf(child.pid);
 
 The parent owner stamp remains `processOps.startTimeOf(process.pid)`, from the invocation snapshot. Add a test whose snapshot omits the subsequently spawned fake child but whose `freshStartTimeOf` returns its identity; assert the worker owner record is written with that value.
 
-- [ ] **Step 4: Make the existing owner scope provider portable**
+- [x] **Step 4: Make the existing owner scope provider portable**
 
 ```js
 export function pidNamespaceOf({
@@ -490,11 +497,11 @@ export function pidNamespaceOf({
 
 Keep `version: 2`, `pidNamespace`, and the exact-key validator unchanged.
 
-- [ ] **Step 5: Cover crashed guards and live refusal**
+- [x] **Step 5: Cover crashed guards and live refusal**
 
 Create a dead lock plus `.reclaim` guard in a temporary directory, age the guard past five seconds with `utimesSync`, and assert the Darwin callback runs with the real `withLock`. Separately pass `lockOptions: { retries: 1, delayMs: 0 }` around a held live lease and assert the generic lease error. Add a callback-throw test proving its original error is not relabeled as lease acquisition.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 node --test test/test-runner.test.js test/lock.test.js test/lock-multiprocess.test.js
@@ -519,7 +526,7 @@ git commit -m "feat(test): add Darwin suite lease"
 - Changes: `emit` requires `terminal: { path, env }` and performs no `/proc` or ambient-environment lookup.
 - Consumes: `processOps.recordOf(intent.pid)` from the one invocation snapshot.
 
-- [ ] **Step 1: Write failing target tests**
+- [x] **Step 1: Write failing target tests**
 
 Create `test/terminal-target.test.js`:
 
@@ -560,7 +567,7 @@ test('unreadable Linux environ degrades graphics only', () => {
 });
 ```
 
-- [ ] **Step 2: Make emitter fixtures explicit**
+- [x] **Step 2: Make emitter fixtures explicit**
 
 In `test/emit.test.js`, replace `readEnviron: KITTY_ENVIRON` in `captureEmission` with:
 
@@ -573,7 +580,7 @@ terminal: {
 
 Update the unreadable-environment case to pass `env: undefined`; retain assertions that graphics disappear while tint/bell remain. Assert the open seam receives `terminal.path`.
 
-- [ ] **Step 3: Verify failure**
+- [x] **Step 3: Verify failure**
 
 ```bash
 node --test test/terminal-target.test.js test/emit.test.js
@@ -581,7 +588,7 @@ node --test test/terminal-target.test.js test/emit.test.js
 
 Expected: missing target module and old emitter signature fail.
 
-- [ ] **Step 4: Implement the target boundary**
+- [x] **Step 4: Implement the target boundary**
 
 Move `envOf` from `emit.js` into `target.js` and add:
 
@@ -611,7 +618,7 @@ export function terminalTarget(pid, {
 
 Change `emit` to require `terminal`, compute capability from `terminal.env`, and call `open(terminal.path, 'a')`. Preserve precomputed bytes, `isatty`, complete-write, and open-failure behavior.
 
-- [ ] **Step 5: Bind terminal data once in `bin/familiar`**
+- [x] **Step 5: Bind terminal data once in `bin/familiar`**
 
 Before both normal and SessionEnd emission:
 
@@ -625,7 +632,7 @@ const terminal = terminalTarget(intentPid, {
 
 Pass `terminal` to `emit`. Add a CLI test that forces a resolver/TTY error and asserts one `familiar:` diagnostic with exit status zero.
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```bash
 node --test test/terminal-target.test.js test/emit.test.js test/bin-familiar.test.js
@@ -647,7 +654,10 @@ git commit -m "feat(terminal): add validated Darwin target"
 - Consumes: this plan plus the completed theme and setup plans.
 - Produces: permanent `macos-14` / Node 22 coverage; live rendering remains provisional.
 
-- [ ] **Step 1: Add the permanent job**
+**Implementation evidence:** Permanent CI is green in
+[GitHub Actions run 32632502797](https://github.com/khughitt/familiar/actions/runs/32632502797).
+
+- [x] **Step 1: Add the permanent job**
 
 Append:
 
@@ -662,28 +672,31 @@ Append:
       - run: npm ci
       - name: fast suite with Darwin tests enforced
         run: |
+          set -o pipefail
           npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
-          ! grep -F 'SKIP requires Darwin' "$RUNNER_TEMP/familiar-tests.log"
+          ! grep -F 'requires Darwin' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'Darwin real snapshot keeps this process identity stable' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin ps keeps comm last' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin copies a stable local pack' "$RUNNER_TEMP/familiar-tests.log"
       - name: linked command smoke
         run: |
+          set -o pipefail
           npm link
           familiar --help
-          familiar setup codex | node -e '
+          familiar setup claude-code | node -e '
             let text = "";
             process.stdin.setEncoding("utf8");
             process.stdin.on("data", chunk => text += chunk);
             process.stdin.on("end", () => {
               const value = JSON.parse(text);
-              if (!value.hooks?.SessionEnd) process.exit(1);
+              if (!value.hooks?.SessionEnd || !value.statusLine) process.exit(1);
             });
           '
 ```
 
 Use standard shell tools; add no dependency. Keep the Linux Node 22/26 matrix and Linux smoke job.
 
-- [ ] **Step 2: Verify Linux locally**
+- [x] **Step 2: Verify Linux locally**
 
 ```bash
 npm ci
@@ -693,7 +706,7 @@ git diff --check
 
 Expected: full suite passes with named `requires Darwin` skips.
 
-- [ ] **Step 3: Commit, push, and inspect all jobs**
+- [x] **Step 3: Commit, push, and inspect all jobs**
 
 ```bash
 git add .github/workflows/test.yml
@@ -704,17 +717,18 @@ gh run watch --exit-status
 
 Expected: Linux Node 22/26, Linux smoke, and macOS Node 22 succeed. In the macOS log, the enforced Darwin test names run without `SKIP requires Darwin`.
 
-- [ ] **Step 4: Correct historical status claims**
+- [x] **Step 4: Correct historical status claims**
 
 Only after the CI commit is an ancestor and the described files exist, change the design header to:
 
 ```markdown
-**Status:** implemented for CI-backed core; physical terminal rendering remains provisional
+**Status:** portable core implemented and CI-backed; Darwin agent activation and
+physical terminal rendering remain provisional
 ```
 
 Add the permanent run URL to its evidence section. Keep the physical Kitty/Ghostty checklist and provisional OpenCode renderer language in `docs/install.md`.
 
-- [ ] **Step 5: Commit and verify**
+- [x] **Step 5: Commit and verify**
 
 ```bash
 git add docs/install.md docs/specs/2026-08-22-macos-support-design.md
