@@ -334,6 +334,13 @@ The macOS suite includes:
 - Exact setup-command JSON, `--help`, rejected extra arguments, and a package
   realpath containing spaces.
 
+Fixture tests inject Darwin inputs and run on every platform. Tests that require
+the real Darwin process table or filesystem register normally with Node's test
+runner and use `{ skip: process.platform !== 'darwin' ? 'requires Darwin' : false }`;
+they are never hidden behind a conditional registration. Linux therefore reports
+each named skip, while the macOS job discovers the same test IDs and executes
+them rather than treating an empty platform group as coverage.
+
 `npm ci` selects `@opentui/core-darwin-arm64`, but no current test loads
 `integrations/opencode/sprite-plugin.tsx`. The macOS job therefore backs the
 OpenCode hook and installer only. The renderer remains provisional rather than
