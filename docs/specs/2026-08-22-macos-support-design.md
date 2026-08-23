@@ -252,8 +252,13 @@ capture, Familiar's hook process under Claude Code had **no controlling
 terminal** — `tty` was `??` at both the hook and its `sh` parent — while the
 resolved `claude` process held `ttys000`. Codex and OpenCode hooks did inherit
 the TTY, so a design that read the terminal from the hook would have worked for
-two agents out of three and silently failed the third. The Ghostty half of the
-environment result is still unmeasured.
+two agents out of three and silently failed the third.
+
+A second capture on the same day in Ghostty 1.3.1 closed the other half: all 12
+records carried `TERM=xterm-ghostty`, `TERM_PROGRAM=ghostty`, and both
+`GHOSTTY_*` markers into the hook, classifying as `static-graphics`. The hook
+environment is therefore a sound capability source on Darwin for both supported
+terminals. tmux remains unmeasured and unclaimed.
 
 Codex uses native pets rather than Familiar-rendered sprites. OpenCode's sprite
 renderer executes inside OpenCode with its own environment, but remains
@@ -450,11 +455,11 @@ applicable pair it checks launch/idle, working, approval, done/error where
 exposed, session exit, and `familiar reap` after abnormal termination.
 
 The pass records agent and terminal versions, resolved ancestor basename, raw
-and canonical TTY, inherited graphics markers, and concise failures. Two gaps
-the §2 capture left open belong to this pass: the Ghostty environment markers,
-whose classifier tests values rather than presence, and a background or
-daemon-hosted Claude Code session, the case the `tty !== null` predicate exists
-for. It also
+and canonical TTY, inherited graphics markers, and concise failures. One gap
+the §2 captures left open belongs to this pass: a background or daemon-hosted
+Claude Code session, the case the `tty !== null` predicate exists for. The
+Ghostty environment markers were closed by the 2026-08-23 Ghostty capture. It
+also
 loads the OpenCode sprite plugin, so the optional native renderer dependency is
 exercised rather than merely installed.
 

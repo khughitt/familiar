@@ -134,6 +134,40 @@ GHOSTTY_RESOURCES_DIR absent
 (`src/render/term/capability.js`), so the design's decision to read the graphics
 environment from the hook's inherited environment on Darwin holds for Kitty.
 
+## 4a. Ghostty capture, 2026-08-23
+
+The same runbook was run a second time on the same Mac in Ghostty 1.3.1, from
+`f1fe964`, producing 12 records across the three agents. It closes the Ghostty
+half of §4 of the design.
+
+The `environment` block is identical in all 12 records and all three agents:
+
+```text
+TERM=xterm-ghostty   TERM_PROGRAM=ghostty
+KITTY_WINDOW_ID=false   KITTY_PID=false
+GHOSTTY_RESOURCES_DIR=true   GHOSTTY_BIN_DIR=true   TMUX=false
+```
+
+Fed to `graphicsCapability`, that environment classifies as `static-graphics` —
+the capability the design claims for Ghostty. Both values survived every hook
+executor, including the two shell frames.
+
+The values, not merely the presence flags, are what make this decisive. The
+classifier's first rule is that an explicit `TERM_PROGRAM === 'ghostty'` beats
+inherited Kitty markers; with the value unknown, the same environment carrying a
+stale `KITTY_WINDOW_ID` classifies as `kitty-animation` instead — the wrong
+renderer. Presence booleans could not have distinguished those cases.
+
+All three executor behaviours reproduced the Kitty run exactly: Claude Code
+`/bin/sh -c` with the quoting honoured, Codex `/bin/zsh -c` with the unquoted
+path and canary intact, OpenCode with no shell frame. All three chains
+terminate at one Ghostty process on `ttys006`, so no terminal mixing occurred.
+
+`tty-tokens` answers the question §5 left open: the whole machine reported only
+`??` and `ttys000`–`ttys005`. No `console`, nothing outside the accepted set.
+That is one machine on one day, not a proof about macOS, but the per-PID row
+scoping means an unexpected token is now survivable rather than fatal.
+
 ## 5. What this evidence does not cover
 
 - **No background or daemon-hosted Claude Code session.** The `tty !== null` half
