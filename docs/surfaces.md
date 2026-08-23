@@ -7,8 +7,10 @@ core independent of frontend and desktop integrations.
 ## Shipped surfaces
 
 The lifecycle and Familiar-rendered surface claims below currently describe
-Linux. macOS has a CI-backed portable core; Darwin agent lifecycle and physical
-terminal rendering remain provisional pending their gates.
+Linux. macOS has a CI-backed portable core. Its live-hook ancestry gate closed
+on 2026-08-23 (`docs/ref/2026-08-23-macos-agent-process-spike.md`), so Darwin
+agent lifecycle is authorized but not yet activated in the adapters; physical
+terminal rendering remains provisional pending its own gate.
 
 | surface | state source | current contract |
 | --- | --- | --- |

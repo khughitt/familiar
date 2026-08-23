@@ -1,7 +1,8 @@
 # macOS Core Support — Design
 
-**Status:** portable core implemented and CI-backed; Darwin agent activation and
-physical terminal rendering remain provisional
+**Status:** portable core implemented and CI-backed; live-hook ancestry and
+executor gate closed 2026-08-23; Darwin adapter activation pending and physical
+terminal rendering provisional
 **Date:** 2026-08-22
 
 Familiar's portable core now runs in Linux and macOS CI without pretending
@@ -9,10 +10,12 @@ GitHub Actions can prove behavior inside a real Kitty or Ghostty window.
 
 The target support claim is deliberately split:
 
-- **Supported after CI and the process spike gates pass:** macOS 14+ on Apple
+- **Supported once Darwin adapter activation lands:** macOS 14+ on Apple
   Silicon, Node 22, checkout installation, Familiar configuration and themes,
   the CLI, Claude Code lifecycle and status-line configuration, Codex hooks and
-  native pets, and the OpenCode hook and installer.
+  native pets, and the OpenCode hook and installer. Both gates this claim waited
+  on have now passed: CI is green, and the live-hook capture in §2 confirmed the
+  resolver predicate. The adapters themselves still refuse on Darwin.
 - **Provisional until physical-Mac smoke testing:** Familiar-rendered graphics,
   tint, and bell delivery in Kitty and Ghostty, including OpenCode's TUI sprite
   renderer.
@@ -63,40 +66,49 @@ established these implementation facts:
   the current Codex package installed a JavaScript launcher. Unauthenticated
   startup did not provide a reliable substitute for a live hook ancestor chain.
 
-One pre-resolver spike remains. On a physical Mac, a live hook from each current
-Claude Code, Codex, and OpenCode release must capture its full ancestor chain
-with both commands below, along with the agent version:
+That pre-resolver spike has been run. On 2026-08-23, a live hook from Claude
+Code 2.1.241, codex-cli 0.149.0, and opencode 1.18.21 was captured on macOS
+26.6.2 (Apple M4, Kitty 0.46.2) from the disposable `spike/macos-agent-handoff`
+branch at `2f592ee`. The reviewed, redacted evidence is
+`docs/ref/2026-08-23-macos-agent-process-spike.md`; the raw capture was never
+committed. It establishes:
 
-```sh
-LC_ALL=C /bin/ps -axo pid=,ppid=,tty=,lstart=,comm=
-LC_ALL=C /bin/ps -axo pid=,ppid=,tty=,lstart=,command=
-```
+- The terminal-owning ancestor basenames are exactly `claude`, `codex`, and
+  `opencode`, each with a non-null TTY, at depth 2, 2, and 1. The approved
+  predicate — skip the hook process, then take the first ancestor whose basename
+  matches and whose `tty` is non-null — needs no amendment.
+- Codex's `comm` is the full vendored executable path, so basename
+  normalization is load-bearing rather than cosmetic. The `node` npm launcher
+  immediately above it shares the TTY but not the name, leaving the walk
+  unambiguous without an additional rule.
+- Claude Code executes its hook command through `/bin/sh -c` and honors the
+  quoting `setupDocument` emits. Codex executes through `/bin/zsh -c`. That is
+  a shell, measured with a deliberately unquoted path and a `; :` canary no
+  whitespace-splitting executor could have produced, so Codex setup command
+  encoding is unblocked and single-quote quoting is correct under both shells.
+- OpenCode spawns Familiar directly, with no shell frame, in all 26 records.
+- Familiar's hook process has no controlling terminal under Claude Code, which
+  is exactly why the TTY target is read from the resolved agent's record rather
+  than from the hook.
 
-Both free-form fields stay last. The capture must cover a real interactive
-session, not an unauthenticated launch. Darwin resolver names are taken only
-from that evidence. If a terminal-owning ancestor basenames to `node`, a shim,
-or another name, the implementation must specify and test the smallest exact
-rule that distinguishes that process; it must not silently reuse Linux's names.
+Two limits are carried forward rather than closed. No background or
+daemon-hosted Claude Code session was observed, so the `tty !== null` half of
+the predicate rests on Linux evidence. And the capture ran on macOS 26.6.2 with
+Node 25 while CI runs macOS 14 with Node 22, so no single configuration has been
+exercised end to end with live agents.
 
-For each agent, the evidence note also records every process between Familiar
-and the agent and whether a shell frame is present. Claude Code's documented
-`sh -c` boundary already justifies POSIX shell quoting. Codex command encoding
-remains gated on this capture: use shell quoting only if the live chain confirms
-a shell-interpreted boundary. If it does not, stop and amend the design from
-measured executor behavior rather than guessing from the single-string JSON
-shape. OpenCode's existing integration uses direct `spawn` with `shell: false`;
-its chain is recorded for completeness, not as a setup-command gate.
-
-Darwin parser, Claude Code setup, CI, theme, and test-runner work may proceed
-independently. Darwin adapter activation, Codex setup command encoding, and the
-Supported claim remain gated on the live-hook capture. A resolver miss is a
-named diagnostic at the hook's cosmetic boundary, not a silent no-op.
+Darwin parser, Claude Code setup, CI, theme, and test-runner work proceeded
+independently and are complete. The live-hook gate is now closed, which
+authorizes Darwin adapter activation and Codex setup command encoding; neither
+is implemented yet. A resolver miss is a named diagnostic at the hook's cosmetic
+boundary, not a silent no-op.
 
 The permanent core matrix is green in [run 32631362471](https://github.com/khughitt/familiar/actions/runs/32631362471):
 Linux Node 22/26 and smoke passed, while macOS 14 / Node 22 ran all 833 tests
 with 828 passing, five non-Darwin skips, and zero failures. Its real process
 snapshot, Darwin parser, stable-theme, linked-help, and Claude setup JSON checks
-all ran. This evidence does not satisfy the live-hook capture above.
+all ran. CI alone never satisfied the live-hook gate; the capture recorded
+above is what closed it.
 
 ## 3. Process architecture
 
@@ -219,6 +231,17 @@ degrade only graphics to capability `none`; tint and bell still target the
 validated TTY. The emitter seam therefore accepts environment and terminal
 target separately instead of deriving both from `intent.pid`.
 
+Both halves of that split are now measured rather than assumed
+(`docs/ref/2026-08-23-macos-agent-process-spike.md`). All 30 captured hook
+processes inherited `TERM`, `KITTY_WINDOW_ID`, and `KITTY_PID`, which is
+sufficient for `graphicsCapability` to return `kitty-animation`. In the same
+capture, Familiar's hook process under Claude Code had **no controlling
+terminal** — `tty` was `??` at both the hook and its `sh` parent — while the
+resolved `claude` process held `ttys000`. Codex and OpenCode hooks did inherit
+the TTY, so a design that read the terminal from the hook would have worked for
+two agents out of three and silently failed the third. The Ghostty half of the
+environment result is still unmeasured.
+
 Codex uses native pets rather than Familiar-rendered sprites. OpenCode's sprite
 renderer executes inside OpenCode with its own environment, but remains
 provisional until the renderer is loaded and exercised on a physical Mac.
@@ -288,16 +311,22 @@ newline. Diagnostics go to stderr and failure is nonzero.
 
 - `setup claude-code` returns the settings fragment containing Familiar's
   lifecycle hooks and `statusLine` command.
-Generated Codex setup remains unimplemented until the executor boundary is
-captured; the committed Codex hooks fixture remains the review source meanwhile.
+
+Generated Codex setup is unimplemented but no longer gated: the §2 capture
+measured Codex executing its single-string hook command through `/bin/zsh -c`.
+The committed Codex hooks fixture remains the review source until `setup codex`
+lands.
 
 Command values use the realpath of `bin/familiar` in the running package. Under
 `npm link`, that is the checkout target rather than the npm-prefix symlink.
-Claude Code's path is POSIX-shell-quoted for its documented `sh -c` boundary
-before the document is JSON-encoded, so spaces, single quotes, and
-JSON-significant characters remain literal. Codex uses the same encoding only
-after the §2 capture confirms a shell-interpreted boundary; otherwise its setup
-design must be amended before implementation. The commands never inspect or
+Claude Code's path is POSIX-shell-quoted for its `sh -c` boundary before the
+document is JSON-encoded, so spaces, single quotes, and JSON-significant
+characters remain literal. The §2 capture observed that boundary directly and
+confirmed the emitted quoting survives it. Codex uses the same encoding: its
+boundary is `/bin/zsh -c`, and the single-quote form is correct under both
+shells. Nothing here applies to OpenCode, which spawns Familiar with no shell at
+all — a future `setup opencode` emitting a quoted command string would be broken
+by that path, not merely redundant. The commands never inspect or
 write `~/.claude` or `~/.codex`. Users review and merge the output.
 
 The existing mutating commands remain distinct:
@@ -398,14 +427,19 @@ substitute for the two physical-Mac gates in §§2 and 11.
 
 ## 11. Manual promotion gates
 
-The live-hook ancestor capture in §2 occurs before Darwin adapter activation.
-With implementation CI green, the remaining physical-Mac smoke pass runs Claude
-Code, Codex, and OpenCode in current Kitty and Ghostty releases. For each
+The live-hook ancestor capture in §2 was completed on 2026-08-23 and is the
+prerequisite for Darwin adapter activation. With implementation CI green, the
+remaining physical-Mac smoke pass runs Claude Code, Codex, and OpenCode in
+current Kitty and Ghostty releases. For each
 applicable pair it checks launch/idle, working, approval, done/error where
 exposed, session exit, and `familiar reap` after abnormal termination.
 
 The pass records agent and terminal versions, resolved ancestor basename, raw
-and canonical TTY, inherited graphics markers, and concise failures. It also
+and canonical TTY, inherited graphics markers, and concise failures. Two gaps
+the §2 capture left open belong to this pass: the Ghostty environment markers,
+whose classifier tests values rather than presence, and a background or
+daemon-hosted Claude Code session, the case the `tty !== null` predicate exists
+for. It also
 loads the OpenCode sprite plugin, so the optional native renderer dependency is
 exercised rather than merely installed.
 
@@ -460,7 +494,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 
 | Decision | Choice |
 | --- | --- |
-| First support claim | portable core CI-backed; Darwin agent lifecycle after live-hook ancestry evidence |
+| First support claim | portable core CI-backed; Darwin agent lifecycle authorized by the 2026-08-23 live-hook evidence |
 | Live terminal claim | provisional until physical-Mac smoke |
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
