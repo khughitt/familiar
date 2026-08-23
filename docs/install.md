@@ -20,6 +20,10 @@ familiar theme add <theme-url-or-directory>
 checkout. It validates the complete pack before atomically installing it into
 `~/.config/familiar/themes/<id>`.
 
+The portable macOS core is CI-backed, but agent lifecycle hooks on Darwin remain
+inactive until the physical-Mac ancestry gate is complete. The setup and install
+commands below prepare configuration; they are not a macOS lifecycle-support claim.
+
 ### Claude Code
 
 Generate the Claude Code settings fragment:

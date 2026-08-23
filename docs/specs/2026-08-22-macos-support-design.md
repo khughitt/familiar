@@ -1,11 +1,11 @@
 # macOS Core Support — Design
 
-**Status:** approved in review; implementation planned; not implemented
+**Status:** portable core implemented and CI-backed; Darwin agent activation and
+physical terminal rendering remain provisional
 **Date:** 2026-08-22
 
-Familiar currently develops and tests against Linux. This milestone makes its
-portable core a CI-backed macOS product without pretending GitHub Actions can
-prove behavior inside a real Kitty or Ghostty window.
+Familiar's portable core now runs in Linux and macOS CI without pretending
+GitHub Actions can prove behavior inside a real Kitty or Ghostty window.
 
 The target support claim is deliberately split:
 
@@ -91,6 +91,12 @@ Darwin parser, Claude Code setup, CI, theme, and test-runner work may proceed
 independently. Darwin adapter activation, Codex setup command encoding, and the
 Supported claim remain gated on the live-hook capture. A resolver miss is a
 named diagnostic at the hook's cosmetic boundary, not a silent no-op.
+
+The permanent core matrix is green in [run 32631362471](https://github.com/khughitt/familiar/actions/runs/32631362471):
+Linux Node 22/26 and smoke passed, while macOS 14 / Node 22 ran all 833 tests
+with 828 passing, five non-Darwin skips, and zero failures. Its real process
+snapshot, Darwin parser, stable-theme, linked-help, and Claude setup JSON checks
+all ran. This evidence does not satisfy the live-hook capture above.
 
 ## 3. Process architecture
 
@@ -270,11 +276,10 @@ after spawn; its owner record cannot be minted from the earlier snapshot.
 
 ## 7. Public setup interface
 
-Add one non-mutating command family:
+The implemented non-mutating setup command is:
 
 ```text
 familiar setup claude-code
-familiar setup codex
 ```
 
 Apart from the CLI's universal `--help`, each leaf command accepts no positional
@@ -283,7 +288,8 @@ newline. Diagnostics go to stderr and failure is nonzero.
 
 - `setup claude-code` returns the settings fragment containing Familiar's
   lifecycle hooks and `statusLine` command.
-- `setup codex` returns the complete Familiar hooks document.
+Generated Codex setup remains unimplemented until the executor boundary is
+captured; the committed Codex hooks fixture remains the review source meanwhile.
 
 Command values use the realpath of `bin/familiar` in the running package. Under
 `npm link`, that is the checkout target rather than the npm-prefix symlink.
@@ -317,14 +323,14 @@ familiar theme add <theme-url-or-directory>
 restatement of existing metadata.
 
 `docs/install.md` is rewritten into shared setup, macOS, and Linux sections. Its
-current hand-written Claude Code and Codex JSON is replaced by the corresponding
-`familiar setup` output so generated and documented commands cannot drift. The
+hand-written Claude Code JSON is replaced by `familiar setup claude-code` output.
+Codex retains its committed fixture until §2 authorizes a setup command. The
 macOS path covers:
 
 1. Checkout installation, scheme, and theme.
 2. `setup claude-code` output merged into `~/.claude/settings.json`.
-3. `install pets`, project syncing, and `setup codex` output for
-   `$CODEX_HOME/hooks.json`.
+3. `install pets`, project syncing, and the committed Codex hooks fixture for
+   `$CODEX_HOME/hooks.json`; no generated Codex setup command is documented yet.
 4. `install opencode`, whose global directory remains `~/.config/opencode` on
    both platforms.
 5. An optional user LaunchAgent invoking `familiar reap` every minute.
@@ -392,10 +398,10 @@ substitute for the two physical-Mac gates in §§2 and 11.
 ## 11. Manual promotion gates
 
 The live-hook ancestor capture in §2 occurs before Darwin adapter activation.
-After implementation CI is green, a physical-Mac smoke pass runs Claude Code,
-Codex, and OpenCode in current Kitty and Ghostty releases. For each applicable
-pair it checks launch/idle, working, approval, done/error where exposed, session
-exit, and `familiar reap` after abnormal termination.
+With implementation CI green, the remaining physical-Mac smoke pass runs Claude
+Code, Codex, and OpenCode in current Kitty and Ghostty releases. For each
+applicable pair it checks launch/idle, working, approval, done/error where
+exposed, session exit, and `familiar reap` after abnormal termination.
 
 The pass records agent and terminal versions, resolved ancestor basename, raw
 and canonical TTY, inherited graphics markers, and concise failures. It also
@@ -453,7 +459,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 
 | Decision | Choice |
 | --- | --- |
-| First support claim | CI-backed core after live-hook ancestry evidence |
+| First support claim | portable core CI-backed; Darwin agent lifecycle after live-hook ancestry evidence |
 | Live terminal claim | provisional until physical-Mac smoke |
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
