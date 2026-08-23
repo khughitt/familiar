@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync, lstatSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
-  readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, watch,
+  readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
@@ -57,32 +57,18 @@ async function copyAfterQueuedSwap(t, kind) {
   const src = mkdtempSync(join(tmpdir(), 'src-swap-'));
   const victim = join(src, 'aa-victim');
   const held = join(src, 'held-victim');
-  const delay = join(src, 'zz-delay');
   const outside = mkdtempSync(join(tmpdir(), 'outside-swap-'));
   const replacement = kind === 'directory' ? join(outside, 'replacement') : outside;
   mkdirSync(victim);
-  mkdirSync(delay);
   if (replacement !== outside) mkdirSync(replacement);
   writeFileSync(join(victim, 'safe.txt'), 'safe');
   writeFileSync(join(replacement, 'secret.txt'), 'must not be copied');
-  for (let i = 0; i < 32; i++) mkdirSync(join(delay, `entry-${i}`));
   const dest = destDir();
+  const sourceReal = realpathSync(src);
   let copySettled = false;
   let swappedBeforeTraversal = false;
   let swappedBeforeSettlement = false;
-  let resolveSwap;
-  const swapped = new Promise((resolveSwapPromise) => { resolveSwap = resolveSwapPromise; });
-  const watcher = watch(dest, (event, name) => {
-    if (name !== 'aa-victim' || existsSync(held)) return;
-    swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
-    swappedBeforeSettlement = !copySettled;
-    renameSync(victim, held);
-    if (kind === 'directory') renameSync(replacement, victim);
-    else symlinkSync(outside, victim, 'dir');
-    resolveSwap();
-  });
   t.after(() => {
-    watcher.close();
     rmSync(src, { recursive: true });
     rmSync(outside, { recursive: true });
     rmSync(dest, { recursive: true });
@@ -90,13 +76,21 @@ async function copyAfterQueuedSwap(t, kind) {
 
   let failure;
   try {
-    await copySource(src, dest);
+    await copySource(src, dest, {
+      afterDirectoryRead(task) {
+        if (task.openPath !== sourceReal || !existsSync(join(dest, 'aa-victim'))) return;
+        swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
+        swappedBeforeSettlement = !copySettled;
+        renameSync(victim, held);
+        if (kind === 'directory') renameSync(replacement, victim);
+        else symlinkSync(outside, victim, 'dir');
+      },
+    });
   } catch (error) {
     failure = error;
   } finally {
     copySettled = true;
   }
-  await swapped;
   return { dest, failure, swappedBeforeSettlement, swappedBeforeTraversal };
 }
 
@@ -201,7 +195,7 @@ test('Darwin rejects a queued parent whose pathname identity changes',
     });
     await assert.rejects(
       copySource(source, dest, {
-        beforeDirectoryRecheck(task) {
+        afterDirectoryRead(task) {
           if (task.openPath !== realpathSync(source)) return;
           renameSync(source, held);
           mkdirSync(source);
@@ -223,7 +217,7 @@ test('the injected Darwin walker rejects a queued parent pathname swap', async (
   await assert.rejects(
     copySource(source, dest, {
       platform: 'darwin',
-      beforeDirectoryRecheck(task) {
+      afterDirectoryRead(task) {
         if (task.openPath !== realpathSync(source)) return;
         renameSync(source, held);
         mkdirSync(source);

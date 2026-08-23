@@ -73,7 +73,7 @@ export function collapseStderr(text) {
 export async function copySource(sourceDir, dest, {
   signal,
   platform = process.platform,
-  beforeDirectoryRecheck = () => {},
+  afterDirectoryRead = () => {},
 } = {}) {
   const sourceReal = await realpath(sourceDir);
   const destReal = await realpath(dest);
@@ -117,10 +117,8 @@ export async function copySource(sourceDir, dest, {
           throw unsupportedEntry(display);
         }
       }
-      if (platform === 'darwin') {
-        beforeDirectoryRecheck(task);
-        await verifyPathIdentity(task);
-      }
+      afterDirectoryRead(task);
+      if (platform === 'darwin') await verifyPathIdentity(task);
     } finally {
       await handle?.close();
     }
