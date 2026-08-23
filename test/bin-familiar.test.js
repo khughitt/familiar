@@ -21,7 +21,8 @@ import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
-  appendHookTrace, makePrepareSprites, reportCosmeticError, sheetRowCaptions,
+  appendHookTrace, emitHookTransition, makePrepareSprites, reportCommandError,
+  reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
@@ -149,24 +150,31 @@ test('a hook invocation that throws internally still exits 0 and prints exactly 
   assert.match(lines[0], /^familiar: no scheme at .* — run: familiar scheme set dark\|light$/);
 });
 
-test('an unresolved terminal owner is one exit-zero hook diagnostic', () => {
-  const runEnv = env();
-  const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], {
-    encoding: 'utf8', env: runEnv,
+test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', () => {
+  let targetError;
+  assert.throws(() => emitHookTransition({
+    prev: null,
+    next: { sessionId: 's1', pid: 42 },
+    priorIntent: null,
+    intent: { s1: { current: {} } },
+    transmitSprite: true,
+    processOps: { recordOf: () => ({ pid: 42, tty: null }) },
+    platform: 'darwin',
+    hookEnv: {},
+  }), (error) => {
+    targetError = error;
+    return /agent pid 42 has no validated Darwin tty/.test(error.message);
   });
-  assert.equal(seeded.status, 0, seeded.stderr);
 
-  const result = spawnSync(process.execPath, [bin, 'hook', 'UserPromptSubmit'], {
-    input: JSON.stringify({ session_id: 's1', cwd: '/tmp' }),
-    encoding: 'utf8',
-    env: runEnv,
+  const lines = [];
+  const status = reportCommandError(targetError, { command: 'hook' }, {
+    write: (line) => lines.push(line),
   });
 
-  assert.equal(result.status, 0);
-  assert.equal(result.stdout, '');
-  const lines = result.stderr.split('\n').filter(Boolean);
-  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${result.stderr}`);
-  assert.match(lines[0], /^familiar: .*process.*ancestors|^familiar: .*resolver.*inactive/);
+  assert.equal(status, 0);
+  assert.deepEqual(lines, [
+    'familiar: terminal target: agent pid 42 has no validated Darwin tty\n',
+  ]);
 });
 
 test('hook rejects unknown flags before state work but remains cosmetic', () => {

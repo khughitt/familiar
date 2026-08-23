@@ -590,6 +590,33 @@ export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, ne
   })}\n`);
 }
 
+export function emitHookTransition({
+  prev, next, priorIntent, intent, transmitSprite,
+  processOps = defaultProcessOps,
+  platform = process.platform,
+  hookEnv = process.env,
+}) {
+  const record = next ?? prev;
+  if (record === null) return;
+  const terminal = terminalTarget(record.pid, {
+    platform,
+    record: processOps.recordOf(record.pid),
+    hookEnv,
+  });
+  if (next !== null) {
+    emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite, terminal });
+    return;
+  }
+  emit({
+    prev,
+    next: null,
+    priorIntent,
+    intent: { identity: { project: prev.project }, pid: prev.pid },
+    transmitSprite,
+    terminal,
+  });
+}
+
 // The `theme sheet` caption row. Exported and pure because it now makes a
 // choice: a member holds several slots but the swatch takes one colour.
 export function sheetRowCaptions(rows, tone) {
@@ -668,28 +695,14 @@ async function main({ command, args: rest }) {
     // field the emitter reads is undefined, in every project, on every event.
     // The emitter throws a named error rather than a TypeError if you do, and
     // test/emit.test.js asserts on exactly that mistake.
-    const transmitSprite = adapter.printsPlaceholderCells;
-    const intentPid = next?.pid ?? prev?.pid;
-    if (intentPid !== undefined) {
-      const terminal = terminalTarget(intentPid, {
-        record: defaultProcessOps.recordOf(intentPid),
-        hookEnv: process.env,
-      });
-      if (next !== null) {
-        emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite, terminal });
-      } else {
-        // A cleared session has no intent left to read — synthesize just enough
-        // to reset the terminal it borrowed.
-        emit({
-          prev,
-          next: null,
-          priorIntent,
-          intent: { identity: { project: prev.project }, pid: prev.pid },
-          transmitSprite,
-          terminal,
-        });
-      }
-    }
+    emitHookTransition({
+      prev,
+      next,
+      priorIntent,
+      intent,
+      transmitSprite: adapter.printsPlaceholderCells,
+      processOps: defaultProcessOps,
+    });
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, {
       options: { with: { type: 'string' } }, help: 'statusline',
@@ -1246,6 +1259,17 @@ async function main({ command, args: rest }) {
 // worth exactly one catch, and this is it.
 //
 const COSMETIC_COMMANDS = new Set(['hook', 'statusline']);
+export function reportCommandError(error, resolved, {
+  write = (line) => process.stderr.write(line),
+} = {}) {
+  reportCosmeticError(error, { write });
+  if (error.help) {
+    const target = error.help === 'root' ? 'familiar --help' : `familiar ${error.help} --help`;
+    write(`Run \`${target}\` for help.\n`);
+  }
+  return COSMETIC_COMMANDS.has(resolved?.command) ? 0 : 1;
+}
+
 const invokedPath = process.argv[1];
 const isMain = invokedPath !== undefined
   && realpathSync(invokedPath) === realpathSync(fileURLToPath(import.meta.url));
@@ -1256,12 +1280,7 @@ if (isMain) {
     if (resolved.help) process.stdout.write(renderHelp(resolved.help, { color: cliColor() }));
     else await main(resolved);
   } catch (error) {
-    reportCosmeticError(error);
-    if (error.help) {
-      const target = error.help === 'root' ? 'familiar --help' : `familiar ${error.help} --help`;
-      process.stderr.write(`Run \`${target}\` for help.\n`);
-    }
-    process.exitCode = COSMETIC_COMMANDS.has(resolved?.command) ? 0 : 1;
+    process.exitCode = reportCommandError(error, resolved);
   }
 }
 
