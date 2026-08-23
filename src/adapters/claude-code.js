@@ -49,14 +49,20 @@ export function stateForEvent(event) {
 // (see ../bus/proc.js), so no separate cmdline read is needed.
 const AGENT_COMM = 'claude';
 
+// The same predicate holds on Darwin, and that is measured rather than assumed: a live hook was
+// captured on a real Mac on 2026-08-23 and reviewed in
+// docs/ref/2026-08-23-macos-agent-process-spike.md, which found `claude` owning the terminal
+// under `/bin/sh -c`, at depth 2. The resolver needs no platform branch: the platform
+// difference lives entirely in how a record is produced (see ../bus/proc.js): by the time a chain
+// reaches here, `comm` is a basename and `tty` is either null or a validated terminal name.
+//
+// NOT measured on Darwin: a background or daemon-hosted session, which is the case the
+// `tty !== null` half exists for. That half rests on the Linux evidence above until the physical
+// terminal gate covers it.
 export function resolveAgentPid({
   startPid = process.pid,
   ancestors = procAncestors,
-  platform = process.platform,
 } = {}) {
-  if (platform === 'darwin') {
-    throw new Error('claude-code Darwin resolver evidence is not recorded; resolver is inactive');
-  }
   const chain = ancestors(startPid);
   // Skip index 0: that is this hook process itself.
   const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);

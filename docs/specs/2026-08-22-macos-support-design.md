@@ -1,8 +1,8 @@
 # macOS Core Support — Design
 
 **Status:** portable core implemented and CI-backed; live-hook ancestry and
-executor gate closed 2026-08-23; Darwin adapter activation pending and physical
-terminal rendering provisional
+executor gate closed 2026-08-23 and the Darwin adapters activated on that
+evidence; physical terminal rendering remains provisional
 **Date:** 2026-08-22
 
 Familiar's portable core now runs in Linux and macOS CI without pretending
@@ -10,12 +10,12 @@ GitHub Actions can prove behavior inside a real Kitty or Ghostty window.
 
 The target support claim is deliberately split:
 
-- **Supported once Darwin adapter activation lands:** macOS 14+ on Apple
-  Silicon, Node 22, checkout installation, Familiar configuration and themes,
-  the CLI, Claude Code lifecycle and status-line configuration, Codex hooks and
-  native pets, and the OpenCode hook and installer. Both gates this claim waited
-  on have now passed: CI is green, and the live-hook capture in §2 confirmed the
-  resolver predicate. The adapters themselves still refuse on Darwin.
+- **Supported:** macOS 14+ on Apple Silicon, Node 22, checkout installation,
+  Familiar configuration and themes, the CLI, Claude Code lifecycle and
+  status-line configuration, Codex hooks and native pets, and the OpenCode hook
+  and installer. Both gates this claim waited on have passed — CI is green, and
+  the live-hook capture in §2 confirmed the resolver predicate — and the Darwin
+  adapters are active on that evidence.
 - **Provisional until physical-Mac smoke testing:** Familiar-rendered graphics,
   tint, and bell delivery in Kitty and Ghostty, including OpenCode's TUI sprite
   renderer.
@@ -98,9 +98,9 @@ Node 25 while CI runs macOS 14 with Node 22, so no single configuration has been
 exercised end to end with live agents.
 
 Darwin parser, Claude Code setup, CI, theme, and test-runner work proceeded
-independently and are complete. The live-hook gate is now closed, which
-authorizes Darwin adapter activation and Codex setup command encoding; neither
-is implemented yet. A resolver miss is a named diagnostic at the hook's cosmetic
+independently and are complete. The live-hook gate is closed. Darwin adapter
+activation followed it on the same day; Codex setup command encoding is
+authorized but not yet implemented. A resolver miss is a named diagnostic at the hook's cosmetic
 boundary, not a silent no-op.
 
 The permanent core matrix is green in [run 32631362471](https://github.com/khughitt/familiar/actions/runs/32631362471):

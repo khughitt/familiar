@@ -135,14 +135,18 @@ test('no codex process among the ancestors is a named failure with the whole cha
   );
 });
 
-test('Darwin resolver fails before inspecting unrecorded agent ancestry', () => {
-  let inspected = false;
-  assert.throws(
-    () => resolveAgentPid({
-      platform: 'darwin',
-      ancestors: () => { inspected = true; return [{ pid: 1, comm: 'codex', tty: 'ttys000' }]; },
-    }),
-    /codex Darwin resolver evidence is not recorded/,
+// Measured 2026-08-23 (docs/ref/2026-08-23-macos-agent-process-spike.md). The process directly
+// above the agent is codex's own npm launcher, `node` running .../bin/codex: same TTY, different
+// basename, so the first-match walk stays unambiguous without an extra rule.
+test('the Darwin chain measured on a real Mac resolves codex, not its npm launcher', () => {
+  const chain = [
+    { pid: 38843, ppid: 38829, comm: 'node', tty: 'ttys000' },
+    { pid: 38829, ppid: 38609, comm: 'zsh', tty: 'ttys000' },
+    { pid: 38609, ppid: 38608, comm: 'codex', tty: 'ttys000' },
+    { pid: 38608, ppid: 35113, comm: 'node', tty: 'ttys000' },
+  ];
+  assert.equal(
+    resolveAgentPid({ startPid: 38843, ancestors: () => chain }),
+    38609,
   );
-  assert.equal(inspected, false);
 });

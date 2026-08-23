@@ -248,11 +248,13 @@ export const isAlive = (...args) => defaultProcessOps.isAlive(...args);
 export const pidExists = (...args) => defaultProcessOps.pidExists(...args);
 ```
 
-- [ ] **Step 5: Activate evidence-backed Darwin adapter predicates**
+- [x] **Step 5: Activate evidence-backed Darwin adapter predicates**
 
-Pending Task 1's physical ancestry evidence. The adapters currently fail
-explicitly on Darwin instead of applying unverified basenames. After the gate,
-use the measured Task 1 basenames and:
+Done 2026-08-23, after Task 1's evidence landed. The three Darwin refusals are
+removed, along with the `platform` parameter that existed only to carry them —
+the resolver never depended on the platform, only on record shape. Each adapter
+now cites the spike note and records what it does NOT cover. The measured
+basenames were exactly the approved ones:
 
 ```js
 const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);

@@ -78,14 +78,21 @@ export function stateForEvent(event) {
 // write escape codes into something's log file.
 const AGENT_COMM = 'codex';
 
+// The same predicate holds on Darwin, and that is measured rather than assumed: a live hook was
+// captured on a real Mac on 2026-08-23 and reviewed in
+// docs/ref/2026-08-23-macos-agent-process-spike.md, which found `codex` owning the terminal
+// under `/bin/zsh -c`, at depth 2, above its own `node` npm launcher -- same terminal, different
+// basename, so the first match is unambiguous. The resolver needs no platform branch: the platform
+// difference lives entirely in how a record is produced (see ../bus/proc.js): by the time a chain
+// reaches here, `comm` is a basename and `tty` is either null or a validated terminal name.
+//
+// NOT measured on Darwin: a background or daemon-hosted session, which is the case the
+// `tty !== null` half exists for. That half rests on the Linux evidence above until the physical
+// terminal gate covers it.
 export function resolveAgentPid({
   startPid = process.pid,
   ancestors = procAncestors,
-  platform = process.platform,
 } = {}) {
-  if (platform === 'darwin') {
-    throw new Error('codex Darwin resolver evidence is not recorded; resolver is inactive');
-  }
   const chain = ancestors(startPid);
   const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
   if (!agent) {

@@ -100,14 +100,20 @@ test('no agent in the ancestor chain is a hard error — a record keyed to a dea
   );
 });
 
-test('Darwin resolver fails before inspecting unrecorded agent ancestry', () => {
-  let inspected = false;
-  assert.throws(
-    () => resolveAgentPid({
-      platform: 'darwin',
-      ancestors: () => { inspected = true; return [{ pid: 1, comm: 'claude', tty: 'ttys000' }]; },
-    }),
-    /claude-code Darwin resolver evidence is not recorded/,
+// THE DARWIN CHAIN IS NOT A GUESS. Measured on a real Mac on 2026-08-23 and recorded in
+// docs/ref/2026-08-23-macos-agent-process-spike.md: the hook is a `node` process with NO
+// controlling terminal, running under `/bin/sh -c`, under the `claude` process that owns
+// ttys000. The predicate needs no Darwin branch of its own -- by the time a record reaches
+// here `comm` is already a basename and `tty` is already normalized (see src/bus/proc.js).
+test('the Darwin chain measured on a real Mac resolves claude, not the hook or its shell', () => {
+  const chain = [
+    { pid: 37708, ppid: 37707, comm: 'node', tty: null },
+    { pid: 37707, ppid: 37609, comm: 'sh', tty: null },
+    { pid: 37609, ppid: 35113, comm: 'claude', tty: 'ttys000' },
+    { pid: 35113, ppid: 35112, comm: '-zsh', tty: 'ttys000' },
+  ];
+  assert.equal(
+    resolveAgentPid({ startPid: 37708, ancestors: () => chain }),
+    37609,
   );
-  assert.equal(inspected, false);
 });

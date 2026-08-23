@@ -86,14 +86,16 @@ test('no opencode among the ancestors names the whole chain', () => {
   );
 });
 
-test('Darwin resolver fails before inspecting unrecorded agent ancestry', () => {
-  let inspected = false;
-  assert.throws(
-    () => resolveAgentPid({
-      platform: 'darwin',
-      ancestors: () => { inspected = true; return [{ pid: 1, comm: 'opencode', tty: 'ttys000' }]; },
-    }),
-    /opencode Darwin resolver evidence is not recorded/,
+// Measured 2026-08-23 (docs/ref/2026-08-23-macos-agent-process-spike.md). opencode spawns the
+// hook directly, with no shell frame, so the agent sits at depth 1.
+test('the Darwin chain measured on a real Mac resolves opencode at depth 1', () => {
+  const chain = [
+    { pid: 42885, ppid: 42878, comm: 'node', tty: 'ttys000' },
+    { pid: 42878, ppid: 35113, comm: 'opencode', tty: 'ttys000' },
+    { pid: 35113, ppid: 35112, comm: '-zsh', tty: 'ttys000' },
+  ];
+  assert.equal(
+    resolveAgentPid({ startPid: 42885, ancestors: () => chain }),
+    42878,
   );
-  assert.equal(inspected, false);
 });
