@@ -1,11 +1,22 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseDarwinRow, runDarwinPs } from './proc.js';
 
 const AGENTS = new Set(['claude-code', 'codex', 'opencode']);
 const COMM_FIELDS = 'pid=,ppid=,tty=,lstart=,comm=';
 const COMMAND_FIELDS = 'pid=,ppid=,tty=,lstart=,command=';
+const ENVIRONMENT_MARKERS = [
+  'TERM', 'TERM_PROGRAM', 'KITTY_WINDOW_ID', 'KITTY_PID', 'GHOSTTY_RESOURCES_DIR',
+];
+
+export const MACOS_WITNESS_PATH = fileURLToPath(
+  new URL('../../.familiar-macos-executed.jsonl', import.meta.url),
+);
+export const MACOS_WITNESS_ENABLE_PATH = fileURLToPath(
+  new URL('../../.familiar-macos-witness-enabled', import.meta.url),
+);
 
 function row(raw, field, expectedPid) {
   const value = raw.trimEnd();
@@ -31,6 +42,7 @@ export function captureProcessEvidence({
   platform = process.platform,
   outDir = join(tmpdir(), 'familiar-macos-process-spike'),
   capturedAt = new Date().toISOString(),
+  env = process.env,
   runPs = runDarwinPs,
 } = {}) {
   if (!AGENTS.has(agent)) {
@@ -62,7 +74,24 @@ export function captureProcessEvidence({
     event,
     capturedAt,
     hookPid,
+    environment: Object.fromEntries(ENVIRONMENT_MARKERS.map((name) => [name, env[name] !== undefined])),
     chain,
   })}\n`, { encoding: 'utf8', mode: 0o600 });
+  return path;
+}
+
+export function writeExecutionWitness({
+  path = MACOS_WITNESS_PATH,
+  agent,
+  event,
+  capturedAt = new Date().toISOString(),
+} = {}) {
+  if (!AGENTS.has(agent)) {
+    throw new Error(`macOS process witness: unsupported agent label ${JSON.stringify(agent)}`);
+  }
+  appendFileSync(path, `${JSON.stringify({ capturedAt, agent, event })}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
   return path;
 }

@@ -1,4 +1,6 @@
 node_modules/
+.familiar-macos-executed.jsonl
+.familiar-macos-witness-enabled
 
 # SDD workspace (ledgers, review packages, absolute local paths). Ignored
 # globally on this machine, but listed here too so a fresh clone, another

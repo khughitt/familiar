@@ -5,14 +5,20 @@ uses Kitty and one authenticated tool event from Claude Code, Codex, and
 OpenCode. It does not test visible graphics, tint, or bell behavior.
 
 The `spike/macos-agent-handoff` branch is disposable and must never be merged.
+The tester must not push this branch or any capture to any remote.
 Its opt-in probe records only Familiar's process and its ancestors, not the
 machine-wide process table. Even that narrow chain can contain private command
 arguments, so raw output stays in `$TMPDIR` and must not be committed.
 
+The branch also writes a payload-free execution witness before it checks the
+probe environment. That separates "Familiar ran but the environment was not
+inherited" from "the hook command never reached Familiar" without recording a
+tool payload.
+
 ## Prerequisites
 
 - macOS 14 or newer on Apple Silicon.
-- Node.js 22 or newer and Kitty.
+- Node.js 22 or newer and Kitty.app.
 - Authenticated, working installations of Claude Code, Codex, and OpenCode.
 - Permission to make and restore temporary edits to each agent's configuration.
 
@@ -23,6 +29,7 @@ may make.
 ## 1. Check out and verify the disposable branch
 
 ```sh
+set -eu
 cd "$HOME"
 git clone --branch spike/macos-agent-handoff --single-branch \
   https://github.com/khughitt/familiar.git familiar-macos-handoff
@@ -47,8 +54,15 @@ export FAMILIAR_NODE_TMP="$(node -e '
   process.stdout.write(require("node:os").tmpdir())
 ')"
 export FAMILIAR_PROBE_DIR="$FAMILIAR_NODE_TMP/familiar-macos-process-spike"
+export FAMILIAR_MACOS_PROBE_DIR="$FAMILIAR_PROBE_DIR"
+export FAMILIAR_WITNESS_PATH="$FAMILIAR_HANDOFF_ROOT/.familiar-macos-executed.jsonl"
+export FAMILIAR_WITNESS_ENABLE_PATH="$FAMILIAR_HANDOFF_ROOT/.familiar-macos-witness-enabled"
 test ! -e "$FAMILIAR_PROBE_DIR"
+test ! -e "$FAMILIAR_WITNESS_PATH"
+test ! -e "$FAMILIAR_WITNESS_ENABLE_PATH"
 mkdir -m 700 "$FAMILIAR_PROBE_DIR"
+: > "$FAMILIAR_WITNESS_ENABLE_PATH"
+chmod 600 "$FAMILIAR_WITNESS_ENABLE_PATH"
 ```
 
 If the `test` command fails, stop and move the existing directory aside. Do not
@@ -57,12 +71,18 @@ overwrite evidence from an earlier attempt.
 Record the environment without recording general environment variables:
 
 ```sh
+export FAMILIAR_KITTY_BIN="$(command -v kitty 2>/dev/null || true)"
+if [ -z "$FAMILIAR_KITTY_BIN" ]; then
+  export FAMILIAR_KITTY_BIN="/Applications/kitty.app/Contents/MacOS/kitty"
+fi
+test -x "$FAMILIAR_KITTY_BIN"
+
 {
   date -u '+captured-at=%Y-%m-%dT%H:%M:%SZ'
   sw_vers
   printf 'architecture='; uname -m
   printf 'node='; node --version
-  printf 'kitty='; kitty --version
+  printf 'kitty='; "$FAMILIAR_KITTY_BIN" --version
   printf 'claude='; claude --version
   printf 'codex='; codex --version
   printf 'opencode='; opencode --version
@@ -82,6 +102,24 @@ mkdir -m 700 "$FAMILIAR_BACKUP_DIR/claude" \
   "$FAMILIAR_BACKUP_DIR/codex" "$FAMILIAR_BACKUP_DIR/opencode"
 export FAMILIAR_CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
 export FAMILIAR_OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+```
+
+The temporary atomic replacements below do not preserve a configuration-file
+symlink. Stop before making any change if one of the affected files is a
+symlink:
+
+```sh
+for path in \
+  "$HOME/.claude/settings.json" \
+  "$FAMILIAR_CODEX_DIR/hooks.json" \
+  "$FAMILIAR_OPENCODE_DIR/tui.json" \
+  "$FAMILIAR_OPENCODE_DIR/opencode.json"
+do
+  if [ -L "$path" ]; then
+    printf 'stop: configuration is a symlink: %s\n' "$path" >&2
+    exit 1
+  fi
+done
 ```
 
 Back up each present file; create the corresponding `.absent` marker when it
@@ -108,6 +146,9 @@ for name in tui.json opencode.json; do
   fi
 done
 ```
+
+After these backups exist, an aborted run is recovered by closing the agents
+and going directly to step 10.
 
 ## 4. Capture Claude Code
 
@@ -166,7 +207,9 @@ Run `printf familiar-macos-probe` once using the terminal tool.
 ```
 
 Exit the session after that tool call. Confirm that
-`$FAMILIAR_PROBE_DIR/claude-code.jsonl` exists and is non-empty.
+`$FAMILIAR_PROBE_DIR/claude-code.jsonl` exists and is non-empty. If it does not,
+record the exact Claude Code diagnostic in `notes.md` and continue to the
+classification in step 7; do not guess why it is absent.
 
 ## 5. Capture Codex
 
@@ -254,15 +297,52 @@ Run `printf familiar-macos-probe` once using the terminal tool.
 ```
 
 Exit after the tool call. Confirm that
-`$FAMILIAR_PROBE_DIR/opencode.jsonl` exists and is non-empty.
+`$FAMILIAR_PROBE_DIR/opencode.jsonl` exists and is non-empty. If it does not,
+record the exact OpenCode diagnostic and the relevant lines from
+`~/.local/state/familiar/opencode-plugin.log` in `notes.md`; do not guess why it
+is absent.
 
 ## 7. Validate the raw artifact inventory
 
+Print the two independent observations for each agent:
+
 ```sh
-for agent in claude-code codex opencode; do
-  test -s "$FAMILIAR_PROBE_DIR/$agent.jsonl"
-done
+node --input-type=module <<'NODE'
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+const witnesses = existsSync(process.env.FAMILIAR_WITNESS_PATH)
+  ? readFileSync(process.env.FAMILIAR_WITNESS_PATH, 'utf8')
+    .trimEnd().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  : [];
+for (const agent of ['claude-code', 'codex', 'opencode']) {
+  const executed = witnesses.some((record) => record.agent === agent);
+  const capture = join(process.env.FAMILIAR_PROBE_DIR, `${agent}.jsonl`);
+  const captured = existsSync(capture) && statSync(capture).size > 0;
+  console.log(`${agent}: executed=${executed ? 'yes' : 'no'} captured=${captured ? 'yes' : 'no'}`);
+}
+NODE
 ```
+
+Interpret each pair as follows:
+
+- `executed=yes captured=yes`: Familiar ran and inherited the explicit probe
+  environment. Use the ancestor frames to determine shell versus direct spawn.
+- `executed=yes captured=no` with a `macOS process probe` diagnostic: the probe
+  ran but an identity read failed. Trigger one more harmless tool event and keep
+  both the diagnostic and any later record.
+- `executed=yes captured=no` without that diagnostic: Familiar ran but the
+  `FAMILIAR_MACOS_*` environment did not reach the hook. Record this as a
+  milestone finding.
+- `executed=no captured=no`: the configured command never reached Familiar.
+  Record the agent's exact diagnostic and stop that agent's evaluation.
+
+`executed=no captured=yes` is internally inconsistent; preserve the files and
+stop rather than interpreting them.
+
+Proceed to step 8 only when all three agents report `captured=yes`. If one still
+reports `captured=no` after the single retry above, stop and report the finding
+in the Signal thread; do not manufacture an empty fifth artifact.
 
 Each line is one JSON record. A valid record has:
 
@@ -271,6 +351,10 @@ Each line is one JSON record. A valid record has:
 - paired raw `comm` and `command` rows for every ancestor;
 - matching PID/PPID values in each pair; and
 - a final PID 1 / PPID 0 row.
+
+Each record also contains presence booleans, never values, for `TERM`,
+`TERM_PROGRAM`, `KITTY_WINDOW_ID`, `KITTY_PID`, and
+`GHOSTTY_RESOURCES_DIR` as seen inside the hook.
 
 There may be several records per agent because lifecycle hooks can fire around
 the requested tool event. Keep them all. The evaluator will select the real
@@ -300,9 +384,9 @@ Edit only the copies. Review every `command` string and apply these rules:
   `/bin/sh` or shell frame, `-c`, and the `; :` canary. These are the evidence.
 - Keep JSON valid and keep `comm` and `command` rows paired.
 
-Do not commit either directory. Return only the redacted directory through the
-agreed private channel. Keep the raw directory private until the evidence note
-has been accepted, then delete it locally.
+Do not commit either directory. The five redacted files are sent later as file
+attachments in the same Signal direct-message thread that delivered this
+handoff. Keep the raw directory private until receipt is confirmed in step 11.
 
 ## 9. Add tester notes
 
@@ -321,25 +405,34 @@ Create `$FAMILIAR_RETURN_DIR/notes.md` with this exact checklist:
 ## Claude Code
 - Version:
 - Authenticated tool event completed: yes/no
+- Execution witness present: yes/no
+- Explicit probe environment inherited: yes/no/indeterminate
 - `claude-code.jsonl` present: yes/no
 - Diagnostic or unexpected behavior: none / describe
 
 ## Codex
 - Version:
 - Authenticated tool event completed: yes/no
+- Execution witness present: yes/no
+- Explicit probe environment inherited: yes/no/indeterminate
 - `codex.jsonl` present: yes/no
 - Diagnostic or unexpected behavior: none / describe exactly
 
 ## OpenCode
 - Version:
 - Authenticated tool event completed: yes/no
+- Execution witness present: yes/no
+- Explicit probe environment inherited: yes/no/indeterminate
 - `opencode.jsonl` present: yes/no
 - Diagnostic or unexpected behavior: none / describe
 
 ## Restoration
-- Claude settings restored: yes/no
-- Codex hooks restored: yes/no
-- OpenCode configs restored: yes/no
+- Claude settings byte-for-byte restored: yes/no
+- Codex hooks byte-for-byte restored: yes/no
+- OpenCode configs byte-for-byte restored: yes/no
+
+## Privacy
+- Mechanical redaction scan passed: yes/no
 ```
 
 The return directory must contain exactly:
@@ -352,6 +445,44 @@ opencode.jsonl
 notes.md
 ```
 
+Run this mechanical backstop over the return copies after manual redaction. It
+prints only filenames and rule names, never the matching secret text:
+
+```sh
+export FAMILIAR_REDACTION_USERNAME="$(id -un)"
+node --input-type=module <<'NODE'
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const escapedUser = process.env.FAMILIAR_REDACTION_USERNAME
+  .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const rules = [
+  ['OpenAI-style key', /sk-[A-Za-z0-9_-]{8,}/i],
+  ['GitHub token', /(?:ghp_|github_pat_)[A-Za-z0-9_]+/i],
+  ['AWS access key', /AKIA[A-Z0-9]{12,}/],
+  ['Bearer credential', /Bearer\s+\S+/i],
+  ['token/key argument', /(?:token|key)=\S+/i],
+  ['local username', new RegExp(`/Users/${escapedUser}(?:/|\\b)`, 'i')],
+];
+const failures = [];
+for (const name of readdirSync(process.env.FAMILIAR_RETURN_DIR)) {
+  const text = readFileSync(join(process.env.FAMILIAR_RETURN_DIR, name), 'utf8');
+  for (const [label, pattern] of rules) {
+    if (pattern.test(text)) failures.push(`${name}: ${label}`);
+  }
+}
+if (failures.length) {
+  console.error(`redaction scan failed:\n${failures.join('\n')}`);
+  process.exit(1);
+}
+console.log('redaction scan passed');
+NODE
+unset FAMILIAR_REDACTION_USERNAME
+```
+
+Only after that command prints `redaction scan passed`, change the corresponding
+`notes.md` answer to `yes`.
+
 ## 10. Restore configuration
 
 Close all three agents first. Restore every file that existed before the test;
@@ -359,26 +490,64 @@ remove only a file whose matching `.absent` marker proves the probe created it.
 
 ```sh
 if [ -f "$FAMILIAR_BACKUP_DIR/claude/settings.json" ]; then
+  mkdir -p "$HOME/.claude"
   cp -p "$FAMILIAR_BACKUP_DIR/claude/settings.json" "$HOME/.claude/settings.json"
+  cmp -s "$FAMILIAR_BACKUP_DIR/claude/settings.json" "$HOME/.claude/settings.json"
 elif [ -f "$FAMILIAR_BACKUP_DIR/claude/settings.absent" ]; then
   rm -f "$HOME/.claude/settings.json"
+  test ! -e "$HOME/.claude/settings.json"
 fi
 
 if [ -f "$FAMILIAR_BACKUP_DIR/codex/hooks.json" ]; then
+  mkdir -p "$FAMILIAR_CODEX_DIR"
   cp -p "$FAMILIAR_BACKUP_DIR/codex/hooks.json" "$FAMILIAR_CODEX_DIR/hooks.json"
+  cmp -s "$FAMILIAR_BACKUP_DIR/codex/hooks.json" "$FAMILIAR_CODEX_DIR/hooks.json"
 elif [ -f "$FAMILIAR_BACKUP_DIR/codex/hooks.absent" ]; then
   rm -f "$FAMILIAR_CODEX_DIR/hooks.json"
+  test ! -e "$FAMILIAR_CODEX_DIR/hooks.json"
 fi
 
+mkdir -p "$FAMILIAR_OPENCODE_DIR"
 for name in tui.json opencode.json; do
   if [ -f "$FAMILIAR_BACKUP_DIR/opencode/$name" ]; then
     cp -p "$FAMILIAR_BACKUP_DIR/opencode/$name" "$FAMILIAR_OPENCODE_DIR/$name"
+    cmp -s "$FAMILIAR_BACKUP_DIR/opencode/$name" "$FAMILIAR_OPENCODE_DIR/$name"
   elif [ -f "$FAMILIAR_BACKUP_DIR/opencode/$name.absent" ]; then
     rm -f "$FAMILIAR_OPENCODE_DIR/$name"
+    test ! -e "$FAMILIAR_OPENCODE_DIR/$name"
   fi
 done
 ```
 
-Re-open each restored JSON/JSONC file once before deleting the backup directory.
-Do not merge this branch. Its only durable output is the later reviewed and
-redacted `docs/ref/2026-08-22-macos-agent-process-spike.md` evidence note.
+Every command above must succeed before marking restoration `yes` in `notes.md`.
+
+## 11. Send and clean up after receipt
+
+Send exactly the five files listed in step 9 as file attachments, not pasted
+text, in the Signal direct-message thread that delivered this handoff. Do not
+send the raw directory or the execution-witness file. Wait for the recipient to
+confirm that all five attachments were saved intact.
+
+After confirmation, validate every deletion target before removing the local
+copies and clone:
+
+```sh
+case "$FAMILIAR_BACKUP_DIR" in
+  "$FAMILIAR_NODE_TMP"/familiar-macos-config.*) ;;
+  *) printf 'refusing unexpected backup path: %s\n' "$FAMILIAR_BACKUP_DIR" >&2; exit 1 ;;
+esac
+test "$FAMILIAR_PROBE_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-spike"
+test "$FAMILIAR_RETURN_DIR" = "$FAMILIAR_NODE_TMP/familiar-macos-process-return"
+test "$FAMILIAR_HANDOFF_ROOT" = "$HOME/familiar-macos-handoff"
+cd "$HOME"
+rm -rf -- \
+  "$FAMILIAR_BACKUP_DIR" \
+  "$FAMILIAR_PROBE_DIR" \
+  "$FAMILIAR_RETURN_DIR" \
+  "$FAMILIAR_HANDOFF_ROOT"
+```
+
+Delete the Signal direct-message thread after both sides confirm their required
+local copy is safely stored. Do not merge this branch. Its only durable output
+is the later reviewed and redacted
+`docs/ref/2026-08-22-macos-agent-process-spike.md` evidence note.

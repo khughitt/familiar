@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { captureProcessEvidence } from '../src/bus/macos-process-probe.js';
+import * as macosProbe from '../src/bus/macos-process-probe.js';
+
+const { captureProcessEvidence } = macosProbe;
 
 const PS_ROWS = new Map([
   [300, {
@@ -44,6 +46,7 @@ test('probe writes only the hook ancestor chain with paired raw ps rows', (t) =>
     platform: 'darwin',
     outDir,
     capturedAt: '2026-08-23T12:00:03.000Z',
+    env: { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '7', SECRET_TOKEN: 'never-record' },
     runPs,
   });
 
@@ -62,12 +65,40 @@ test('probe writes only the hook ancestor chain with paired raw ps rows', (t) =>
     event: 'PreToolUse',
     capturedAt: '2026-08-23T12:00:03.000Z',
     hookPid: 300,
+    environment: {
+      TERM: true,
+      TERM_PROGRAM: false,
+      KITTY_WINDOW_ID: true,
+      KITTY_PID: false,
+      GHOSTTY_RESOURCES_DIR: false,
+    },
     chain: [...PS_ROWS.entries()].map(([pid, row]) => ({
       pid,
       ppid: pid === 300 ? 200 : pid === 200 ? 100 : pid === 100 ? 1 : 0,
       comm: row.comm,
       command: row.command,
     })),
+  });
+});
+
+test('execution witness records no payload and uses private permissions', (t) => {
+  assert.equal(typeof macosProbe.writeExecutionWitness, 'function');
+  const root = mkdtempSync(join(tmpdir(), 'familiar-macos-witness-test-'));
+  const path = join(root, 'executed.jsonl');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  macosProbe.writeExecutionWitness({
+    path,
+    agent: 'codex',
+    event: 'PreToolUse',
+    capturedAt: '2026-08-23T12:00:03.000Z',
+  });
+
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+    capturedAt: '2026-08-23T12:00:03.000Z',
+    agent: 'codex',
+    event: 'PreToolUse',
   });
 });
 

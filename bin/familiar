@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import {
+  appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { captureProcessEvidence } from '../src/bus/macos-process-probe.js';
+import {
+  captureProcessEvidence, MACOS_WITNESS_ENABLE_PATH, writeExecutionWitness,
+} from '../src/bus/macos-process-probe.js';
 import { adapterFor, AGENTS } from '../src/adapters/index.js';
 import { spritesheet, petFile, SPRITESHEET_PATH } from '../src/render/codex/pets.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
@@ -662,10 +666,18 @@ async function main({ command, args: rest }) {
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'hook') {
+    if (process.platform === 'darwin' && existsSync(MACOS_WITNESS_ENABLE_PATH)) {
+      const agentIndex = rest.indexOf('--agent');
+      writeExecutionWitness({
+        agent: agentIndex === -1 ? 'claude-code' : rest[agentIndex + 1],
+        event: agentIndex === 0 ? rest[2] : rest[0],
+      });
+    }
     if (process.env.FAMILIAR_MACOS_SPIKE !== undefined) {
       captureProcessEvidence({
         agent: process.env.FAMILIAR_MACOS_SPIKE,
         event: rest[0],
+        outDir: process.env.FAMILIAR_MACOS_PROBE_DIR,
       });
     }
     const { positionals, values } = parseLeaf(rest, {

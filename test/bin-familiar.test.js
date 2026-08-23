@@ -19,6 +19,9 @@ import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/code
 import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
+import {
+  MACOS_WITNESS_ENABLE_PATH, MACOS_WITNESS_PATH,
+} from '../src/bus/macos-process-probe.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
   appendHookTrace, emitHookTransition, makePrepareSprites, reportCommandError,
@@ -179,10 +182,23 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
 
 test('the macOS handoff probe runs before hook parsing', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'familiar-macos-hook-probe-'));
+  const outDir = join(root, 'explicit-output');
   t.after(() => rmSync(root, { recursive: true, force: true }));
+  if (process.platform === 'darwin') {
+    rmSync(MACOS_WITNESS_PATH, { force: true });
+    writeFileSync(MACOS_WITNESS_ENABLE_PATH, '', { mode: 0o600 });
+    t.after(() => {
+      rmSync(MACOS_WITNESS_ENABLE_PATH, { force: true });
+      rmSync(MACOS_WITNESS_PATH, { force: true });
+    });
+  }
   const result = spawnSync(process.execPath, [bin, 'hook', 'PreToolUse', ';', ':'], {
     encoding: 'utf8',
-    env: env({ FAMILIAR_MACOS_SPIKE: 'codex', TMPDIR: root }),
+    env: env({
+      FAMILIAR_MACOS_SPIKE: 'codex',
+      FAMILIAR_MACOS_PROBE_DIR: outDir,
+      TMPDIR: join(root, 'wrong-output'),
+    }),
   });
 
   assert.equal(result.status, 0);
@@ -193,12 +209,16 @@ test('the macOS handoff probe runs before hook parsing', (t) => {
   }
   assert.equal(result.stderr,
     'familiar: unexpected argument ";"\nRun `familiar hook --help` for help.\n');
-  const records = readFileSync(join(root, 'familiar-macos-process-spike', 'codex.jsonl'), 'utf8')
+  const records = readFileSync(join(outDir, 'codex.jsonl'), 'utf8')
     .trimEnd().split('\n').map((line) => JSON.parse(line));
   assert.equal(records.length, 1);
   assert.equal(records[0].agent, 'codex');
   assert.equal(records[0].event, 'PreToolUse');
   assert.equal(records[0].chain[0].pid, records[0].hookPid);
+  const witnesses = readFileSync(MACOS_WITNESS_PATH, 'utf8')
+    .trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(witnesses.some((record) => record.agent === 'codex'
+    && record.event === 'PreToolUse'), true);
 });
 
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
