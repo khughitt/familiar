@@ -12,6 +12,7 @@ import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
 import { addTheme } from '../src/theme/add.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
+import { setupDocument } from '../src/install/setup.js';
 import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
@@ -48,6 +49,7 @@ const FAMILIES = new Map([
   ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate', 'add'])],
   ['install', new Set(['pets', 'opencode'])],
   ['scheme', new Set(['set'])],
+  ['setup', new Set(['claude-code'])],
 ]);
 const ROOT_LEAVES = new Set(['whoami', 'hook', 'statusline', 'reap']);
 
@@ -124,6 +126,7 @@ Set up
   scheme set dark|light        Set the terminal colour scheme
   install pets                 Install the active theme as Codex pets
   install opencode             Install the OpenCode integration
+  setup claude-code            Print Claude Code integration settings
 
 Runtime
   hook EVENT                   Record an agent lifecycle event
@@ -307,6 +310,27 @@ Examples:
   familiar install pets
   familiar install pets --sync-projects
   familiar install pets --out ./pets
+`,
+  setup: `Print agent integration settings.
+
+Usage:
+  familiar setup <agent>
+
+Commands:
+  claude-code     Print Claude Code integration settings
+
+Examples:
+  familiar setup claude-code
+`,
+  'setup claude-code': `Print Claude Code integration settings.
+
+Usage:
+  familiar setup claude-code
+
+Prints JSON for you to merge into Claude Code settings; it never reads or writes those settings.
+
+Examples:
+  familiar setup claude-code
 `,
   hook: `Record an agent lifecycle event.
 
@@ -582,7 +606,11 @@ export function sheetRowCaptions(rows, tone) {
 }
 
 async function main({ command, args: rest }) {
-  if (command === 'whoami') {
+  if (command === 'setup claude-code') {
+    parseLeaf(rest, { help: command });
+    const binPath = realpathSync(fileURLToPath(import.meta.url));
+    process.stdout.write(`${JSON.stringify(setupDocument('claude-code', binPath), null, 2)}\n`);
+  } else if (command === 'whoami') {
     const { positionals } = parseLeaf(rest, {
       minPositionals: 0, maxPositionals: 1, help: 'whoami',
     });

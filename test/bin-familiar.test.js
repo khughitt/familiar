@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,12 +18,14 @@ import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER } from '../src/render/term/placeholder.js';
+import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
   appendHookTrace, makePrepareSprites, reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
 const runTty = (args, options) => spawnSync(process.execPath, [ttyBin, ...args], options);
 const themeFixture = fileURLToPath(new URL('../test/fixtures/theme-pack', import.meta.url));
@@ -45,6 +47,55 @@ function env(over = {}) {
     ...over,
   };
 }
+
+test('setup claude-code prints exact JSON without reading configuration', () => {
+  const runEnv = env();
+  const result = spawnSync(process.execPath, [bin, 'setup', 'claude-code'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, `${JSON.stringify(setupDocument('claude-code', realpathSync(bin)), null, 2)}\n`);
+  assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
+});
+
+test('setup claude-code rejects extra arguments and unknown flags before work', () => {
+  for (const args of [
+    ['setup', 'claude-code', 'extra'],
+    ['setup', 'claude-code', '--write'],
+  ]) {
+    const runEnv = env();
+    const result = spawnSync(process.execPath, [bin, ...args], {
+      encoding: 'utf8', env: runEnv,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /unexpected argument|unknown option/i);
+    assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
+  }
+});
+
+test('setup resolves an npm-style link to a checkout path containing spaces', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-setup-link-'));
+  const checkout = join(root, 'Familiar Build');
+  const prefix = join(root, 'prefix', 'bin');
+  mkdirSync(join(checkout, 'bin'), { recursive: true });
+  mkdirSync(prefix, { recursive: true });
+  cpSync(bin, join(checkout, 'bin', 'familiar'));
+  for (const name of ['src', 'integrations', 'node_modules']) {
+    symlinkSync(join(repoRoot, name), join(checkout, name), 'dir');
+  }
+  const linked = join(prefix, 'familiar');
+  symlinkSync(join(checkout, 'bin', 'familiar'), linked);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const result = spawnSync(process.execPath, [linked, 'setup', 'claude-code'], {
+    encoding: 'utf8', env: env(),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).statusLine.command,
+    `'${join(checkout, 'bin', 'familiar')}' statusline`);
+});
 
 test('hook trace appends lifecycle metadata without prompt or tool contents', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-hook-trace-'));

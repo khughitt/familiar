@@ -57,7 +57,7 @@ function gitRepo(t) {
 
 test('root and bare families print offline help with status zero', (t) => {
   const f = fixture(t);
-  for (const args of [[], ['-h'], ['--help'], ['theme'], ['install'], ['scheme']]) {
+  for (const args of [[], ['-h'], ['--help'], ['theme'], ['install'], ['scheme'], ['setup']]) {
     const result = run(args, f.env);
     assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
     assert.equal(result.stderr, '');
@@ -70,7 +70,7 @@ test('root and bare families print offline help with status zero', (t) => {
   }
   for (const command of [
     'whoami [PATH]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
-    'scheme set dark|light', 'install pets', 'install opencode', 'hook EVENT', 'statusline', 'reap',
+    'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'hook EVENT', 'statusline', 'reap',
   ]) {
     assert.equal(root.split(command).length - 1, 1, command);
   }
@@ -81,7 +81,7 @@ test('root and bare families print offline help with status zero', (t) => {
 const leaves = [
   ['whoami'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
-  ['install', 'opencode'], ['hook'], ['statusline'], ['reap'],
+  ['install', 'opencode'], ['setup', 'claude-code'], ['hook'], ['statusline'], ['reap'],
 ];
 
 test('every leaf owns -h and --help before config or work', (t) => {
@@ -153,10 +153,12 @@ test('unknown commands point to the nearest help scope', (t) => {
     assert.match(root.stderr, /familiar --help/);
   }
 
-  const family = run(['theme', 'cats'], f.env);
-  assert.equal(family.status, 1);
-  assert.match(family.stderr, /unknown theme command.*cats/i);
-  assert.match(family.stderr, /familiar theme --help/);
+  for (const [args, help] of [[['theme', 'cats'], 'theme'], [['setup', 'codex'], 'setup']]) {
+    const family = run(args, f.env);
+    assert.equal(family.status, 1);
+    assert.match(family.stderr, new RegExp(`unknown ${args[0]} command.*${args[1]}`, 'i'));
+    assert.match(family.stderr, new RegExp(`familiar ${help} --help`));
+  }
 });
 
 test('whoami reports the resolver and proves selected assets', (t) => {
