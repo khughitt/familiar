@@ -11,6 +11,7 @@ import {
 } from '../src/bus/proc.js';
 
 const requiresLinuxProc = process.platform !== 'linux' ? 'requires Linux /proc' : false;
+const requiresDarwin = process.platform !== 'darwin' ? 'requires Darwin' : false;
 
 // A real /proc/<pid>/stat line, fields 3..22 in order, so field 22 (starttime)
 // lands where the parser looks for it. Anything shorter is a truncated fixture,
@@ -209,6 +210,18 @@ test('Darwin ps uses the fixed binary, arguments, locale, and returns stdout', (
   assert.deepEqual(call[1], ['-axo', 'fields']);
   assert.equal(call[2].encoding, 'utf8');
   assert.equal(call[2].env.LC_ALL, 'C');
+});
+
+test('Darwin real snapshot keeps this process identity stable', {
+  skip: requiresDarwin,
+}, () => {
+  const ops = createProcessOps({ platform: 'darwin' });
+  const mine = ops.recordOf(process.pid);
+  assert.equal(mine?.pid, process.pid);
+  assert.ok(Number.isInteger(mine.starttime));
+  assert.equal(ops.startTimeOf(process.pid), mine.starttime);
+  assert.equal(ops.freshStartTimeOf(process.pid), mine.starttime);
+  assert.equal(ops.isAlive(process.pid, { starttime: mine.starttime }), true);
 });
 
 test('parses starttime — field 22, the thing that makes a pid an identity', () => {

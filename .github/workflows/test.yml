@@ -27,3 +27,37 @@ jobs:
           rm -rf node_modules package-lock.json .git
           npm install
           ./bin/familiar --help
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: fast suite with Darwin tests enforced
+        run: |
+          npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
+          ! grep -F 'requires Darwin' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'Darwin real snapshot keeps this process identity stable' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'Darwin ps keeps comm last and canonicalizes tty' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'Darwin copies a stable local pack through its pathname walker' "$RUNNER_TEMP/familiar-tests.log"
+      - name: linked command smoke
+        run: |
+          npm link
+          familiar --help
+          familiar setup claude-code | node -e '
+            let text = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", chunk => text += chunk);
+            process.stdin.on("end", () => {
+              const value = JSON.parse(text);
+              const hooks = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "StopFailure", "SessionEnd"];
+              if (JSON.stringify(Object.keys(value.hooks ?? {})) !== JSON.stringify(hooks)
+                  || !hooks.every(name => value.hooks[name].length > 0)
+                  || !value.hooks.SessionEnd[0].hooks[0].command.endsWith(" hook SessionEnd")
+                  || value.statusLine?.type !== "command"
+                  || !value.statusLine.command.endsWith(" statusline")
+                  || value.statusLine.refreshInterval !== 2) process.exit(1);
+            });
+          '
