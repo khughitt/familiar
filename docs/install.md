@@ -120,6 +120,15 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.familiar.reap.plist
 launchctl kickstart gui/$(id -u)/dev.familiar.reap
 ```
 
+### Known macOS difference: the status line branch field
+
+Familiar gives `git symbolic-ref` a 250 ms budget when it fills the status
+line's branch field, and falls back to a short commit sha if that budget is
+exceeded. On macOS a cold `git` — first run after boot, or one being scanned by
+security software — can exceed it on its own, so the same repository may show a
+sha on macOS where it shows a branch name on Linux. It corrects itself once git
+is warm. Nothing is wrong with the repository or the status line.
+
 ### Provisional terminal checklist
 
 Until the physical-Mac gate is complete, smoke-test Claude Code, Codex, and
