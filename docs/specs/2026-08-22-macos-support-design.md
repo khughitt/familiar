@@ -1,6 +1,6 @@
 # macOS Core Support — Design
 
-**Status:** proposed; revised after macOS CI spike, awaiting approval
+**Status:** approved in review; two planning corrections awaiting confirmation; not implemented
 **Date:** 2026-08-22
 
 Familiar currently develops and tests against Linux. This milestone makes its
@@ -247,6 +247,12 @@ shape. Linux supplies its current namespace link; Darwin supplies one fixed
 host-scope value. Because neither the schema nor its meaning as a cleanup scope
 changes, no version bump or migration layer is introduced.
 
+The suite worker is spawned after the runner's invocation snapshot, so it cannot
+be identified from that snapshot. Immediately after spawn, the runner performs
+one targeted process-identity read for the worker's owner record. This reuses the
+fresh identity primitive required by contended lock reclaim and does not add a
+spawn to the normal hook path.
+
 ## 7. Public setup interface
 
 Add one non-mutating command family:
@@ -265,9 +271,11 @@ newline. Diagnostics go to stderr and failure is nonzero.
 - `setup codex` returns the complete Familiar hooks document.
 
 Command values use the realpath of `bin/familiar` in the running package. Under
-`npm link`, that is the checkout target rather than the npm-prefix symlink. JSON
-encoding handles spaces and JSON-significant characters; the commands never
-inspect or write `~/.claude` or `~/.codex`. Users review and merge the output.
+`npm link`, that is the checkout target rather than the npm-prefix symlink. The
+path is POSIX-shell-quoted for the agents' `sh -c` command boundary before the
+document is JSON-encoded, so spaces, single quotes, and JSON-significant
+characters remain literal. The commands never inspect or write `~/.claude` or
+`~/.codex`. Users review and merge the output.
 
 The existing mutating commands remain distinct:
 
