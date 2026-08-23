@@ -31,7 +31,7 @@ pending; no macOS agent lifecycle or terminal-rendering support is claimed.
 ### Task 1: Capture and commit physical-Mac resolver evidence
 
 **Files:**
-- Create: `docs/ref/2026-08-22-macos-agent-process-spike.md`
+- Create: `docs/ref/2026-08-23-macos-agent-process-spike.md`
 - Temporarily modify, then restore: `bin/familiar`
 
 **Interfaces:**
@@ -39,7 +39,7 @@ pending; no macOS agent lifecycle or terminal-rendering support is claimed.
 - Gate: if any resolver needs more than exact basename plus non-null TTY, amend and reapprove the design before Task 2.
 - Gate: do not implement Codex setup command encoding until this capture proves whether a shell interprets its single-string hook command.
 
-- [ ] **Step 1: Add temporary hook instrumentation on the physical Mac**
+- [x] **Step 1: Add temporary hook instrumentation on the physical Mac**
 
 Immediately inside the `hook` branch in `bin/familiar`, insert without committing:
 
@@ -55,7 +55,7 @@ if (process.env.FAMILIAR_MACOS_SPIKE) {
 }
 ```
 
-- [ ] **Step 2: Trigger one authenticated hook per agent**
+- [x] **Step 2: Trigger one authenticated hook per agent**
 
 Temporarily change the configured Claude Code and Codex hook command strings to:
 
@@ -76,7 +76,7 @@ FAMILIAR_MACOS_SPIKE=opencode opencode
 
 Trigger a real tool event in each session and record agent/terminal versions.
 
-- [ ] **Step 3: Walk and evaluate each chain**
+- [x] **Step 3: Walk and evaluate each chain**
 
 Starting at each recorded `hook_pid`, follow PPIDs to PID 1 in both tables. Record the first post-hook ancestor with TTY other than `??`. The currently approved rule proceeds only if the measured basenames are exactly:
 
@@ -95,7 +95,7 @@ agent. Its absence does not authorize Codex quoting: stop and investigate or
 amend the setup design. OpenCode is expected to show the direct `spawn` boundary
 already specified by `integrations/opencode/hook.js`.
 
-- [ ] **Step 4: Restore source and write the evidence note**
+- [x] **Step 4: Restore source and write the evidence note**
 
 Remove only the temporary source block with `apply_patch`, then manually restore
 the two agent configuration command strings. The note records hardware, OS,
@@ -109,10 +109,10 @@ git diff -- bin/familiar
 
 Expected: no output.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add docs/ref/2026-08-22-macos-agent-process-spike.md
+git add docs/ref/2026-08-23-macos-agent-process-spike.md
 git commit -m "docs(macos): record live agent ancestry"
 ```
 
