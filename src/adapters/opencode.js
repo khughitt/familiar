@@ -87,9 +87,13 @@ const AGENT_COMM = 'opencode';
 export function resolveAgentPid({
   startPid = process.pid,
   ancestors = procAncestors,
+  platform = process.platform,
 } = {}) {
+  if (platform === 'darwin') {
+    throw new Error('opencode Darwin resolver evidence is not recorded; resolver is inactive');
+  }
   const chain = ancestors(startPid);
-  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.ttyNr !== 0);
+  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
   if (!agent) {
     throw new Error(
       `could not find the opencode process among the ancestors of ${startPid}: ` +

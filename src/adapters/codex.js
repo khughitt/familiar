@@ -81,9 +81,13 @@ const AGENT_COMM = 'codex';
 export function resolveAgentPid({
   startPid = process.pid,
   ancestors = procAncestors,
+  platform = process.platform,
 } = {}) {
+  if (platform === 'darwin') {
+    throw new Error('codex Darwin resolver evidence is not recorded; resolver is inactive');
+  }
   const chain = ancestors(startPid);
-  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.ttyNr !== 0);
+  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
   if (!agent) {
     throw new Error(
       `could not find the codex process among the ancestors of ${startPid}: ` +

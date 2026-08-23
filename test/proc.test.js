@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseStat, ancestors, isAlive, startTimeOf } from '../src/bus/proc.js';
+import {
+  createProcessOps,
+  parseDarwinRow,
+  normalizeDarwinTty,
+  parseStat,
+  ancestors,
+  isAlive,
+  startTimeOf,
+} from '../src/bus/proc.js';
 
 // A real /proc/<pid>/stat line, fields 3..22 in order, so field 22 (starttime)
 // lands where the parser looks for it. Anything shorter is a truncated fixture,
@@ -22,8 +30,102 @@ const statLine = (over = {}) => {
 
 test('parses a comm containing spaces and parentheses', () => {
   assert.deepEqual(parseStat(statLine({ comm: 'my (weird) proc' })), {
-    pid: 4242, comm: 'my (weird) proc', ppid: 4200, ttyNr: 34816, starttime: 987654,
+    pid: 4242, ppid: 4200, comm: 'my (weird) proc', tty: true, starttime: 987654,
   });
+});
+
+test('Linux records normalize controlling terminal presence', () => {
+  assert.equal(parseStat(statLine({ ttyNr: 34816 })).tty, true);
+  assert.equal(parseStat(statLine({ ttyNr: 0 })).tty, null);
+});
+
+test('Darwin ps keeps comm last and canonicalizes tty', () => {
+  assert.deepEqual(parseDarwinRow(
+    '77266 77264 ttys000 Sat Aug 22 23:24:46 2026 /Applications/Some App/claude'
+  ), {
+    pid: 77266,
+    ppid: 77264,
+    comm: 'claude',
+    tty: 'ttys000',
+    starttime: Date.parse('Sat Aug 22 23:24:46 2026') / 1000,
+  });
+});
+
+test('Darwin tty accepts full and abbreviated ptys only', () => {
+  assert.equal(normalizeDarwinTty('??'), null);
+  assert.equal(normalizeDarwinTty('ttys003'), 'ttys003');
+  assert.equal(normalizeDarwinTty('s003'), 'ttys003');
+  for (const raw of ['console', '../ttys003', 'ttys003/x', '/dev/ttys003']) {
+    assert.throws(() => normalizeDarwinTty(raw), /unsafe Darwin tty/);
+  }
+});
+
+test('Darwin rows reject malformed identities, dates, and commands', () => {
+  for (const row of [
+    '0 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+    '20 -1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+    '20 1 ?? not-a-date /usr/bin/node',
+    '20 1 ?? Sat Aug 22 23:24:46 2026    ',
+  ]) {
+    assert.throws(() => parseDarwinRow(row), /Darwin ps: malformed row/);
+  }
+});
+
+test('one Darwin snapshot serves ancestry, start time, and liveness', () => {
+  let spawns = 0;
+  const ops = createProcessOps({
+    platform: 'darwin',
+    runPs: () => {
+      spawns++;
+      return [
+        '30 20 ?? Sat Aug 22 23:24:47 2026 /usr/bin/node',
+        '20 10 ttys003 Sat Aug 22 23:24:46 2026 /opt/bin/claude',
+        '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
+      ].join('\n');
+    },
+    kill: () => {},
+  });
+  const chain = ops.ancestors(30);
+  assert.deepEqual(chain.map((record) => record.pid), [30, 20, 10]);
+  assert.equal(ops.startTimeOf(20), chain[1].starttime);
+  assert.equal(ops.isAlive(20, { starttime: chain[1].starttime }), true);
+  assert.equal(spawns, 1);
+});
+
+test('Darwin process identity fails closed when missing or mismatched', () => {
+  const ops = createProcessOps({
+    platform: 'darwin',
+    runPs: () => '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+    kill: () => {},
+  });
+  const starttime = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
+  assert.equal(ops.isAlive(20), false);
+  assert.equal(ops.isAlive(20, { starttime: starttime + 1 }), false);
+  assert.equal(ops.isAlive(999, { starttime }), false);
+});
+
+test('Darwin liveness treats EPERM as existing and other kill errors as absent', () => {
+  const runPs = () => '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node';
+  const starttime = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
+  const denied = createProcessOps({
+    platform: 'darwin', runPs,
+    kill: () => { const error = new Error('denied'); error.code = 'EPERM'; throw error; },
+  });
+  const absent = createProcessOps({
+    platform: 'darwin', runPs,
+    kill: () => { const error = new Error('gone'); error.code = 'ESRCH'; throw error; },
+  });
+  assert.equal(denied.isAlive(20, { starttime }), true);
+  assert.equal(absent.isAlive(20, { starttime }), false);
+});
+
+test('Darwin ps failures stay named and unsupported platforms fail explicitly', () => {
+  const ops = createProcessOps({
+    platform: 'darwin',
+    runPs: () => { throw new Error('Darwin ps: exited with status 1'); },
+  });
+  assert.throws(() => ops.recordOf(1), /Darwin ps: exited with status 1/);
+  assert.throws(() => createProcessOps({ platform: 'win32' }), /unsupported process platform: win32/);
 });
 
 test('parses starttime — field 22, the thing that makes a pid an identity', () => {

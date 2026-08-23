@@ -72,16 +72,28 @@ test('every other level is what it says it is', () => {
 // no terminal, and writing escape bytes into a daemon's log file is the bug the tty test closes.
 test('resolveAgentPid finds the opencode process with a tty, and skips the hook itself', () => {
   const chain = [
-    { pid: 400, comm: 'node', ttyNr: 0 },        // the hook: index 0, always skipped
-    { pid: 300, comm: 'opencode', ttyNr: 0 },    // a daemon: right name, no terminal
-    { pid: 200, comm: 'opencode', ttyNr: 34816 },// the agent
+    { pid: 400, comm: 'node', tty: null },        // the hook: index 0, always skipped
+    { pid: 300, comm: 'opencode', tty: null },    // a daemon: right name, no terminal
+    { pid: 200, comm: 'opencode', tty: true },// the agent
   ];
   assert.equal(resolveAgentPid({ startPid: 400, ancestors: () => chain }), 200);
 });
 
 test('no opencode among the ancestors names the whole chain', () => {
   assert.throws(
-    () => resolveAgentPid({ startPid: 9, ancestors: () => [{ pid: 9, comm: 'node', ttyNr: 0 }] }),
+    () => resolveAgentPid({ startPid: 9, ancestors: () => [{ pid: 9, comm: 'node', tty: null }] }),
     /could not find the opencode process among the ancestors of 9/,
   );
+});
+
+test('Darwin resolver fails before inspecting unrecorded agent ancestry', () => {
+  let inspected = false;
+  assert.throws(
+    () => resolveAgentPid({
+      platform: 'darwin',
+      ancestors: () => { inspected = true; return [{ pid: 1, comm: 'opencode', tty: 'ttys000' }]; },
+    }),
+    /opencode Darwin resolver evidence is not recorded/,
+  );
+  assert.equal(inspected, false);
 });

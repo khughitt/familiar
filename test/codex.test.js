@@ -116,21 +116,33 @@ test('the agent is the codex process WITH a terminal — not the hook, and not i
   // found in 370 of 1507 samples, where fd 1 was a log file and we would have written escape
   // codes into it.
   const chain = [
-    { pid: 10, comm: 'node', ttyNr: 0 },          // the hook itself — index 0, always skipped
-    { pid: 9, comm: 'sh', ttyNr: 0 },
-    { pid: 8, comm: 'codex', ttyNr: 0 },          // same comm, NO terminal: a daemon. Not our agent.
-    { pid: 7, comm: 'codex', ttyNr: 34816 },      // the real one
+    { pid: 10, comm: 'node', tty: null },          // the hook itself — index 0, always skipped
+    { pid: 9, comm: 'sh', tty: null },
+    { pid: 8, comm: 'codex', tty: null },          // same comm, NO terminal: a daemon. Not our agent.
+    { pid: 7, comm: 'codex', tty: true },          // the real one
   ];
   assert.equal(resolveAgentPid({ startPid: 10, ancestors: () => chain }), 7);
 });
 
 test('no codex process among the ancestors is a named failure with the whole chain in it', () => {
   const chain = [
-    { pid: 10, comm: 'node', ttyNr: 0 },
-    { pid: 9, comm: 'claude', ttyNr: 34816 },     // a claude-code session: the wrong --agent flag
+    { pid: 10, comm: 'node', tty: null },
+    { pid: 9, comm: 'claude', tty: true },     // a claude-code session: the wrong --agent flag
   ];
   assert.throws(
     () => resolveAgentPid({ startPid: 10, ancestors: () => chain }),
     /could not find the codex process.*10\(node\) -> 9\(claude\)/s,
   );
+});
+
+test('Darwin resolver fails before inspecting unrecorded agent ancestry', () => {
+  let inspected = false;
+  assert.throws(
+    () => resolveAgentPid({
+      platform: 'darwin',
+      ancestors: () => { inspected = true; return [{ pid: 1, comm: 'codex', tty: 'ttys000' }]; },
+    }),
+    /codex Darwin resolver evidence is not recorded/,
+  );
+  assert.equal(inspected, false);
 });

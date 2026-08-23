@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 // `comm` (field 2) is wrapped in parens and may itself contain spaces and
 // parens, so split after the LAST ')'. Field order after comm:
@@ -17,84 +19,140 @@ export function parseStat(text) {
   const after = text.slice(close + 1).trim().split(/\s+/);
   const ppid = Number.parseInt(after[FIELD(4)], 10);
   const ttyNr = Number.parseInt(after[FIELD(7)], 10);
-
   if (![pid, ppid, ttyNr].every(Number.isInteger)) return null;
 
-  // THE PROCESS'S IDENTITY, not just its name. A pid is a slot, and the kernel
-  // hands the same slot out again; starttime (clock ticks since boot) is what
-  // makes "pid 4242" mean one particular process rather than the next one to
-  // land on that number. Kept OPTIONAL — null when the field is absent — so
-  // parseStat stays a parser and the policy about a missing starttime lives in
-  // one place (isAlive).
   const raw = Number.parseInt(after[FIELD(22)], 10);
   const starttime = Number.isInteger(raw) ? raw : null;
+  return { pid, ppid, comm, tty: ttyNr === 0 ? null : true, starttime };
+}
 
-  return { pid, comm, ppid, ttyNr, starttime };
+const DARWIN_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/;
+
+export function normalizeDarwinTty(raw) {
+  if (raw === '??') return null;
+  const match = /^(?:tty)?s([0-9a-f]+)$/i.exec(raw);
+  if (!match) throw new Error(`Darwin ps: unsafe Darwin tty ${JSON.stringify(raw)}`);
+  return `ttys${match[1]}`;
+}
+
+export function parseDarwinRow(line) {
+  const match = DARWIN_ROW.exec(line);
+  if (!match) throw new Error(`Darwin ps: malformed row ${JSON.stringify(line)}`);
+  const pid = Number(match[1]);
+  const ppid = Number(match[2]);
+  const starttime = Date.parse(match[4]) / 1000;
+  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(ppid) || ppid < 0
+      || !Number.isInteger(starttime) || match[5].trim() === '') {
+    throw new Error(`Darwin ps: malformed row ${JSON.stringify(line)}`);
+  }
+  return {
+    pid,
+    ppid,
+    comm: basename(match[5]),
+    tty: normalizeDarwinTty(match[3]),
+    starttime,
+  };
 }
 
 const defaultReadStat = (pid) => {
   try {
     return readFileSync(`/proc/${pid}/stat`, 'utf8');
   } catch {
-    return null;   // the process exited between listing and reading
+    return null;
   }
 };
 
-// Self first, walking up to pid 1. A vanished ancestor truncates the chain
-// rather than throwing: /proc is a race by construction.
-export function ancestors(pid, { readStat = defaultReadStat } = {}) {
+const defaultKill = (pid, signal) => process.kill(pid, signal);
+
+const runDarwinPs = (args) => {
+  const result = spawnSync('/bin/ps', args, {
+    encoding: 'utf8',
+    env: { ...process.env, LC_ALL: 'C' },
+  });
+  if (result.error) throw new Error(`Darwin ps: spawn failed: ${result.error.message}`);
+  if (result.signal) throw new Error(`Darwin ps: terminated by signal ${result.signal}`);
+  if (result.status !== 0) throw new Error(`Darwin ps: exited with status ${result.status}`);
+  return result.stdout;
+};
+
+const walkAncestors = (pid, recordOf) => {
   const chain = [];
   const seen = new Set();
   let current = pid;
   while (current > 1 && !seen.has(current)) {
     seen.add(current);
-    const stat = parseStat(readStat(current));
-    if (!stat) break;
-    chain.push(stat);
-    current = stat.ppid;
+    const record = recordOf(current);
+    if (!record) break;
+    chain.push(record);
+    current = record.ppid;
   }
   return chain;
-}
+};
 
-// The starttime of a process, for stamping onto the record that claims it.
-export function startTimeOf(pid, { readStat = defaultReadStat } = {}) {
-  return parseStat(readStat(pid))?.starttime ?? null;
-}
-
-// "Is SOMETHING using this pid?" — and nothing more. This is the whole of what
-// kill(pid, 0) can tell you, and the reason it is not enough on its own: it
-// cannot distinguish the process you meant from whatever recycled its number.
-// Exported separately so the two callers with genuinely different questions do
-// not have to share one answer.
-export function pidExists(pid) {
+const exists = (pid, kill) => {
   try {
-    process.kill(pid, 0);
+    kill(pid, 0);
     return true;
   } catch (error) {
-    return error.code === 'EPERM';   // exists, owned by someone else
+    return error.code === 'EPERM';
   }
+};
+
+export function createProcessOps({
+  platform = process.platform,
+  readStat = defaultReadStat,
+  runPs = runDarwinPs,
+  kill = defaultKill,
+} = {}) {
+  if (platform === 'linux') {
+    const recordOf = (pid, { readStat: read = readStat } = {}) => parseStat(read(pid));
+    const startTimeOf = (pid, options) => recordOf(pid, options)?.starttime ?? null;
+    return {
+      recordOf,
+      ancestors: (pid, options) => walkAncestors(pid, (current) => recordOf(current, options)),
+      startTimeOf,
+      pidExists: (pid) => exists(pid, kill),
+      isAlive(pid, { starttime = null, readStat: read = readStat } = {}) {
+        return exists(pid, kill)
+          && Number.isInteger(starttime)
+          && startTimeOf(pid, { readStat: read }) === starttime;
+      },
+    };
+  }
+
+  if (platform === 'darwin') {
+    let snapshot;
+    const records = () => {
+      if (!snapshot) {
+        const output = runPs(['-axo', 'pid=,ppid=,tty=,lstart=,comm=']);
+        if (typeof output !== 'string' || output.trim() === '') {
+          throw new Error('Darwin ps: malformed output');
+        }
+        snapshot = new Map(output.trimEnd().split('\n').map(parseDarwinRow).map((record) => [record.pid, record]));
+      }
+      return snapshot;
+    };
+    const recordOf = (pid) => records().get(pid) ?? null;
+    const startTimeOf = (pid) => recordOf(pid)?.starttime ?? null;
+    return {
+      recordOf,
+      ancestors: (pid) => walkAncestors(pid, recordOf),
+      startTimeOf,
+      pidExists: (pid) => exists(pid, kill),
+      isAlive(pid, { starttime = null } = {}) {
+        return exists(pid, kill)
+          && Number.isInteger(starttime)
+          && startTimeOf(pid) === starttime;
+      },
+    };
+  }
+
+  throw new Error(`unsupported process platform: ${platform}`);
 }
 
-// A PID IS NOT AN IDENTITY. agents.json survives reboots, and `kill(pid, 0)` is
-// perfectly true for a RECYCLED pid now belonging to something else entirely —
-// so a stale record could be "alive" forever and never be reaped. A record
-// with `pid: 1` survived every prune there has ever been.
-//
-// starttime settles it: same pid, different starttime, different process. Evict.
-//
-// A record with NO starttime (written before the field existed) is UNVERIFIABLE,
-// and unverifiable is exactly the class of record this bug is made of — the one
-// that outlives its process. So it is treated as DEAD. That is safe because it is
-// self-healing and costs nothing: a genuinely live session rewrites its own record
-// on its very next hook (PreToolUse fires on every tool call), with a starttime,
-// and is simply back. A dead one is finally gone.
-export function isAlive(pid, { starttime = null, readStat = defaultReadStat } = {}) {
-  if (!pidExists(pid)) return false;
-  if (!Number.isInteger(starttime)) return false;   // unverifiable — see above
-
-  // EPERM above means the pid exists but is another user's. /proc/<pid>/stat is
-  // world-readable, so the comparison still works — which is the point: a pid
-  // recycled INTO another user's process is precisely the case kill(pid, 0)
-  // cannot see.
-  return startTimeOf(pid, { readStat }) === starttime;
-}
+export const defaultProcessOps = createProcessOps();
+export const ancestors = (...args) => defaultProcessOps.ancestors(...args);
+export const recordOf = (...args) => defaultProcessOps.recordOf(...args);
+export const startTimeOf = (...args) => defaultProcessOps.startTimeOf(...args);
+export const isAlive = (...args) => defaultProcessOps.isAlive(...args);
+export const pidExists = (...args) => defaultProcessOps.pidExists(...args);

@@ -40,22 +40,26 @@ export function stateForEvent(event) {
 // alone. That guess picks the WRONG process in 370 of 1507 real samples (25%):
 // background/daemon-hosted sessions put a `claude bg-pty-host` and a
 // `claude daemon run` between the hook and the real agent, and the daemon
-// process ALSO reports comm === 'claude' — but it owns no terminal
-// (ttyNr === 0). Its fd 1 is a pipe or a log, not the user's screen.
+// process ALSO reports comm === 'claude' — but it owns no terminal. Its fd 1
+// is a pipe or a log, not the user's screen.
 //
-// The corrected predicate — comm === 'claude' AND ttyNr !== 0 — found the
+// The corrected Linux predicate — comm === 'claude' AND tty !== null — found the
 // right process in 1507 of 1507 samples, at depth 1 (interactive) or depth 4
-// (background). Both `comm` and `ttyNr` come straight off /proc/<pid>/stat
+// (background). Both `comm` and `tty` come straight off /proc/<pid>/stat
 // (see ../bus/proc.js), so no separate cmdline read is needed.
 const AGENT_COMM = 'claude';
 
 export function resolveAgentPid({
   startPid = process.pid,
   ancestors = procAncestors,
+  platform = process.platform,
 } = {}) {
+  if (platform === 'darwin') {
+    throw new Error('claude-code Darwin resolver evidence is not recorded; resolver is inactive');
+  }
   const chain = ancestors(startPid);
   // Skip index 0: that is this hook process itself.
-  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.ttyNr !== 0);
+  const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
   if (!agent) {
     throw new Error(
       `could not find the claude-code process among the ancestors of ${startPid}: ` +
