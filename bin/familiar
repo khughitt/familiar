@@ -18,6 +18,7 @@ import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
 import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { loadIdentities } from '../src/bus/pins.js';
@@ -644,7 +645,7 @@ async function main({ command, args: rest }) {
     const { prev, next, priorIntent, intent, evicted } = await applyHookEvent({
       event: positionals[0],
       stdin,
-      deps: { ...ctx, adapter, prepareSprites: makePrepareSprites(ctx) },
+      deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
     });
     reportEvictions(evicted);
     if (values.trace !== undefined) {
@@ -851,7 +852,9 @@ async function main({ command, args: rest }) {
   } else if (command === 'reap') {
     parseLeaf(rest, { help: 'reap' });
     const ctx = await context();
-    const { reaped, evicted } = await reap({ deps: { ...ctx, prepareSprites: makePrepareSprites(ctx) } });
+    const { reaped, evicted } = await reap({
+      deps: { ...ctx, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
+    });
     reportEvictions(evicted);
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
   } else if (command === 'install opencode') {

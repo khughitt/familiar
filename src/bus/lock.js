@@ -1,7 +1,10 @@
 import { open, unlink, readFile, writeFile, link, stat, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { isAlive as defaultIsAlive, startTimeOf } from './proc.js';
+import {
+  lockHolderAlive as defaultLockHolderAlive,
+  startTimeOf as defaultStartTimeOf,
+} from './proc.js';
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -12,7 +15,8 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // holder (see isAlive in ./proc.js); the uuid makes the token unique per
 // acquisition, so the release path can verify it still owns what it is about to
 // unlink.
-const mintToken = () => `${process.pid}:${startTimeOf(process.pid)}:${randomUUID()}`;
+const mintToken = (startTimeOf) =>
+  `${process.pid}:${startTimeOf(process.pid)}:${randomUUID()}`;
 
 function parseToken(text) {
   const [pidText, startText] = String(text).trim().split(':');
@@ -206,7 +210,8 @@ export async function withLock(lockPath, fn, opts = {}) {
     // against ten seconds — so a lock this old means a dead holder, not a slow one.
     staleMs = 10_000,
     now = () => Date.now(),
-    isAlive = defaultIsAlive,
+    startTimeOf = defaultStartTimeOf,
+    isAlive = defaultLockHolderAlive,
     sleep = defaultSleep,
   } = opts;
 
@@ -214,7 +219,7 @@ export async function withLock(lockPath, fn, opts = {}) {
 
   // Unique per-acquisition identity: lets the finally block verify it still
   // owns the lock before deleting it, instead of unlinking whatever is there.
-  const token = mintToken();
+  const token = mintToken(startTimeOf);
 
   let acquired = false;
   for (let attempt = 0; attempt <= retries && !acquired; attempt++) {

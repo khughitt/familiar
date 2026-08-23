@@ -8,6 +8,7 @@ import { applyHookEvent, reap } from '../src/bus/transaction.js';
 import { readJson } from '../src/bus/store.js';
 import { resolveIdentities } from '../src/bus/resolve.js';
 import { parseIdentities } from '../src/bus/pins.js';
+import { createProcessOps } from '../src/bus/proc.js';
 import { TTL_DONE_MS } from '../src/protocol/intent.js';
 import { parseThemePack, STATES } from 'familiar-theme';
 
@@ -50,11 +51,16 @@ function harness(over = {}) {
         animationFor: () => ({ kind: 'static' }),
       }),
       gitContext: async () => ({ remote: 'github.com/me/api', repoRoot: '/home/k/d/api' }),
-      resolveAgentPid: () => 4242,
-      // The agent's start time, stamped onto the record so a RECYCLED pid can
-      // never keep a dead record "alive" (see isAlive in src/bus/proc.js).
-      startTimeOf: () => 987_654,
-      isAlive: () => true,
+      processOps: {
+        ancestors: () => [
+          { pid: process.pid, ppid: 4242, comm: 'node', tty: null, starttime: 1 },
+          { pid: 4242, ppid: 1, comm: 'claude', tty: true, starttime: 987_654 },
+        ],
+        recordOf: () => null,
+        startTimeOf: () => 987_654,
+        isAlive: () => true,
+        lockHolderAlive: () => true,
+      },
       now: () => 1_000_000,
       ...over,
     },
@@ -87,6 +93,51 @@ test('writes the bus AND the resolved intent in one transaction', async () => {
   assert.equal(intent.s1.current.motionPolicy, 'full');
   assert.deepEqual(intent.s1.current.animation, { kind: 'static' });
   assert.equal(intent.s1.expiresAt, null);
+});
+
+test('one Darwin process table serves an N-record transaction', async () => {
+  const { paths, deps } = harness();
+  const started = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
+  const record = (sessionId, pid) => ({
+    sessionId,
+    projectKey: `project-${sessionId}`,
+    project: `project-${sessionId}`,
+    remote: null,
+    repoRoot: `/projects/${sessionId}`,
+    cwd: `/projects/${sessionId}`,
+    pid,
+    starttime: started,
+    state: 'idle',
+    updatedAt: 1,
+  });
+  writeFileSync(paths.agentsPath, JSON.stringify({
+    a: record('a', 20),
+    b: record('b', 30),
+    c: record('c', 40),
+  }));
+
+  let fullTableCalls = 0;
+  const processOps = {
+    ...createProcessOps({
+      platform: 'darwin',
+      runPs: (args) => {
+        assert.deepEqual(args, ['-axo', 'pid=,ppid=,tty=,lstart=,comm=']);
+        fullTableCalls++;
+        return [
+          `${process.pid} 50 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node`,
+          '50 1 ttys003 Sat Aug 22 23:24:46 2026 /opt/bin/claude',
+          '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+          '30 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+          '40 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node',
+        ].join('\n');
+      },
+      kill: () => {},
+    }),
+    lockHolderAlive: () => true,
+  };
+
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps: { ...deps, processOps } });
+  assert.equal(fullTableCalls, 1);
 });
 
 test('reports the transition, so the terminal emitter can gate on it without extra state', async () => {
@@ -154,7 +205,11 @@ test('a dead agent is pruned on the next write — portable, no compositor asked
   await applyHookEvent({
     event: 'UserPromptSubmit',
     stdin: other,
-    deps: { ...deps, resolveAgentPid: () => 5555, isAlive: (pid) => pid === 5555 },
+    deps: {
+      ...deps,
+      resolveAgentPid: () => 5555,
+      processOps: { ...deps.processOps, isAlive: (pid) => pid === 5555 },
+    },
   });
 
   const agents = await readJson(paths.agentsPath);
@@ -175,7 +230,9 @@ test('reap sweeps an agent that died without a SessionEnd — kill -9 leaves no 
   await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
 
   // The terminal was closed. No SessionEnd fired, and no further hook ever will.
-  const { reaped } = await reap({ deps: { ...deps, isAlive: () => false } });
+  const { reaped } = await reap({
+    deps: { ...deps, processOps: { ...deps.processOps, isAlive: () => false } },
+  });
 
   assert.deepEqual(reaped, ['s1']);
   assert.deepEqual(await readJson(paths.agentsPath), {});
@@ -286,7 +343,11 @@ test('the record carries the agent starttime, and a dead agent takes the record 
   await applyHookEvent({
     event: 'UserPromptSubmit',
     stdin: JSON.stringify({ session_id: 's2', cwd: '/home/k/d/api' }),
-    deps: { ...deps, resolveAgentPid: () => 5555, startTimeOf: () => 111, isAlive: recycled },
+    deps: {
+      ...deps,
+      resolveAgentPid: () => 5555,
+      processOps: { ...deps.processOps, startTimeOf: () => 111, isAlive: recycled },
+    },
   });
 
   assert.deepEqual(Object.keys(await readJson(paths.agentsPath)), ['s2']);
@@ -297,7 +358,11 @@ test('an agent that vanishes before its starttime can be read is a hard error, n
   // nothing can ever prove dead. Fail early instead — one stderr line, exit 0.
   const { paths, deps } = harness();
   await assert.rejects(
-    applyHookEvent({ event: 'UserPromptSubmit', stdin, deps: { ...deps, startTimeOf: () => null } }),
+    applyHookEvent({
+      event: 'UserPromptSubmit',
+      stdin,
+      deps: { ...deps, processOps: { ...deps.processOps, startTimeOf: () => null } },
+    }),
     /could not read the start time of agent pid 4242 — it is gone/
   );
   assert.equal(await readJson(paths.agentsPath), null);
@@ -432,7 +497,10 @@ test('reap evicts a faulted record too — every record it sees is pre-existing'
   // s1's agent died (pid 4242); s2's config broke. reap must sweep the first and
   // evict the second rather than throwing on it and sweeping neither.
   const { reaped, evicted } = await reap({
-    deps: { ...withCatalog(deps, REPIN_B_TO_A_MISSING_MEMBER), isAlive: (pid) => pid !== 4242 },
+    deps: {
+      ...withCatalog(deps, REPIN_B_TO_A_MISSING_MEMBER),
+      processOps: { ...deps.processOps, isAlive: (pid) => pid !== 4242 },
+    },
   });
 
   assert.deepEqual(reaped, ['s1']);

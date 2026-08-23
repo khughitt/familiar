@@ -13,6 +13,15 @@ const dir = () => mkdtempSync(join(tmpdir(), 'familiar-lock-'));
 // there is no instant at which the file exists without it.
 const liveToken = () => `${process.pid}:${startTimeOf(process.pid)}:held`;
 
+test('lock token uses the invocation start-time reader', async () => {
+  const path = join(dir(), 'agents.lock');
+  let calls = 0;
+  await withLock(path, async () => {
+    assert.match(readFileSync(path, 'utf8'), new RegExp(`^${process.pid}:12345:`));
+  }, { startTimeOf: () => { calls++; return 12345; } });
+  assert.equal(calls, 1);
+});
+
 test('serializes concurrent writers — no interleaving', async () => {
   const lockPath = join(dir(), 'agents.lock');
   const order = [];

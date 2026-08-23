@@ -114,6 +114,27 @@ const exists = (pid, kill) => {
   }
 };
 
+const cachedLockHolderAlive = (freshRecordOf, pidExists) => {
+  const cache = new Map();
+  return (pid, options = {}) => {
+    const { starttime = null } = options;
+    const key = `${pid}:${starttime}`;
+    if (cache.has(key)) return cache.get(key);
+
+    let alive = false;
+    if (pidExists(pid)) {
+      try {
+        const record = freshRecordOf(pid, options);
+        alive = !Number.isInteger(record?.starttime) || record.starttime === starttime;
+      } catch {
+        alive = true;
+      }
+    }
+    cache.set(key, alive);
+    return alive;
+  };
+};
+
 export function createProcessOps({
   platform = process.platform,
   readStat = defaultReadStat,
@@ -121,15 +142,22 @@ export function createProcessOps({
   kill = defaultKill,
 } = {}) {
   if (platform === 'linux') {
-    const recordOf = (pid, { readStat: read = readStat } = {}) => parseStat(read(pid));
-    const startTimeOf = (pid, options) => recordOf(pid, options)?.starttime ?? null;
+    const freshRecordOf = (pid, { readStat: read = readStat } = {}) => parseStat(read(pid));
+    const recordOf = freshRecordOf;
+    const freshStartTimeOf = (pid, options) => freshRecordOf(pid, options)?.starttime ?? null;
+    const startTimeOf = freshStartTimeOf;
+    const pidExists = (pid) => exists(pid, kill);
+    const lockHolderAlive = cachedLockHolderAlive(freshRecordOf, pidExists);
     return {
       recordOf,
       ancestors: (pid, options) => walkAncestors(pid, (current) => recordOf(current, options)),
       startTimeOf,
-      pidExists: (pid) => exists(pid, kill),
+      freshRecordOf,
+      freshStartTimeOf,
+      pidExists,
+      lockHolderAlive,
       isAlive(pid, { starttime = null, readStat: read = readStat } = {}) {
-        return exists(pid, kill)
+        return pidExists(pid)
           && Number.isInteger(starttime)
           && startTimeOf(pid, { readStat: read }) === starttime;
       },
@@ -150,13 +178,27 @@ export function createProcessOps({
     };
     const recordOf = (pid) => records().get(pid) ?? null;
     const startTimeOf = (pid) => recordOf(pid)?.starttime ?? null;
+    const freshRecordOf = (pid) => {
+      const output = runPs(['-p', String(pid), '-o', 'pid=,ppid=,tty=,lstart=,comm=']);
+      if (typeof output !== 'string' || output.trim() === '') return null;
+      const lines = output.trimEnd().split('\n');
+      if (lines.length !== 1) throw new Error('Darwin ps: malformed output');
+      const record = parseDarwinRow(lines[0]);
+      return record.pid === pid ? record : null;
+    };
+    const freshStartTimeOf = (pid) => freshRecordOf(pid)?.starttime ?? null;
+    const pidExists = (pid) => exists(pid, kill);
+    const lockHolderAlive = cachedLockHolderAlive(freshRecordOf, pidExists);
     return {
       recordOf,
       ancestors: (pid) => walkAncestors(pid, recordOf),
       startTimeOf,
-      pidExists: (pid) => exists(pid, kill),
+      freshRecordOf,
+      freshStartTimeOf,
+      pidExists,
+      lockHolderAlive,
       isAlive(pid, { starttime = null } = {}) {
-        return exists(pid, kill)
+        return pidExists(pid)
           && Number.isInteger(starttime)
           && startTimeOf(pid) === starttime;
       },
@@ -170,5 +212,8 @@ export const defaultProcessOps = createProcessOps();
 export const ancestors = (...args) => defaultProcessOps.ancestors(...args);
 export const recordOf = (...args) => defaultProcessOps.recordOf(...args);
 export const startTimeOf = (...args) => defaultProcessOps.startTimeOf(...args);
+export const freshRecordOf = (...args) => defaultProcessOps.freshRecordOf(...args);
+export const freshStartTimeOf = (...args) => defaultProcessOps.freshStartTimeOf(...args);
 export const isAlive = (...args) => defaultProcessOps.isAlive(...args);
+export const lockHolderAlive = (...args) => defaultProcessOps.lockHolderAlive(...args);
 export const pidExists = (...args) => defaultProcessOps.pidExists(...args);

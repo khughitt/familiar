@@ -101,6 +101,60 @@ test('one Darwin snapshot serves ancestry, start time, and liveness', () => {
   assert.equal(spawns, 1);
 });
 
+test('Darwin fresh reads target one pid with the strict row parser', () => {
+  let args;
+  const ops = createProcessOps({
+    platform: 'darwin',
+    runPs: (given) => {
+      args = given;
+      return '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node';
+    },
+  });
+  assert.deepEqual(ops.freshRecordOf(20), {
+    pid: 20,
+    ppid: 1,
+    comm: 'node',
+    tty: null,
+    starttime: Date.parse('Sat Aug 22 23:24:46 2026') / 1000,
+  });
+  assert.deepEqual(args, ['-p', '20', '-o', 'pid=,ppid=,tty=,lstart=,comm=']);
+});
+
+test('Darwin lock liveness caches by exact pid and start time', () => {
+  let reads = 0;
+  const ops = createProcessOps({
+    platform: 'darwin',
+    runPs: () => {
+      reads++;
+      return '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node';
+    },
+    kill: () => {},
+  });
+  const starttime = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
+  assert.equal(ops.lockHolderAlive(20, { starttime }), true);
+  assert.equal(ops.lockHolderAlive(20, { starttime }), true);
+  assert.equal(ops.lockHolderAlive(20, { starttime: starttime + 1 }), false);
+  assert.equal(reads, 2);
+});
+
+test('Darwin lock liveness rejects an absent pid but preserves an unverifiable live lock', () => {
+  let reads = 0;
+  const absent = createProcessOps({
+    platform: 'darwin',
+    runPs: () => { reads++; return ''; },
+    kill: () => { const error = new Error('gone'); error.code = 'ESRCH'; throw error; },
+  });
+  assert.equal(absent.lockHolderAlive(20, { starttime: 123 }), false);
+  assert.equal(reads, 0);
+
+  const unreadable = createProcessOps({
+    platform: 'darwin',
+    runPs: () => { throw new Error('denied'); },
+    kill: () => {},
+  });
+  assert.equal(unreadable.lockHolderAlive(20, { starttime: 123 }), true);
+});
+
 test('Darwin process identity fails closed when missing or mismatched', () => {
   const ops = createProcessOps({
     platform: 'darwin',
@@ -187,6 +241,25 @@ test('a vanished ancestor truncates the chain rather than throwing', () => {
   const readStat = (pid) => (pid === 500 ? '500 (node) S 999 0 0 0 0 0 0 0 0 0 0 0 0 0' : null);
   const ops = createProcessOps({ platform: 'linux' });
   assert.deepEqual(ops.ancestors(500, { readStat }).map((p) => p.pid), [500]);
+});
+
+test('Linux fresh start-time reads once through the call-time seam', () => {
+  let reads = 0;
+  const ops = createProcessOps({ platform: 'linux' });
+  assert.equal(ops.freshStartTimeOf(4242, {
+    readStat: () => { reads++; return statLine(); },
+  }), 987654);
+  assert.equal(reads, 1);
+});
+
+test('Linux lock liveness reads once through the call-time seam', () => {
+  let reads = 0;
+  const ops = createProcessOps({ platform: 'linux', kill: () => {} });
+  assert.equal(ops.lockHolderAlive(4242, {
+    starttime: 111,
+    readStat: () => { reads++; return statLine(); },
+  }), false);
+  assert.equal(reads, 1);
 });
 
 // --- A PID IS NOT AN IDENTITY ----------------------------------------------

@@ -1,7 +1,7 @@
 import { withLock } from './lock.js';
 import { readJson, writeJsonAtomic } from './store.js';
 import { pruneDead } from './prune.js';
-import { isAlive as defaultIsAlive, startTimeOf as defaultStartTimeOf } from './proc.js';
+import { defaultProcessOps } from './proc.js';
 import { gitContext as defaultGitContext, projectKeyFor, displayProject } from './identity.js';
 import { resolveAll } from './resolve.js';
 import { assertState } from 'familiar-theme';
@@ -101,14 +101,14 @@ export async function applyHookEvent({ event, stdin, deps }) {
   const {
     paths, tone, motionPolicy, prepareSprites, adapter,
     gitContext = defaultGitContext,
-    isAlive = defaultIsAlive,
-    startTimeOf = defaultStartTimeOf,
     now = () => Date.now(),
   } = deps;
+  const processOps = deps.processOps ?? defaultProcessOps;
 
   if (!adapter) throw new Error('applyHookEvent needs an adapter — see src/adapters/index.js');
   const { stateForEvent, parsePayload, reduceState } = adapter;
-  const resolveAgentPid = deps.resolveAgentPid ?? adapter.resolveAgentPid;
+  const resolveAgentPid = deps.resolveAgentPid ?? (() =>
+    adapter.resolveAgentPid({ ancestors: processOps.ancestors }));
 
   // The LEVEL: what the event says, on its own. Still validated before the lock, so an unknown
   // event still fails before anything is written -- and `null` still means "clear", so the git
@@ -133,7 +133,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
   // an unverifiable record that outlives its process, which is the bug itself.
   let starttime = null;
   if (level !== null) {
-    starttime = startTimeOf(pid);
+    starttime = processOps.startTimeOf(pid);
     if (!Number.isInteger(starttime)) {
       throw new Error(`could not read the start time of agent pid ${pid} — it is gone`);
     }
@@ -146,7 +146,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
     // query it cannot safely perform.
     const priorIntents = (await readJson(paths.intentPath)) ?? {};
     const priorIntent = priorIntents[sessionId]?.current ?? null;
-    const agents = pruneDead((await readJson(paths.agentsPath)) ?? {}, { isAlive });
+    const agents = pruneDead((await readJson(paths.agentsPath)) ?? {}, { isAlive: processOps.isAlive });
     const prev = agents[sessionId] ?? null;
 
     let next = null;
@@ -183,6 +183,9 @@ export async function applyHookEvent({ event, stdin, deps }) {
       required: level === null ? null : sessionId,
     });
     return { prev, next, priorIntent, intent, evicted };
+  }, {
+    startTimeOf: processOps.startTimeOf,
+    isAlive: processOps.lockHolderAlive,
   });
 }
 
@@ -197,12 +200,13 @@ export async function applyHookEvent({ event, stdin, deps }) {
 // they must never do.
 export async function reap({ deps }) {
   const {
-    paths, tone, motionPolicy, prepareSprites, isAlive = defaultIsAlive,
+    paths, tone, motionPolicy, prepareSprites,
   } = deps;
+  const processOps = deps.processOps ?? defaultProcessOps;
 
   return withLock(paths.lockPath, async () => {
     const before = (await readJson(paths.agentsPath)) ?? {};
-    const agents = pruneDead(before, { isAlive });
+    const agents = pruneDead(before, { isAlive: processOps.isAlive });
 
     const reaped = Object.keys(before).filter((id) => !(id in agents));
     if (reaped.length === 0) return { reaped, evicted: [] };   // nothing to do; do not churn the files
@@ -213,5 +217,8 @@ export async function reap({ deps }) {
       paths, agents, tone, motionPolicy, prepareSprites,
     });
     return { reaped, evicted };
+  }, {
+    startTimeOf: processOps.startTimeOf,
+    isAlive: processOps.lockHolderAlive,
   });
 }
