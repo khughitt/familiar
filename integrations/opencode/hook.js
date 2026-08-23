@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 export const FAMILIAR_BIN = fileURLToPath(new URL('../../bin/familiar', import.meta.url));
 
 // The one piece of I/O in the plugin, and it is its own module so that it can be TESTED: point it
-// at /bin/false and a nonzero exit had better become a rejection, because queue.js's whole failure
-// contract is built on `run` rejecting.
+// at a child that exits nonzero and it had better become a rejection, because queue.js's whole
+// failure contract is built on `run` rejecting.
 //
 // `shell: false` -- there is nothing to expand, and a shell is only an opportunity for the cwd to
 // be interpreted.

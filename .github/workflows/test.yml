@@ -37,6 +37,7 @@ jobs:
       - run: npm ci
       - name: fast suite with Darwin tests enforced
         run: |
+          set -o pipefail
           npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
           ! grep -F 'requires Darwin' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin real snapshot keeps this process identity stable' "$RUNNER_TEMP/familiar-tests.log"

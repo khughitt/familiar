@@ -12,12 +12,14 @@ test('FAMILIAR_BIN resolves to the repo\'s own bin/familiar, not to $PATH', () =
 });
 
 test('a zero exit resolves', async () => {
-  await spawnHook('session.busy', { session_id: 'opencode:1', cwd: '/tmp' }, { bin: '/bin/true' });
+  await spawnHook('session.busy', { session_id: 'opencode:1', cwd: '/tmp' },
+    { bin: process.execPath, args: ['-e', ''] });
 });
 
 test('a nonzero exit rejects, and says which event and what the hook said', async () => {
   await assert.rejects(
-    () => spawnHook('session.idle', { session_id: 'opencode:1', cwd: '/tmp' }, { bin: '/bin/false' }),
+    () => spawnHook('session.idle', { session_id: 'opencode:1', cwd: '/tmp' },
+      { bin: process.execPath, args: ['-e', 'process.exitCode = 1'] }),
     /exited 1/,
   );
 });

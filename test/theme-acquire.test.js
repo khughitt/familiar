@@ -299,11 +299,11 @@ test('a regular file replaced between lstat and open is rejected by identity', a
 
 test('a Unix socket fails acquisition by path', async () => {
   const src = writePack();
-  const sock = join(src, 'listen.sock');
+  const sock = join(src, 's');
   const server = createNetServer();
   await new Promise((ready) => server.listen(sock, ready));
   try {
-    await assert.rejects(copySource(src, destDir()), /listen\.sock/);
+    await assert.rejects(copySource(src, destDir()), /\/s is not a regular file or directory/);
   } finally {
     await new Promise((closed) => server.close(closed));
   }
