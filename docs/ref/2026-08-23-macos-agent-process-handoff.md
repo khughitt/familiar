@@ -1,8 +1,10 @@
 # macOS agent-process handoff
 
-This runbook closes only Familiar's Darwin ancestry and hook-executor gate. It
-uses Kitty and one authenticated tool event from Claude Code, Codex, and
-OpenCode. It does not test visible graphics, tint, or bell behavior.
+This runbook closes only Familiar's Darwin ancestry, hook-executor, and
+terminal-environment evidence. It runs in ONE terminal — Kitty or Ghostty,
+whichever the handoff message names — and takes one authenticated tool event
+from Claude Code, Codex, and OpenCode. It does not test visible graphics, tint,
+or bell behavior; that is the separate physical terminal gate.
 
 The `spike/macos-agent-handoff` branch is disposable and must never be merged.
 The tester must not push this branch or any capture to any remote.
@@ -18,13 +20,16 @@ tool payload.
 ## Prerequisites
 
 - macOS 14 or newer on Apple Silicon.
-- Node.js 22 or newer and Kitty.app.
+- Node.js 22 or newer, and the terminal the handoff message names: Kitty.app or
+  Ghostty.app.
 - Authenticated, working installations of Claude Code, Codex, and OpenCode.
 - Permission to make and restore temporary edits to each agent's configuration.
 
-Run the entire handoff from a Kitty shell. Use a checkout path without spaces;
-Codex command quoting is the fact being measured, not an assumption this probe
-may make.
+Run the entire handoff from a shell inside that one terminal, and do not mix
+terminals within a run: the inherited terminal markers are the evidence, and a
+session started under one terminal carries its markers into every hook it
+spawns. Use a checkout path without spaces; Codex command quoting is the fact
+being measured, not an assumption this probe may make.
 
 ## 1. Check out and verify the disposable branch
 
@@ -71,18 +76,29 @@ overwrite evidence from an earlier attempt.
 Record the environment without recording general environment variables:
 
 ```sh
-export FAMILIAR_KITTY_BIN="$(command -v kitty 2>/dev/null || true)"
-if [ -z "$FAMILIAR_KITTY_BIN" ]; then
-  export FAMILIAR_KITTY_BIN="/Applications/kitty.app/Contents/MacOS/kitty"
+Set `FAMILIAR_TERMINAL` to the terminal this run is for, exactly as the handoff
+message names it:
+
+```sh
+export FAMILIAR_TERMINAL=kitty          # or: ghostty
+case "$FAMILIAR_TERMINAL" in
+  kitty)   FAMILIAR_TERMINAL_APP=/Applications/kitty.app/Contents/MacOS/kitty ;;
+  ghostty) FAMILIAR_TERMINAL_APP=/Applications/Ghostty.app/Contents/MacOS/ghostty ;;
+  *) printf 'unknown terminal: %s\n' "$FAMILIAR_TERMINAL" >&2 ;;
+esac
+export FAMILIAR_TERMINAL_BIN="$(command -v "$FAMILIAR_TERMINAL" 2>/dev/null || true)"
+if [ -z "$FAMILIAR_TERMINAL_BIN" ]; then
+  export FAMILIAR_TERMINAL_BIN="$FAMILIAR_TERMINAL_APP"
 fi
-test -x "$FAMILIAR_KITTY_BIN"
+test -x "$FAMILIAR_TERMINAL_BIN"
 
 {
   date -u '+captured-at=%Y-%m-%dT%H:%M:%SZ'
   sw_vers
   printf 'architecture='; uname -m
   printf 'node='; node --version
-  printf 'kitty='; "$FAMILIAR_KITTY_BIN" --version
+  printf 'terminal=%s\n' "$FAMILIAR_TERMINAL"
+  printf 'terminal-version='; "$FAMILIAR_TERMINAL_BIN" --version
   printf 'claude='; claude --version
   printf 'codex='; codex --version
   printf 'opencode='; opencode --version
@@ -376,9 +392,12 @@ Each line is one JSON record. A valid record has:
 - matching PID/PPID values in each pair; and
 - a final PID 1 / PPID 0 row.
 
-Each record also contains presence booleans, never values, for `TERM`,
-`TERM_PROGRAM`, `KITTY_WINDOW_ID`, `KITTY_PID`, and
-`GHOSTTY_RESOURCES_DIR` as seen inside the hook.
+Each record also contains an `environment` block as seen inside the hook. It
+mirrors the marker set Familiar's own capability classifier reads: `TERM` and
+`TERM_PROGRAM` as bounded terminal names (or the literal `other`), and presence
+booleans for `KITTY_WINDOW_ID`, `KITTY_PID`, `GHOSTTY_RESOURCES_DIR`,
+`GHOSTTY_BIN_DIR`, and `TMUX`. On a Ghostty run those two values are the whole
+point: the classifier decides Ghostty by value, not by presence.
 
 There may be several records per agent because lifecycle hooks can fire around
 the requested tool event. Keep them all. The evaluator will select the real
@@ -428,7 +447,7 @@ Create `$FAMILIAR_RETURN_DIR/notes.md` with this exact checklist:
 - Capture date (UTC):
 - Mac model / architecture:
 - macOS version:
-- Kitty version:
+- Terminal and version:
 - Familiar commit:
 
 ## Claude Code
