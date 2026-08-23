@@ -1104,6 +1104,15 @@ test('a status line invocation makes exactly one cheap git call', (t) => {
     rmSync(probe, { recursive: true, force: true });
   });
 
+  // A COLD EXEC IS NOT A SECOND GIT CALL. `gitBranch` gives `symbolic-ref` a 250ms budget
+  // (BRANCH_TIMEOUT_MS); on macOS the first executions of a just-written unsigned shim script
+  // cost about that much on their own, so the cheap call is SIGKILLed, the `rev-parse` fallback
+  // fires, and this test counts two calls for a reason that has nothing to do with familiar --
+  // measured at 252ms cold and 28ms warm on an M4 during the 2026-08-23 handoff, failing 6 of 6
+  // runs. One warm statusline run below was not enough, because it pays the cost at most twice.
+  // Exercise the shim directly until it is warm; a genuine extra git call still fails the count.
+  for (let i = 0; i < 5; i++) spawnSync(join(fakeBin, 'git'), ['--version'], { env: e });
+
   seedBus(e, 'timed');
   const payload = { session_id: 'timed', cwd: process.cwd() };
   const warm = statusline(e, [], payload);
