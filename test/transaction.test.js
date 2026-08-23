@@ -17,6 +17,10 @@ const PACK = parseThemePack(
   `spec-version: 1\nid: cats\nlabel: Cats\nmembers:\n  - id: dog-in-disguise\n    asset-root: sprites/dog-in-disguise\n    label: Dog in Disguise\n    slots: [3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11]\n    persona: The Impostor.\n    animation: { kind: static }\n    poses:\n${POSES}\n`,
   '/themes/cats'
 );
+const TEST_ADAPTER = {
+  ...adapterFor('claude-code'),
+  resolveAgentPid: ({ ancestors }) => ancestors(process.pid).find((record) => record.comm === 'claude').pid,
+};
 
 function harness(over = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-tx-'));
@@ -35,10 +39,9 @@ function harness(over = {}) {
       paths,
       pack,
       catalog,
-      // The transaction no longer knows which agent it serves — it is handed one. These tests
-      // use claude-code because its event names are the ones they assert on; the codex adapter
-      // gets its own coverage in test/codex.test.js.
-      adapter: adapterFor('claude-code'),
+      // Keep transaction fixtures platform-neutral while proving the core passes
+      // its process view's ancestry function into the adapter resolver.
+      adapter: TEST_ADAPTER,
       tone: { mode: 'dark', satScale: 1 },
       motionPolicy: 'full',
       // The REAL shape, and the real identity pass — only the bake is faked.
