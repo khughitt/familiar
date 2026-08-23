@@ -329,8 +329,9 @@ macOS path covers:
 
 1. Checkout installation, scheme, and theme.
 2. `setup claude-code` output merged into `~/.claude/settings.json`.
-3. `install pets`, project syncing, and the committed Codex hooks fixture for
-   `$CODEX_HOME/hooks.json`; no generated Codex setup command is documented yet.
+3. `install pets`, project syncing, and a warning that the committed Codex hooks
+   fixture is review-only: do not copy, merge, or install it until executor
+   evidence resolves its literal path and command encoding.
 4. `install opencode`, whose global directory remains `~/.config/opencode` on
    both platforms.
 5. An optional user LaunchAgent invoking `familiar reap` every minute.
