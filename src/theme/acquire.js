@@ -5,7 +5,7 @@ import { devNull } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { LIMITS } from 'familiar-theme';
-import { copyRegularFile, unsupportedEntry } from './copy-regular-file.js';
+import { changedEntry, copyRegularFile, unsupportedEntry } from './copy-regular-file.js';
 
 export const DEFAULT_TIMEOUT_MS = 300_000;
 export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
@@ -107,7 +107,7 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
             openPath, displayPath: display, to: out, dev: st.dev, ino: st.ino,
           });
         } else if (st.isFile()) {
-          await copyRegularFile(src, display, out, signal);
+          await copyRegularFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
         } else {
           throw unsupportedEntry(display);
         }
@@ -116,14 +116,6 @@ export async function copySource(sourceDir, dest, { signal } = {}) {
       await handle?.close();
     }
   }
-}
-
-function changedEntry(path) {
-  const error = new Error(
-    `theme add: ${path} changed during acquisition — retry with a stable source`
-  );
-  error.code = 'THEME_ENTRY_CHANGED';
-  return error;
 }
 
 async function openVerifiedDirectory(task) {

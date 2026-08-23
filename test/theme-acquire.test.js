@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  chmodSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
+  chmodSync, lstatSync, mkdirSync, mkdtempSync, symlinkSync, existsSync, readFileSync, realpathSync,
   readdirSync, readlinkSync, renameSync, rmSync, statSync, truncateSync, utimesSync, watch,
   writeFileSync,
 } from 'node:fs';
@@ -13,6 +13,7 @@ import {
   acquireSource, buildCloneEnv, classifySource, cloneSource, collapseStderr, copySource,
   DEFAULT_GROWTH_LIMIT_BYTES,
 } from '../src/theme/acquire.js';
+import { copyRegularFile } from '../src/theme/copy-regular-file.js';
 import { LIMITS, validateThemePack } from 'familiar-theme';
 import { writePack } from './helpers/fixture.js';
 
@@ -209,6 +210,26 @@ try {
   assert.equal(result.signal, null, 'regular-file open blocked on the FIFO');
   assert.equal(result.status, 2);
   assert.match(result.stderr, /swapped-file.*regular file or directory/);
+});
+
+test('a regular file replaced between lstat and open is rejected by identity', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-identity-'));
+  const path = join(dir, 'source');
+  const out = join(dir, 'out');
+  writeFileSync(path, 'source');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const expected = lstatSync(path);
+  await assert.rejects(
+    copyRegularFile(path, path, out, undefined,
+      { dev: expected.dev, ino: expected.ino },
+      { open: async () => ({
+        stat: async () => ({
+          dev: expected.dev, ino: expected.ino + 1, isFile: () => true,
+        }),
+        close: async () => {},
+      }) }),
+    (error) => error.code === 'THEME_ENTRY_CHANGED'
+  );
 });
 
 test('a Unix socket fails acquisition by path', async () => {
