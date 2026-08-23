@@ -216,21 +216,26 @@ export async function runSuite(files, {
       });
       closed.catch(() => {});
       await spawned;
-      const starttime = processOps.freshStartTimeOf(child.pid);
-      if (!Number.isInteger(starttime)) {
-        child.kill('SIGTERM');
-        await closed;
-        throw new Error(`test runner: cannot identify worker ${child.pid}`);
+      try {
+        const starttime = processOps.freshStartTimeOf(child.pid);
+        if (!Number.isInteger(starttime)) {
+          throw new Error(`test runner: cannot identify worker ${child.pid}`);
+        }
+        const nextOwner = join(scratch, `${OWNER}.next`);
+        writeFile(nextOwner, ownerBytes(namespace, child.pid, starttime), { flag: 'wx' });
+        rename(nextOwner, join(scratch, OWNER));
+        for (const signal of ['SIGINT', 'SIGTERM']) {
+          const handler = () => child.kill(signal);
+          handlers.set(signal, handler);
+          processEvents.on(signal, handler);
+        }
+        child.stdio[3].end('ready\n');
+      } catch (error) {
+        try { child.stdio[3].destroy(); } catch {}
+        try { child.kill('SIGTERM'); } catch {}
+        await closed.catch(() => {});
+        throw error;
       }
-      const nextOwner = join(scratch, `${OWNER}.next`);
-      writeFile(nextOwner, ownerBytes(namespace, child.pid, starttime), { flag: 'wx' });
-      rename(nextOwner, join(scratch, OWNER));
-      for (const signal of ['SIGINT', 'SIGTERM']) {
-        const handler = () => child.kill(signal);
-        handlers.set(signal, handler);
-        processEvents.on(signal, handler);
-      }
-      child.stdio[3].end('ready\n');
       return await closed;
     } finally {
       for (const [signal, handler] of handlers) processEvents.off(signal, handler);

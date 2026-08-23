@@ -180,3 +180,48 @@ test('runSuite reads a newly spawned worker identity outside the invocation snap
     worker: { pid: childPid, starttime: 200 },
   });
 });
+
+test('runSuite terminates and settles a spawned worker when fresh identity lookup throws', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-suite-runner-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const identityError = new Error('targeted process read failed');
+  let handshakeDestroyed = false;
+  let killed = false;
+  let settled = false;
+  const child = new EventEmitter();
+  child.pid = 4242;
+  child.kill = (signal) => {
+    assert.equal(signal, 'SIGTERM');
+    killed = true;
+    queueMicrotask(() => child.emit('close', null));
+  };
+  child.stdio = [null, null, null, {
+    destroy() { handshakeDestroyed = true; },
+  }];
+  child.once('close', () => { settled = true; });
+
+  await assert.rejects(
+    runSuite(['test/fake.test.js'], {
+      tmpdir: () => dir,
+      reap: () => {},
+      processOps: {
+        startTimeOf: () => 100,
+        freshStartTimeOf: () => { throw identityError; },
+        isAlive: () => true,
+        lockHolderAlive: () => true,
+      },
+      pidNamespace: () => 'darwin-host',
+      processEvents: new EventEmitter(),
+      spawn: () => {
+        queueMicrotask(() => child.emit('spawn'));
+        return child;
+      },
+      suiteLease: async (fn) => fn(),
+    }),
+    (error) => error === identityError
+  );
+
+  assert.equal(handshakeDestroyed, true);
+  assert.equal(killed, true);
+  assert.equal(settled, true);
+});
