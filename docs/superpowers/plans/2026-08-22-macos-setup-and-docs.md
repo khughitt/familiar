@@ -4,7 +4,7 @@
 
 **Goal:** Add non-mutating Claude Code and Codex setup output, declare Node 22, and replace path-placeholder installation instructions with generated configuration.
 
-**Architecture:** One pure setup module owns both JSON documents and the POSIX shell quoting required by the agents' `sh -c` boundary. `bin/familiar` resolves its own real path and only prints the selected document; it never reads or writes agent configuration.
+**Architecture:** One pure setup module owns both JSON documents. `bin/familiar` resolves its own real path and only prints the selected document; it never reads or writes agent configuration. Claude Code commands use POSIX shell quoting at its documented `sh -c` boundary. Codex command encoding is filled in only after the physical-Mac process spike records its executor boundary.
 
 **Tech Stack:** Node 22 ESM, `node:util.parseArgs`, `node:test`, Markdown.
 
@@ -14,7 +14,8 @@
 
 - Commands are `familiar setup claude-code` and `familiar setup codex`; universal `-h`/`--help` remains available.
 - Leaf commands accept no other flags or positional arguments.
-- Resolve the checkout's real `bin/familiar` path, POSIX-shell-quote it, then JSON-encode the document.
+- Resolve the checkout's real `bin/familiar` path before command encoding and JSON serialization.
+- POSIX-shell-quote Claude Code paths. Apply the same encoding to Codex only if Task 1 of the process/runtime plan records a shell frame; otherwise stop and amend this plan from the measured executor behavior.
 - Never inspect, merge, or write `~/.claude` or `~/.codex`.
 - Keep Familiar's existing `~/.config` and `~/.local/state` paths on macOS.
 - Add `engines.node: ">=22"`; add no dependency or packaging channel.
@@ -23,6 +24,14 @@
 ---
 
 ### Task 1: Make setup documents a single pure source of truth
+
+**Precondition:** Complete Task 1 of
+`2026-08-22-macos-process-runtime-and-ci.md`. The code and Codex assertions below
+apply only when its evidence note confirms that Codex interprets hook commands
+through a shell. If it does not, revise and reapprove the Codex portions before
+writing them. If a physical Mac is unavailable, complete the Claude Code parts
+of this plan and omit every Codex-labeled branch, assertion, CLI leaf, and
+documentation instruction until the gate is resolved.
 
 **Files:**
 - Create: `src/install/setup.js`

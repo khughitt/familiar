@@ -1,6 +1,6 @@
 # macOS Core Support — Design
 
-**Status:** approved in review; two planning corrections awaiting confirmation; not implemented
+**Status:** approved in review; implementation planned; not implemented
 **Date:** 2026-08-22
 
 Familiar currently develops and tests against Linux. This milestone makes its
@@ -78,10 +78,19 @@ from that evidence. If a terminal-owning ancestor basenames to `node`, a shim,
 or another name, the implementation must specify and test the smallest exact
 rule that distinguishes that process; it must not silently reuse Linux's names.
 
-Darwin parser, setup, CI, theme, and test-runner work may proceed independently.
-Darwin adapter activation and the Supported claim remain gated on the live-hook
-capture. A resolver miss is a named diagnostic at the hook's cosmetic boundary,
-not a silent no-op.
+For each agent, the evidence note also records every process between Familiar
+and the agent and whether a shell frame is present. Claude Code's documented
+`sh -c` boundary already justifies POSIX shell quoting. Codex command encoding
+remains gated on this capture: use shell quoting only if the live chain confirms
+a shell-interpreted boundary. If it does not, stop and amend the design from
+measured executor behavior rather than guessing from the single-string JSON
+shape. OpenCode's existing integration uses direct `spawn` with `shell: false`;
+its chain is recorded for completeness, not as a setup-command gate.
+
+Darwin parser, Claude Code setup, CI, theme, and test-runner work may proceed
+independently. Darwin adapter activation, Codex setup command encoding, and the
+Supported claim remain gated on the live-hook capture. A resolver miss is a
+named diagnostic at the hook's cosmetic boundary, not a silent no-op.
 
 ## 3. Process architecture
 
@@ -145,11 +154,20 @@ resolution, `startTimeOf`, bus pruning, and terminal lookup. Lock-token minting
 also gets the current process's start time from that snapshot. Consequently the
 normal Darwin hook path spawns `ps` once, not once per bus record.
 
-Lock contention is the narrow exception: reclaiming another process's lock must
-not trust a snapshot taken before that holder started. A contended lock performs
-one fresh, targeted identity read per observed lock token, memoized for that
-token. An unreadable identity is treated as live/unreclaimable at this boundary,
-so Familiar may defer cleanup but cannot steal a live lock.
+Two narrow cases require fresh targeted reads rather than the invocation
+snapshot:
+
+1. Reclaiming another process's lock must not trust a snapshot taken before that
+   holder started. A contended lock performs one fresh identity read per
+   observed lock token, memoized for that token. An unreadable identity is
+   treated as live/unreclaimable, so Familiar may defer cleanup but cannot steal
+   a live lock.
+2. The test runner must identify the worker it just spawned, which cannot appear
+   in the runner's earlier snapshot. It performs one fresh identity read for
+   that worker's owner record.
+
+Both reuse the same targeted identity primitive. Neither adds a `ps` spawn to
+the normal hook path.
 
 Bus liveness remains process identity, not PID presence:
 
@@ -247,11 +265,8 @@ shape. Linux supplies its current namespace link; Darwin supplies one fixed
 host-scope value. Because neither the schema nor its meaning as a cleanup scope
 changes, no version bump or migration layer is introduced.
 
-The suite worker is spawned after the runner's invocation snapshot, so it cannot
-be identified from that snapshot. Immediately after spawn, the runner performs
-one targeted process-identity read for the worker's owner record. This reuses the
-fresh identity primitive required by contended lock reclaim and does not add a
-spawn to the normal hook path.
+The suite worker uses the second fresh-read exception defined in §3 immediately
+after spawn; its owner record cannot be minted from the earlier snapshot.
 
 ## 7. Public setup interface
 
@@ -271,11 +286,13 @@ newline. Diagnostics go to stderr and failure is nonzero.
 - `setup codex` returns the complete Familiar hooks document.
 
 Command values use the realpath of `bin/familiar` in the running package. Under
-`npm link`, that is the checkout target rather than the npm-prefix symlink. The
-path is POSIX-shell-quoted for the agents' `sh -c` command boundary before the
-document is JSON-encoded, so spaces, single quotes, and JSON-significant
-characters remain literal. The commands never inspect or write `~/.claude` or
-`~/.codex`. Users review and merge the output.
+`npm link`, that is the checkout target rather than the npm-prefix symlink.
+Claude Code's path is POSIX-shell-quoted for its documented `sh -c` boundary
+before the document is JSON-encoded, so spaces, single quotes, and
+JSON-significant characters remain literal. Codex uses the same encoding only
+after the §2 capture confirms a shell-interpreted boundary; otherwise its setup
+design must be amended before implementation. The commands never inspect or
+write `~/.claude` or `~/.codex`. Users review and merge the output.
 
 The existing mutating commands remain distinct:
 
@@ -442,7 +459,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Installation | checkout + `npm install` + `npm link` |
 | Familiar paths | existing `~/.config` and `~/.local/state` paths |
 | Agent configuration | generated JSON only; never auto-merge Claude/Codex files |
-| Process source | Linux `/proc`; one memoized Darwin `/bin/ps` snapshot per invocation |
+| Process source | Linux `/proc`; one memoized Darwin `/bin/ps` snapshot on the normal path, plus the two §3 targeted-read exceptions |
 | Linux `tty` | presence marker only; never a path component |
 | Darwin TTY | strict normalization to `ttys<hex>` and `/dev/<tty>` |
 | Darwin environment | inherited hook environment; graphics-only degradation |

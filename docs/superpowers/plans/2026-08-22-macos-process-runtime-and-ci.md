@@ -4,7 +4,7 @@
 
 **Goal:** Add one-snapshot Darwin process identity, portable lock/test-runner behavior, validated terminal emission, evidence-backed agent resolution, and permanent macOS CI.
 
-**Architecture:** `src/bus/proc.js` remains the single process-operations boundary and returns one normalized record on both platforms. A lazy Darwin snapshot backs ancestry, start time, pruning, and terminal lookup; lock reclaim alone uses a fresh targeted identity read. The emitter receives an explicit `{ path, env }` binding so Darwin's hook environment and agent TTY cannot be conflated.
+**Architecture:** `src/bus/proc.js` remains the single process-operations boundary and returns one normalized record on both platforms. A lazy Darwin snapshot backs ancestry, start time, pruning, and terminal lookup; contended lock reclaim and post-spawn test-worker identification share a fresh targeted identity read. The emitter receives an explicit `{ path, env }` binding so Darwin's hook environment and agent TTY cannot be conflated.
 
 **Tech Stack:** Node 22 ESM, Linux `/proc`, Darwin `/bin/ps` with `LC_ALL=C`, `node:test`, GitHub Actions.
 
@@ -14,7 +14,7 @@
 
 - Task 1 requires a physical Mac and gates all resolver-name implementation.
 - Do not infer Darwin agent names from package launchers, unauthenticated startup, or Linux evidence.
-- Normal Darwin execution spawns one full `ps`; lock contention may add one targeted read per observed token.
+- The normal Darwin hook path spawns one full `ps`. Lock contention may add one targeted read per observed token; the test runner adds one for its newly spawned worker.
 - Linux `tty` is a presence marker only. Darwin accepts `??`, `ttys<hex>`, and `s<hex>` only.
 - Darwin `lstart` identity has one-second granularity.
 - No daemon, native helper, `/proc` fallback, environment dependency, or silent resolver miss.
@@ -30,8 +30,9 @@
 - Temporarily modify, then restore: `bin/familiar`
 
 **Interfaces:**
-- Produces: exact terminal-owning ancestor basenames and raw `pid,ppid,tty,lstart,comm,command` evidence for Claude Code, Codex, and OpenCode.
+- Produces: exact terminal-owning ancestor basenames, raw `pid,ppid,tty,lstart,comm,command` evidence, and the observed hook-command execution boundary for Claude Code, Codex, and OpenCode.
 - Gate: if any resolver needs more than exact basename plus non-null TTY, amend and reapprove the design before Task 2.
+- Gate: do not implement Codex setup command encoding until this capture proves whether a shell interprets its single-string hook command.
 
 - [ ] **Step 1: Add temporary hook instrumentation on the physical Mac**
 
@@ -51,12 +52,16 @@ if (process.env.FAMILIAR_MACOS_SPIKE) {
 
 - [ ] **Step 2: Trigger one authenticated hook per agent**
 
-Prefix generated Claude Code and Codex commands with:
+Temporarily change the configured Claude Code and Codex hook command strings to:
 
 ```text
-FAMILIAR_MACOS_SPIKE=claude-code <generated command>
-FAMILIAR_MACOS_SPIKE=codex <generated command>
+FAMILIAR_MACOS_SPIKE=claude-code <generated command>; :
+FAMILIAR_MACOS_SPIKE=codex <generated command>; :
 ```
+
+The trailing shell no-op keeps a shell executor alive as Familiar runs, making
+it visible in the ancestor chain. If the Codex hook does not run, record the
+failure and stop its setup work; do not infer quoting from the JSON field shape.
 
 Launch OpenCode with:
 
@@ -78,9 +83,20 @@ opencode    -> opencode
 
 If any differs or a same-named daemon precedes the terminal owner, stop and revise the design with the measured discriminator.
 
+Also record every frame between Familiar and the agent. For each agent, state
+whether the temporary `; :` command ran through a visible shell and include the
+shell's `comm` and `command` rows. A shell frame confirms shell quoting for that
+agent. Its absence does not authorize Codex quoting: stop and investigate or
+amend the setup design. OpenCode is expected to show the direct `spawn` boundary
+already specified by `integrations/opencode/hook.js`.
+
 - [ ] **Step 4: Restore source and write the evidence note**
 
-Remove only the temporary block with `apply_patch`. The note records hardware, OS, terminal and agent versions, exact commands, full raw ancestor rows, selected basename/TTY predicate, and observed depth. Verify:
+Remove only the temporary source block with `apply_patch`, then manually restore
+the two agent configuration command strings. The note records hardware, OS,
+terminal and agent versions, exact commands, full raw ancestor rows, selected
+basename/TTY predicate, observed depth, and the shell-boundary result for every
+agent. Verify:
 
 ```bash
 git diff -- bin/familiar
