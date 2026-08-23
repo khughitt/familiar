@@ -73,9 +73,8 @@ chmod 600 "$FAMILIAR_WITNESS_ENABLE_PATH"
 If the `test` command fails, stop and move the existing directory aside. Do not
 overwrite evidence from an earlier attempt.
 
-Record the environment without recording general environment variables:
+Record the environment without recording general environment variables.
 
-```sh
 Set `FAMILIAR_TERMINAL` to the terminal this run is for, exactly as the handoff
 message names it:
 
@@ -91,22 +90,37 @@ if [ -z "$FAMILIAR_TERMINAL_BIN" ]; then
   export FAMILIAR_TERMINAL_BIN="$FAMILIAR_TERMINAL_APP"
 fi
 test -x "$FAMILIAR_TERMINAL_BIN"
+```
 
+EVERY version is captured through a command substitution, and that is not
+style. Measured on the 2026-08-23 Ghostty run: `ghostty --version` writes to
+stderr and seeks the shared file description back to offset 0, so inside a
+`{ ... } > file` block it overwrote five lines already written and left
+`claude=` sitting mid-file — with exit status 0 throughout, so nothing looked
+wrong. A command substitution gives each child a pipe of its own, which it
+cannot seek into the evidence file. Kitty's single-line stdout never exposed
+this.
+
+```sh
 {
-  date -u '+captured-at=%Y-%m-%dT%H:%M:%SZ'
-  sw_vers
-  printf 'architecture='; uname -m
-  printf 'node='; node --version
+  printf 'captured-at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  printf 'os=%s (%s)\n' "$(sw_vers -productVersion)" "$(sw_vers -buildVersion)"
+  printf 'architecture=%s\n' "$(uname -m)"
+  printf 'node=%s\n' "$(node --version 2>&1 | head -n 1)"
   printf 'terminal=%s\n' "$FAMILIAR_TERMINAL"
-  printf 'terminal-version='; "$FAMILIAR_TERMINAL_BIN" --version
-  printf 'claude='; claude --version
-  printf 'codex='; codex --version
-  printf 'opencode='; opencode --version
-  printf 'familiar-commit='; git rev-parse HEAD
-  printf 'tty-tokens='; LC_ALL=C /bin/ps -axo tty= | sort -u | tr '\n' ' '; printf '\n'
+  printf 'terminal-version=%s\n' "$("$FAMILIAR_TERMINAL_BIN" --version 2>&1 | head -n 1)"
+  printf 'claude=%s\n' "$(claude --version 2>&1 | head -n 1)"
+  printf 'codex=%s\n' "$(codex --version 2>&1 | head -n 1)"
+  printf 'opencode=%s\n' "$(opencode --version 2>&1 | head -n 1)"
+  printf 'familiar-commit=%s\n' "$(git rev-parse HEAD)"
+  printf 'tty-tokens=%s\n' "$(LC_ALL=C /bin/ps -axo tty= | sort -u | tr '\n' ' ')"
 } > "$FAMILIAR_PROBE_DIR/versions.txt"
 chmod 600 "$FAMILIAR_PROBE_DIR/versions.txt"
 ```
+
+Open `versions.txt` once and confirm every line is present and intact before
+continuing. A short or scrambled file means a version command wrote into it
+directly; capture that command separately and rebuild the file.
 
 `tty-tokens` is the distinct set of TTY tokens on the whole machine, and it is
 the one line here that is about Familiar's parser rather than about versions.
