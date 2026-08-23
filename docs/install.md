@@ -134,7 +134,10 @@ familiar install opencode
 ```
 
 It registers the server and TUI plugins, preserving existing plugin entries. Restart
-OpenCode after installation. The server plugin forwards lifecycle events to Familiar;
+OpenCode after installation. It writes `tui.json` and `opencode.json` only. If you keep
+a `tui.jsonc` or `opencode.jsonc` instead, the command refuses and prints the plugin path
+to add by hand, rather than rewriting a commented file as plain JSON or creating a `.json`
+sibling that shadows it. The server plugin forwards lifecycle events to Familiar;
 the TUI plugin renders the full-colour graphic. If the integration fails, inspect
 `~/.local/state/familiar/opencode-plugin.log`.
 

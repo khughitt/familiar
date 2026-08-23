@@ -112,3 +112,46 @@ test('installOpencode: missing files (read -> null) are created fresh', () => {
   assert.deepEqual(JSON.parse(writes['/cfg/tui.json']).plugin, ['/abs/sprite.tsx']);
   assert.deepEqual(JSON.parse(writes['/cfg/opencode.json']).plugin, ['/abs/plugin.js']);
 });
+
+test('installOpencode: an existing .jsonc config is refused, not shadowed by a new .json', () => {
+  const files = { '/cfg/opencode.jsonc': '{\n  // mine\n  "plugin": []\n}' };
+  const writes = {};
+  assert.throws(() => installOpencode({
+    configDir: '/cfg',
+    tuiPluginPath: '/abs/sprite.tsx',
+    serverPluginPath: '/abs/plugin.js',
+    read: (p) => files[p] ?? null,
+    writeAtomic: (p, text) => { writes[p] = text; },
+  }), /\/cfg\/opencode\.jsonc: add "\/abs\/plugin\.js" to its "plugin" array by hand/);
+  assert.deepEqual(writes, {});
+});
+
+test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
+  const files = {
+    '/cfg/tui.json': '{}',
+    '/cfg/tui.jsonc': '{}',
+    '/cfg/opencode.json': '{ "plugin": [] }',
+  };
+  const writes = {};
+  assert.throws(() => installOpencode({
+    configDir: '/cfg',
+    tuiPluginPath: '/abs/sprite.tsx',
+    serverPluginPath: '/abs/plugin.js',
+    read: (p) => files[p] ?? null,
+    writeAtomic: (p, text) => { writes[p] = text; },
+  }), /\/cfg\/tui\.json and \/cfg\/tui\.jsonc both exist/);
+  assert.deepEqual(writes, {});
+});
+
+test('installOpencode: a .jsonc refusal aborts the other file too', () => {
+  const files = { '/cfg/tui.jsonc': '{}', '/cfg/opencode.json': '{ "plugin": [] }' };
+  const writes = {};
+  assert.throws(() => installOpencode({
+    configDir: '/cfg',
+    tuiPluginPath: '/abs/sprite.tsx',
+    serverPluginPath: '/abs/plugin.js',
+    read: (p) => files[p] ?? null,
+    writeAtomic: (p, text) => { writes[p] = text; },
+  }), /\/cfg\/tui\.jsonc/);
+  assert.deepEqual(writes, {});   // opencode.json is mergeable, but nothing is written
+});

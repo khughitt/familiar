@@ -37,25 +37,65 @@ export function mergePlugin(jsoncText, absPath) {
   return `${JSON.stringify({ ...obj, plugin }, null, 2)}\n`;
 }
 
-// All-or-nothing: merge BOTH files in memory (either can throw) BEFORE writing either, so a
-// malformed config never leaves the pair half-updated.
+function readText(path, read) {
+  const text = read(path);
+  if (text !== null && typeof text !== 'string') {
+    throw new Error(`${path}: read() must return a string or null, found ${typeof text}`);
+  }
+  return text;
+}
+
+// OPENCODE READS `<name>.json` OR `<name>.jsonc`, AND THIS INSTALLER WRITES ONLY THE FIRST.
+// Ignoring the second is not harmless: a machine whose real config is `opencode.jsonc` used to get
+// a brand-new `opencode.json` created beside it, which is either ignored or shadows the file the
+// user actually maintains -- silently, either way. It was found on a real Mac, and it is not a
+// macOS bug.
+//
+// The `.jsonc` case is REFUSED rather than merged. mergePlugin normalizes its output through
+// JSON.stringify, so merging would rewrite the file as plain JSON and delete the comments that are
+// the entire reason someone chose that extension. Refusing with the exact entry to add is the same
+// answer `install pets` already gives for a tracked `.codex/config.toml`: do not rewrite a config
+// this tool cannot reproduce faithfully, print what to add.
+//
+// Both present is ambiguous, so it is also refused. Familiar does not get to guess which file
+// opencode is reading.
+function resolveTarget(configDir, base, pluginPath, read) {
+  const jsonPath = join(configDir, `${base}.json`);
+  const jsoncPath = join(configDir, `${base}.jsonc`);
+  const jsonText = readText(jsonPath, read);
+  const jsoncText = readText(jsoncPath, read);
+
+  if (jsonText !== null && jsoncText !== null) {
+    throw new Error(
+      `${jsonPath} and ${jsoncPath} both exist; opencode reads one of them and familiar will not `
+      + 'guess which. Keep one and re-run.'
+    );
+  }
+  if (jsoncText !== null) {
+    throw new Error(
+      `${jsoncPath}: add ${JSON.stringify(pluginPath)} to its "plugin" array by hand. Merging it `
+      + 'here would rewrite the file as plain JSON and drop its comments.'
+    );
+  }
+  return { path: jsonPath, text: jsonText };
+}
+
+// All-or-nothing: resolve BOTH targets and merge BOTH files in memory (either can throw) BEFORE
+// writing either, so a malformed or unmergeable config never leaves the pair half-updated.
 export function installOpencode({ configDir, tuiPluginPath, serverPluginPath, read, writeAtomic }) {
-  const tuiPath = join(configDir, 'tui.json');
-  const configPath = join(configDir, 'opencode.json');
+  const tui = resolveTarget(configDir, 'tui', tuiPluginPath, read);
+  const config = resolveTarget(configDir, 'opencode', serverPluginPath, read);
 
   // Attach the source path at the orchestration boundary. mergePlugin stays a pure text transform,
   // while every user-facing refusal identifies WHICH of the two configs is malformed and why.
-  const mergeAt = (path, text, pluginPath) => {
-    if (text !== null && typeof text !== 'string') {
-      throw new Error(`${path}: read() must return a string or null, found ${typeof text}`);
-    }
+  const mergeAt = ({ path, text }, pluginPath) => {
     try { return mergePlugin(text === null ? '{}' : text, pluginPath); }
     catch (err) { throw new Error(`${path}: ${err.message}`); }
   };
-  const tuiText = mergeAt(tuiPath, read(tuiPath), tuiPluginPath);
-  const configText = mergeAt(configPath, read(configPath), serverPluginPath);
+  const tuiText = mergeAt(tui, tuiPluginPath);
+  const configText = mergeAt(config, serverPluginPath);
 
-  writeAtomic(tuiPath, tuiText);
-  writeAtomic(configPath, configText);
-  return { tuiPath, configPath };
+  writeAtomic(tui.path, tuiText);
+  writeAtomic(config.path, configText);
+  return { tuiPath: tui.path, configPath: config.path };
 }
