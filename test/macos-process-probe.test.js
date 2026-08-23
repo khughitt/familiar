@@ -66,11 +66,13 @@ test('probe writes only the hook ancestor chain with paired raw ps rows', (t) =>
     capturedAt: '2026-08-23T12:00:03.000Z',
     hookPid: 300,
     environment: {
-      TERM: true,
+      TERM: 'xterm-kitty',
       TERM_PROGRAM: false,
       KITTY_WINDOW_ID: true,
       KITTY_PID: false,
       GHOSTTY_RESOURCES_DIR: false,
+      GHOSTTY_BIN_DIR: false,
+      TMUX: false,
     },
     chain: [...PS_ROWS.entries()].map(([pid, row]) => ({
       pid,
@@ -140,4 +142,59 @@ test('probe rejects a process lifetime change between paired ps reads', () => {
       ? `${PS_ROWS.get(300).comm}\n`
       : `300 200 ?? Sun Aug 23 12:00:03 2026 node familiar hook session.busy\n`,
   }), /identity changed while capturing pid 300/);
+});
+
+// The classifier in src/render/term/capability.js tests VALUES for TERM and TERM_PROGRAM
+// (`=== 'xterm-kitty'`, `=== 'ghostty'`, `/^(screen|tmux)/`), so presence booleans cannot decide
+// what a Ghostty or tmux session would have produced. It also reads GHOSTTY_BIN_DIR and TMUX,
+// which the first capture never recorded at all.
+test('probe records marker values where the classifier compares values', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-macos-probe-env-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = captureProcessEvidence({
+    agent: 'codex',
+    event: 'PreToolUse',
+    hookPid: 1,
+    platform: 'darwin',
+    outDir: join(root, 'private'),
+    capturedAt: '2026-08-23T12:00:03.000Z',
+    env: {
+      TERM: 'xterm-ghostty',
+      TERM_PROGRAM: 'ghostty',
+      GHOSTTY_BIN_DIR: '/opt/ghostty/bin',
+      TMUX: '/private/tmp/tmux-501/default,9,0',
+      SECRET_TOKEN: 'never-record',
+    },
+    runPs: () => `${PS_ROWS.get(1).comm}\n`,
+  });
+
+  const { environment } = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(environment, {
+    TERM: 'xterm-ghostty',
+    TERM_PROGRAM: 'ghostty',
+    KITTY_WINDOW_ID: false,
+    KITTY_PID: false,
+    GHOSTTY_RESOURCES_DIR: false,
+    GHOSTTY_BIN_DIR: true,      // a path: presence only
+    TMUX: true,                 // a socket path carrying the uid: presence only
+  });
+});
+
+test('probe reduces an unrecognized terminal name to "other" instead of copying it', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-macos-probe-env-odd-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = captureProcessEvidence({
+    agent: 'codex',
+    event: 'PreToolUse',
+    hookPid: 1,
+    platform: 'darwin',
+    outDir: join(root, 'private'),
+    capturedAt: '2026-08-23T12:00:03.000Z',
+    env: { TERM: '/Users/someone/private note.txt', TERM_PROGRAM: 'x'.repeat(64) },
+    runPs: () => `${PS_ROWS.get(1).comm}\n`,
+  });
+
+  const { environment } = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(environment.TERM, 'other');
+  assert.equal(environment.TERM_PROGRAM, 'other');
 });

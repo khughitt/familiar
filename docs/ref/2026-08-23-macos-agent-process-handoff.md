@@ -396,6 +396,11 @@ Edit only the copies. Review every `command` string and apply these rules:
   secrets completely.
 - Preserve every PID, PPID, TTY, `lstart`, executable basename, agent name,
   `/bin/sh` or shell frame, `-c`, and the `; :` canary. These are the evidence.
+- Preserve the `environment` block exactly. It carries no paths or values from
+  your machine: `TERM` and `TERM_PROGRAM` appear only as a bounded terminal name
+  or the literal `other`, and every other marker is a true/false presence flag.
+  Those two values are what decide Ghostty and tmux capability, so redacting
+  them destroys the result.
 - Keep JSON valid and keep `comm` and `command` rows paired.
 
 Do not commit either directory. The five redacted files are sent later as file

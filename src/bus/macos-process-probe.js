@@ -7,9 +7,32 @@ import { parseDarwinRow, runDarwinPs } from './proc.js';
 const AGENTS = new Set(['claude-code', 'codex', 'opencode']);
 const COMM_FIELDS = 'pid=,ppid=,tty=,lstart=,comm=';
 const COMMAND_FIELDS = 'pid=,ppid=,tty=,lstart=,command=';
-const ENVIRONMENT_MARKERS = [
-  'TERM', 'TERM_PROGRAM', 'KITTY_WINDOW_ID', 'KITTY_PID', 'GHOSTTY_RESOURCES_DIR',
+// MIRRORS THE CLASSIFIER, NOT A GUESS AT IT. src/render/term/capability.js decides capability from
+// GRAPHICS_MARKERS plus MULTIPLEXER_MARKERS, and for two of them it compares VALUES:
+// `TERM === 'xterm-kitty'`, `TERM_PROGRAM === 'ghostty'`, and `/^(screen|tmux)/.test(TERM)`. A
+// presence boolean cannot answer any of those, so the first capture could confirm Kitty only by
+// luck -- KITTY_WINDOW_ID alone is enough for Kitty, and nothing else was decidable. Ghostty and
+// tmux sessions need the values.
+//
+// The two value markers are terminal identity, never user data, and they are still bounded: a
+// value outside a conservative terminal-name shape is recorded as 'other' rather than copied, so
+// an oddly-set TERM cannot smuggle a path or a secret into evidence meant to be shareable.
+// Everything else is presence only, because GHOSTTY_* are filesystem paths and TMUX is a socket
+// path carrying the uid.
+const ENVIRONMENT_VALUE_MARKERS = ['TERM', 'TERM_PROGRAM'];
+const ENVIRONMENT_PRESENCE_MARKERS = [
+  'KITTY_WINDOW_ID', 'KITTY_PID', 'GHOSTTY_RESOURCES_DIR', 'GHOSTTY_BIN_DIR', 'TMUX',
 ];
+const TERMINAL_NAME = /^[A-Za-z0-9._+-]{1,32}$/;
+
+const environmentEvidence = (env) => Object.fromEntries([
+  ...ENVIRONMENT_VALUE_MARKERS.map((name) => {
+    const value = env[name];
+    if (value === undefined) return [name, false];
+    return [name, TERMINAL_NAME.test(value) ? value : 'other'];
+  }),
+  ...ENVIRONMENT_PRESENCE_MARKERS.map((name) => [name, env[name] !== undefined]),
+]);
 
 export const MACOS_WITNESS_PATH = fileURLToPath(
   new URL('../../.familiar-macos-executed.jsonl', import.meta.url),
@@ -74,7 +97,7 @@ export function captureProcessEvidence({
     event,
     capturedAt,
     hookPid,
-    environment: Object.fromEntries(ENVIRONMENT_MARKERS.map((name) => [name, env[name] !== undefined])),
+    environment: environmentEvidence(env),
     chain,
   })}\n`, { encoding: 'utf8', mode: 0o600 });
   return path;
