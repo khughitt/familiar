@@ -165,6 +165,17 @@ export function createProcessOps({
   }
 
   if (platform === 'darwin') {
+    // ONE BAD ROW MUST NOT DISABLE THE MACHINE. `-axo` returns EVERY process on the Mac, most of
+    // them nothing to do with Familiar and some of them nothing to do with this user. Mapping a
+    // strict parser across that table made Familiar's correctness depend on all several hundred
+    // rows: one `tty console` row -- a real BSD tty name -- threw out of the map(), and every hook
+    // on the machine then failed with a cosmetic exit-zero diagnostic and no cat.
+    //
+    // So each row is parsed on its own. A row that fails is remembered AGAINST ITS PID rather than
+    // dropped, so asking about that specific process still raises the named error instead of
+    // quietly answering "no such process" -- fail closed for the question we were asked, and stay
+    // silent about questions nobody asked. A parseable row always wins over an unparseable one for
+    // the same pid. A row too damaged to name a pid at all answers no question and is dropped.
     let snapshot;
     const records = () => {
       if (!snapshot) {
@@ -172,11 +183,28 @@ export function createProcessOps({
         if (typeof output !== 'string' || output.trim() === '') {
           throw new Error('Darwin ps: malformed output');
         }
-        snapshot = new Map(output.trimEnd().split('\n').map(parseDarwinRow).map((record) => [record.pid, record]));
+        snapshot = new Map();
+        for (const line of output.trimEnd().split('\n')) {
+          let record;
+          try {
+            record = parseDarwinRow(line);
+          } catch (error) {
+            const damaged = Number.parseInt(line, 10);
+            if (Number.isSafeInteger(damaged) && damaged > 0 && !snapshot.has(damaged)) {
+              snapshot.set(damaged, error);
+            }
+            continue;
+          }
+          snapshot.set(record.pid, record);
+        }
       }
       return snapshot;
     };
-    const recordOf = (pid) => records().get(pid) ?? null;
+    const recordOf = (pid) => {
+      const found = records().get(pid) ?? null;
+      if (found instanceof Error) throw found;
+      return found;
+    };
     const startTimeOf = (pid) => recordOf(pid)?.starttime ?? null;
     const freshRecordOf = (pid) => {
       const output = runPs(['-p', String(pid), '-o', 'pid=,ppid=,tty=,lstart=,comm=']);

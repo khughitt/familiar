@@ -327,3 +327,52 @@ test('a pid recycled into ANOTHER USER\'S process is caught too — EPERM is not
   assert.equal(ops.isAlive(1, { starttime: 999, readStat }), false, 'pid 1 exists; it is not our agent');
   assert.equal(ops.isAlive(1, { starttime: 5, readStat }), true, 'pid 1 IS the process the record names');
 });
+
+// THE SNAPSHOT IS A MACHINE-WIDE TABLE, NOT FAMILIAR'S DATA. `ps -axo` returns every process on
+// the Mac, so a strict row parser makes Familiar's correctness depend on all several hundred of
+// them -- including other users' -- producing a row it accepts. `tty console` is a real BSD tty
+// name, and one row carrying it used to throw out of the map() that builds the snapshot, taking
+// down every hook on the machine with a cosmetic exit-zero diagnostic. Unrelated garbage must not
+// be able to do that; the row we were actually asked about must still fail loudly.
+const CONSOLE_ROW =
+  '501 1 console Sun Aug 23 15:09:55 2026 /System/Library/CoreServices/loginwindow';
+
+test('an unrelated unparseable row does not destroy the Darwin snapshot', () => {
+  const ops = createProcessOps({
+    platform: 'darwin',
+    kill: () => {},
+    runPs: () => [
+      '30 20 ?? Sat Aug 22 23:24:47 2026 /usr/bin/node',
+      CONSOLE_ROW,
+      '20 10 ttys003 Sat Aug 22 23:24:46 2026 /opt/bin/claude',
+      '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(ops.ancestors(30).map((record) => record.comm), ['node', 'claude', 'zsh']);
+});
+
+test('the pid whose own Darwin row is unparseable still fails loudly', () => {
+  const ops = createProcessOps({
+    platform: 'darwin',
+    kill: () => {},
+    runPs: () => [
+      '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
+      CONSOLE_ROW,
+    ].join('\n'),
+  });
+
+  assert.throws(() => ops.recordOf(501), /unsafe Darwin tty "console"/);
+  assert.equal(ops.recordOf(10).comm, 'zsh');   // its neighbour is unaffected
+});
+
+test('a row too damaged to attribute to a pid is not mistaken for a live process', () => {
+  const ops = createProcessOps({
+    platform: 'darwin',
+    kill: () => {},
+    runPs: () => ['10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh', 'not a ps row at all'].join('\n'),
+  });
+
+  assert.equal(ops.recordOf(10).comm, 'zsh');
+  assert.equal(ops.recordOf(99), null);
+});

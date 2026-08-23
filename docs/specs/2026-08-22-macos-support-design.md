@@ -155,6 +155,19 @@ tokens, and then the entire remaining `comm` path. It takes `basename(comm)`
 only after the row is structurally valid. No delimiter-based split is attempted
 inside the command path.
 
+Row failure is scoped to one PID, not to the snapshot. `-axo` returns every
+process on the machine, including other users', so mapping a strict parser
+across the whole table would make Familiar's correctness depend on several
+hundred unrelated rows: a single `tty console` row — a real BSD tty name — threw
+out of snapshot construction and disabled every hook on the machine behind a
+cosmetic exit-zero diagnostic. Each row is therefore parsed independently. A row
+that fails is remembered against its PID, so a lookup for that process raises
+the named error rather than reporting it missing; a parseable row always wins
+over an unparseable one for the same PID; and a row too damaged to name a PID
+answers no question and is dropped. This is a scoping rule, not a fallback:
+nothing is guessed, and the process actually being asked about still fails
+closed.
+
 Darwin accepts these TTY forms only:
 
 ```text
@@ -413,9 +426,11 @@ substitute for the two physical-Mac gates in §§2 and 11.
 
 ## 10. Error contract
 
-- `ps` absence, nonzero exit, malformed output, unknown agent ancestry, missing
-  start time, or unsafe TTY data is a named error. None becomes an invented
-  process record.
+- `ps` absence, nonzero exit, wholly malformed output, unknown agent ancestry,
+  missing start time, or unsafe TTY data is a named error. None becomes an
+  invented process record.
+- An unparseable row inside an otherwise readable snapshot is a named error for
+  that PID alone (§3). Unrelated rows cannot disable the hook path.
 - A missing graphics marker means capability `none`; tint and bell can continue.
 - Failure to open or validate the selected TTY writes no bytes.
 - Hook failures retain the existing cosmetic boundary: one sanitized diagnostic
