@@ -81,6 +81,11 @@ familiar install opencode
 It preserves existing plugin entries. Restart OpenCode after installation; if
 the integration fails, inspect `~/.local/state/familiar/opencode-plugin.log`.
 
+It writes `tui.json` and `opencode.json` only. If you keep a `tui.jsonc` or
+`opencode.jsonc` instead, the command refuses and prints the plugin path to add
+by hand, rather than rewriting a commented file as plain JSON or creating a
+`.json` sibling that shadows it.
+
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
 provisional pending the physical-Mac gate.
 
