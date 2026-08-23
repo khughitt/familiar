@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isAlive, startTimeOf } from '../src/bus/proc.js';
+import { withLock } from '../src/bus/lock.js';
+import { defaultProcessOps } from '../src/bus/proc.js';
 
 const OWNER = '.familiar-suite-owner.json';
 const OWNER_KIND = 'familiar-test-suite';
@@ -22,9 +23,16 @@ const ownerBytes = (pidNamespace, pid, starttime) => Buffer.from(`${JSON.stringi
   worker: { pid, starttime },
 }, null, 2)}\n`);
 
-const pidNamespaceOf = () => readlinkSync('/proc/self/ns/pid');
+export function pidNamespaceOf({
+  platform = process.platform,
+  readlink = readlinkSync,
+} = {}) {
+  if (platform === 'linux') return readlink('/proc/self/ns/pid');
+  if (platform === 'darwin') return 'darwin-host';
+  throw new Error(`test runner: unsupported platform ${JSON.stringify(platform)}`);
+}
 
-export function acquireSuiteLease(name = SUITE_LEASE, { create = createServer } = {}) {
+export function acquireSocketLease(name = SUITE_LEASE, { create = createServer } = {}) {
   return new Promise((resolveLease, rejectLease) => {
     const lease = create();
     const onError = (error) => rejectLease(error.code === 'EADDRINUSE'
@@ -38,9 +46,47 @@ export function acquireSuiteLease(name = SUITE_LEASE, { create = createServer } 
   });
 }
 
-const releaseSuiteLease = (lease) => new Promise((resolveClose, rejectClose) => {
+const releaseSocketLease = (lease) => new Promise((resolveClose, rejectClose) => {
   lease.close((error) => error ? rejectClose(error) : resolveClose());
 });
+
+export async function withSuiteLease(fn, {
+  platform = process.platform,
+  tmpdir: getTmpdir = tmpdir,
+  uid = process.getuid,
+  withLock: lock = withLock,
+  processOps = defaultProcessOps,
+  create = createServer,
+  lockOptions = {},
+} = {}) {
+  if (platform === 'linux') {
+    const lease = await acquireSocketLease(SUITE_LEASE, { create });
+    try {
+      return await fn();
+    } finally {
+      await releaseSocketLease(lease);
+    }
+  }
+  if (platform === 'darwin') {
+    const path = join(getTmpdir(), `familiar-test-suite-${uid()}.lock`);
+    let entered = false;
+    try {
+      return await lock(path, async () => {
+        entered = true;
+        return fn();
+      }, {
+        ...lockOptions,
+        staleMs: Infinity,
+        startTimeOf: processOps.startTimeOf,
+        isAlive: processOps.lockHolderAlive,
+      });
+    } catch (error) {
+      if (entered) throw error;
+      throw new Error('test runner: could not acquire suite lease', { cause: error });
+    }
+  }
+  throw new Error(`test runner: unsupported platform ${JSON.stringify(platform)}`);
+}
 
 function exactKeys(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -78,7 +124,7 @@ function ownerIdentity(path, { lstat, realpath, readFile }) {
 
 export function reapSuiteRoots(tempRoot, {
   readdir = readdirSync, lstat = lstatSync, realpath = realpathSync,
-  readFile = readFileSync, rm = rmSync, isAlive: alive = isAlive,
+  readFile = readFileSync, rm = rmSync, isAlive: alive = defaultProcessOps.isAlive,
   pidNamespace = pidNamespaceOf,
 } = {}) {
   const canonicalTemp = realpath(tempRoot);
@@ -127,71 +173,71 @@ export function testFiles(root = process.cwd(), mode = 'fast') {
 export async function runSuite(files, {
   tmpdir: getTmpdir = tmpdir, mkdtemp = mkdtempSync, spawn: spawnChild = spawn,
   rm = rmSync, realpath = realpathSync, rename = renameSync, reap = reapSuiteRoots,
-  startTime = startTimeOf, writeFile = writeFileSync, processEvents = process,
+  processOps = defaultProcessOps, writeFile = writeFileSync, processEvents = process,
   readdir = readdirSync, lstat = lstatSync, readFile = readFileSync,
-  isAlive: alive = isAlive, pidNamespace = pidNamespaceOf, pid = process.pid,
-  acquireLease = acquireSuiteLease, releaseLease = releaseSuiteLease,
+  pidNamespace = pidNamespaceOf, pid = process.pid, suiteLease = withSuiteLease,
 } = {}) {
   if (files.length === 0) throw new Error('no test files selected');
-  const lease = await acquireLease();
-  const handlers = new Map();
-  let staging;
-  let scratch;
-  try {
-    const canonicalTmp = realpath(getTmpdir());
-    reap(canonicalTmp, {
-      readdir, lstat, realpath, readFile, rm, isAlive: alive, pidNamespace,
-    });
-    const namespace = pidNamespace();
-    const parentStarttime = startTime(pid);
-    if (!Number.isInteger(parentStarttime)) {
-      throw new Error(`test runner: cannot identify runner ${pid}`);
-    }
-    staging = mkdtemp(join(canonicalTmp, STAGING_PREFIX));
-    writeFile(join(staging, OWNER), ownerBytes(namespace, pid, parentStarttime), { flag: 'wx' });
-    scratch = join(canonicalTmp, basename(staging).slice(1));
-    rename(staging, scratch);
-    staging = undefined;
+  return suiteLease(async () => {
+    const handlers = new Map();
+    let staging;
+    let scratch;
+    try {
+      const canonicalTmp = realpath(getTmpdir());
+      reap(canonicalTmp, {
+        readdir, lstat, realpath, readFile, rm,
+        isAlive: processOps.isAlive, pidNamespace,
+      });
+      const namespace = pidNamespace();
+      const parentStarttime = processOps.startTimeOf(pid);
+      if (!Number.isInteger(parentStarttime)) {
+        throw new Error(`test runner: cannot identify runner ${pid}`);
+      }
+      staging = mkdtemp(join(canonicalTmp, STAGING_PREFIX));
+      writeFile(join(staging, OWNER), ownerBytes(namespace, pid, parentStarttime), { flag: 'wx' });
+      scratch = join(canonicalTmp, basename(staging).slice(1));
+      rename(staging, scratch);
+      staging = undefined;
 
-    const child = spawnChild('/bin/sh', [
-      '-c', 'read -r ready <&3 || exit 1; exec 3<&-; exec "$@"', 'familiar-test-worker',
-      process.execPath, '--test', ...files,
-    ], {
-      stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
-      env: { ...process.env, TMPDIR: scratch },
-    });
-    const spawned = new Promise((resolveSpawn, rejectSpawn) => {
-      child.once('spawn', resolveSpawn);
-      child.once('error', rejectSpawn);
-    });
-    const closed = new Promise((resolveClose, rejectClose) => {
-      child.once('error', rejectClose);
-      child.once('close', (code) => resolveClose(code ?? 1));
-    });
-    closed.catch(() => {});
-    await spawned;
-    const starttime = startTime(child.pid);
-    if (!Number.isInteger(starttime)) {
-      child.kill('SIGTERM');
-      await closed;
-      throw new Error(`test runner: cannot identify worker ${child.pid}`);
+      const child = spawnChild('/bin/sh', [
+        '-c', 'read -r ready <&3 || exit 1; exec 3<&-; exec "$@"', 'familiar-test-worker',
+        process.execPath, '--test', ...files,
+      ], {
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+        env: { ...process.env, TMPDIR: scratch },
+      });
+      const spawned = new Promise((resolveSpawn, rejectSpawn) => {
+        child.once('spawn', resolveSpawn);
+        child.once('error', rejectSpawn);
+      });
+      const closed = new Promise((resolveClose, rejectClose) => {
+        child.once('error', rejectClose);
+        child.once('close', (code) => resolveClose(code ?? 1));
+      });
+      closed.catch(() => {});
+      await spawned;
+      const starttime = processOps.freshStartTimeOf(child.pid);
+      if (!Number.isInteger(starttime)) {
+        child.kill('SIGTERM');
+        await closed;
+        throw new Error(`test runner: cannot identify worker ${child.pid}`);
+      }
+      const nextOwner = join(scratch, `${OWNER}.next`);
+      writeFile(nextOwner, ownerBytes(namespace, child.pid, starttime), { flag: 'wx' });
+      rename(nextOwner, join(scratch, OWNER));
+      for (const signal of ['SIGINT', 'SIGTERM']) {
+        const handler = () => child.kill(signal);
+        handlers.set(signal, handler);
+        processEvents.on(signal, handler);
+      }
+      child.stdio[3].end('ready\n');
+      return await closed;
+    } finally {
+      for (const [signal, handler] of handlers) processEvents.off(signal, handler);
+      if (scratch) rm(scratch, { recursive: true, force: true });
+      if (staging) rm(staging, { recursive: true, force: true });
     }
-    const nextOwner = join(scratch, `${OWNER}.next`);
-    writeFile(nextOwner, ownerBytes(namespace, child.pid, starttime), { flag: 'wx' });
-    rename(nextOwner, join(scratch, OWNER));
-    for (const signal of ['SIGINT', 'SIGTERM']) {
-      const handler = () => child.kill(signal);
-      handlers.set(signal, handler);
-      processEvents.on(signal, handler);
-    }
-    child.stdio[3].end('ready\n');
-    return await closed;
-  } finally {
-    for (const [signal, handler] of handlers) processEvents.off(signal, handler);
-    if (scratch) rm(scratch, { recursive: true, force: true });
-    if (staging) rm(staging, { recursive: true, force: true });
-    await releaseLease(lease);
-  }
+  }, { processOps });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
