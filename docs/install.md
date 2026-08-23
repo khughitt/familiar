@@ -35,16 +35,20 @@ prints JSON; it does not edit your settings file.
 
 Codex lifecycle configuration remains the committed fixture at
 `integrations/codex/hooks.json` while its generated setup path awaits the
-physical-Mac gate. From this checkout, copy it for a new configuration or
-merge it with an existing one:
+physical-Mac gate. Review the fixture and merge it into an existing hooks file;
+do not replace that file. When `CODEX_HOME` is unset, the destination is
+`$HOME/.codex/hooks.json`.
+
+Only if no hooks file exists, copy the fixture from this checkout:
 
 ```sh
-cp integrations/codex/hooks.json "$CODEX_HOME/hooks.json"
+if [ ! -e "${CODEX_HOME:-$HOME/.codex}/hooks.json" ]; then
+  cp integrations/codex/hooks.json "${CODEX_HOME:-$HOME/.codex}/hooks.json"
+fi
 ```
 
-Review the fixture before replacing an existing hooks file. This is distinct
-from Claude Code's generated JSON; no Codex generation behavior is documented
-until the physical-Mac gate has been completed.
+This is distinct from Claude Code's generated JSON; no Codex generation
+behavior is documented until the physical-Mac gate has been completed.
 
 ## macOS integration
 
@@ -58,9 +62,9 @@ familiar install pets --sync-projects
 ```
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
-from each repository. It never overwrites an existing user-owned config; review
-its printed setting instead. To install pets without synchronizing projects,
-run `familiar install pets`.
+from each repository. It never overwrites an existing tracked config; review
+its printed setting instead. It refuses an existing unmanaged untracked config.
+To install pets without synchronizing projects, run `familiar install pets`.
 
 Choose a user-wide default in `~/.codex/config.toml`:
 
@@ -167,13 +171,14 @@ The adapter reads Noctalia's dark/light setting and writes Familiar's scheme fil
 
 ### Reap abandoned sessions with systemd
 
-Run `familiar reap` periodically with a user systemd timer:
+Run `familiar reap` periodically with a user systemd timer. Replace only the
+binary path in this service file:
 
 ```ini
 # ~/.config/systemd/user/familiar-reap.service
 [Service]
 Type=oneshot
-ExecStart=familiar reap
+ExecStart=/absolute/path/to/familiar/bin/familiar reap
 ```
 
 ```ini
