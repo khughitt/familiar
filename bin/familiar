@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { captureProcessEvidence } from '../src/bus/macos-process-probe.js';
 import { adapterFor, AGENTS } from '../src/adapters/index.js';
 import { spritesheet, petFile, SPRITESHEET_PATH } from '../src/render/codex/pets.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
@@ -661,6 +662,12 @@ async function main({ command, args: rest }) {
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'hook') {
+    if (process.env.FAMILIAR_MACOS_SPIKE !== undefined) {
+      captureProcessEvidence({
+        agent: process.env.FAMILIAR_MACOS_SPIKE,
+        event: rest[0],
+      });
+    }
     const { positionals, values } = parseLeaf(rest, {
       options: { agent: { type: 'string' }, trace: { type: 'string' } },
       minPositionals: 1, maxPositionals: 1, help: 'hook',

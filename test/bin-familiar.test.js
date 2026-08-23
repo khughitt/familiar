@@ -177,6 +177,30 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
   ]);
 });
 
+test('the macOS handoff probe runs before hook parsing', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-macos-hook-probe-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, [bin, 'hook', 'PreToolUse', ';', ':'], {
+    encoding: 'utf8',
+    env: env({ FAMILIAR_MACOS_SPIKE: 'codex', TMPDIR: root }),
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
+  if (process.platform !== 'darwin') {
+    assert.equal(result.stderr, 'familiar: macOS process probe: requires Darwin\n');
+    return;
+  }
+  assert.equal(result.stderr,
+    'familiar: unexpected argument ";"\nRun `familiar hook --help` for help.\n');
+  const records = readFileSync(join(root, 'familiar-macos-process-spike', 'codex.jsonl'), 'utf8')
+    .trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(records.length, 1);
+  assert.equal(records[0].agent, 'codex');
+  assert.equal(records[0].event, 'PreToolUse');
+  assert.equal(records[0].chain[0].pid, records[0].hookPid);
+});
+
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
   const e = env();
   const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart', '--bogus'], {

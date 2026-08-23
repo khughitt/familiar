@@ -1,0 +1,68 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseDarwinRow, runDarwinPs } from './proc.js';
+
+const AGENTS = new Set(['claude-code', 'codex', 'opencode']);
+const COMM_FIELDS = 'pid=,ppid=,tty=,lstart=,comm=';
+const COMMAND_FIELDS = 'pid=,ppid=,tty=,lstart=,command=';
+
+function row(raw, field, expectedPid) {
+  const value = raw.trimEnd();
+  if (value.includes('\n')) {
+    throw new Error(`macOS process probe: malformed ${field} row for pid ${expectedPid}`);
+  }
+  let identity;
+  try {
+    identity = parseDarwinRow(value);
+  } catch (cause) {
+    throw new Error(`macOS process probe: malformed ${field} row for pid ${expectedPid}`, { cause });
+  }
+  if (identity.pid !== expectedPid) {
+    throw new Error(`macOS process probe: identity changed while capturing pid ${expectedPid}`);
+  }
+  return { ...identity, raw: value };
+}
+
+export function captureProcessEvidence({
+  agent,
+  event,
+  hookPid = process.pid,
+  platform = process.platform,
+  outDir = join(tmpdir(), 'familiar-macos-process-spike'),
+  capturedAt = new Date().toISOString(),
+  runPs = runDarwinPs,
+} = {}) {
+  if (!AGENTS.has(agent)) {
+    throw new Error(`macOS process probe: unsupported agent label ${JSON.stringify(agent)}`);
+  }
+  if (platform !== 'darwin') throw new Error('macOS process probe: requires Darwin');
+
+  const chain = [];
+  const seen = new Set();
+  let pid = hookPid;
+  while (pid > 0) {
+    if (seen.has(pid)) throw new Error(`macOS process probe: ancestor cycle at pid ${pid}`);
+    seen.add(pid);
+    const comm = row(runPs(['-p', String(pid), '-o', COMM_FIELDS]), 'comm', pid);
+    const command = row(runPs(['-p', String(pid), '-o', COMMAND_FIELDS]), 'command', pid);
+    if (comm.ppid !== command.ppid || comm.starttime !== command.starttime
+        || comm.tty !== command.tty) {
+      throw new Error(`macOS process probe: identity changed while capturing pid ${pid}`);
+    }
+    chain.push({ pid, ppid: comm.ppid, comm: comm.raw, command: command.raw });
+    pid = comm.ppid;
+  }
+
+  mkdirSync(outDir, { recursive: true, mode: 0o700 });
+  const path = join(outDir, `${agent}.jsonl`);
+  appendFileSync(path, `${JSON.stringify({
+    version: 1,
+    agent,
+    event,
+    capturedAt,
+    hookPid,
+    chain,
+  })}\n`, { encoding: 'utf8', mode: 0o600 });
+  return path;
+}
