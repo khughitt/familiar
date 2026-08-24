@@ -493,7 +493,15 @@ the `rdev` of the written fd, and each escape decomposed into introducer, contro
 keys, payload length, and payload SHA-256. The device is identified by `rdev`
 rather than by name because Node exposes no `ttyname`; comparing
 `fstat(fd).rdev` against `stat(/dev/<tty>).rdev` is also the stronger check, being
-device identity rather than a string that matched. Tint, cursor, reset, and bell bytes
+device identity rather than a string that matched.
+
+That internal comparison is necessary and not sufficient. It proves the emitter
+wrote to the device it opened, which a resolver that picked the *wrong* terminal
+also satisfies — it would open that terminal and write to it consistently. So the
+run captures its window's device independently, before any agent starts, and every
+write is checked against that value too. This is what moves "the bytes land in this
+window" from the tester's column into the machine-checked one; the tester's
+observation becomes corroboration rather than the only evidence. Tint, cursor, reset, and bell bytes
 are short and constant and are recorded verbatim. Graphics payloads are recorded
 as length and digest only, because they are bulk; the digest and the control keys
 are what verification needs, never the pixels.
@@ -520,7 +528,7 @@ counting saves and restores would not catch.
 | Sprite transmitted | APC `_G` keys well formed; every chunk that names an image names `imageIdFor(sessionId)` and at least one does; the transmit chunk's `c=`/`r=` equal the `boxFor` placement box; the chunk count matches the encoder's own | a sprite is on screen, positioned correctly, covering no dialog |
 | Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
 | Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
-| Correct terminal | target path equals the resolved agent's canonical TTY, and `fstat(fd).rdev` equals `stat(target).rdev` | the bytes land in this window and no other |
+| Correct terminal | `fstat(fd).rdev` equals `stat(target).rdev`, **and** every write's device equals the window device captured independently before the run | corroboration only: the sprite appears in this window |
 | Graphics correctly suppressed | at capability `none`, zero APC `_G` bytes, while the `OSC 11`/`OSC 12` and any bell bytes still reach the validated TTY | the window still tints and rings with no sprite |
 
 The tester's column is irreducible. The point of the first column is that a
@@ -796,7 +804,8 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Test lease | existing file lock; default retry budget clears stale guards |
 | OpenCode renderer | provisional; CI backs hook and installer only |
 | Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
-| Gate cleanup coverage | per cell: `oscReset` on normal exit; SIGKILL, record present, `reaped <id>` on stdout, record absent |
+| Gate cleanup coverage | per cell: `oscReset` on normal exit; stored pid+starttime verified, SIGKILL, record present, `reaped <id>` on stdout, record absent |
+| Gate terminal identity | internal target/fd agreement plus every write checked against the run's independently captured window device |
 | Gate negative control | one marker-scrubbed physical-terminal run over Claude Code and OpenCode; required for any promotion |
 | Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; the OpenCode placement envelope order-checked for that writer alone; any other escape fails the cell |
 | Gate graphics depth | image identity, key grammar, and placement box are machine-checked; frame sequence is not, and OpenCode carries no planned frame count |

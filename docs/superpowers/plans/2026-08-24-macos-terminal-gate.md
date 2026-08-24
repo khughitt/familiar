@@ -979,14 +979,26 @@ test('the envelope is checked as a sequence, so counting saves and restores cann
     /nested placement envelope/,
   );
 
-  // Two complete envelopes in one write are fine.
+  // A delete inside an envelope built to place: balanced, ordered, and still wrong.
+  assert.match(
+    problems([
+      { k: 'ESC', code: '7' }, { k: 'CSI', params: '1;1', final: 'H' },
+      apc('a=d,d=i,i=42'), { k: 'ESC', code: '8' },
+    ]),
+    /non-placement command/,
+  );
+
+  // Two placements inside one envelope, and two envelopes in one write. sprite-runtime
+  // calls writeTerminal once per builder, so neither shape is one it can produce.
   const one = [
     { k: 'ESC', code: '7' }, { k: 'CSI', params: '1;1', final: 'H' },
     apc('a=p,i=42'), { k: 'ESC', code: '8' },
   ];
-  assert.deepEqual(
-    verifyTrace([rec([...one, ...one], sprite, inProcess)], noRestore).violations, [],
+  assert.match(
+    problems([...one.slice(0, 3), apc('a=p,i=42'), { k: 'ESC', code: '8' }]),
+    /carried 2 placement commands/,
   );
+  assert.match(problems([...one, ...one]), /2 placement envelopes in one write/);
 });
 
 test('out-of-vocabulary, unterminated and untagged writes each fail', () => {
@@ -1105,46 +1117,77 @@ const KEYS = /^[A-Za-z]=[^,]*(,[A-Za-z]=[^,]*)*$/;
 // with a row and a column (integrations/opencode/sprite.js placeAt).
 const CUP = /^\d+;\d+$/;
 
-// The envelope contract is a SEQUENCE: save, exactly one absolute move, the placement,
-// restore. Counting saves against restores accepts `ESC8, CSI, APC, ESC7`, which balances
-// perfectly and leaves the cursor exactly where the sprite put it -- the visible bug.
-// Bare APCs outside an envelope are fine: hidePlacement and freeImage are unwrapped.
+// The envelope contract is a SEQUENCE with fixed contents: save, exactly one absolute
+// move, exactly one `a=p` placement, restore -- which is precisely what placeAt() emits.
+// Counting saves against restores accepts `ESC8, CSI, APC, ESC7`, which balances perfectly
+// and leaves the cursor exactly where the sprite put it: the visible bug. Accepting any
+// APC in the placement slot accepts `ESC7, CSI, a=d, ESC8`, which deletes from inside an
+// envelope built to place. Bare APCs OUTSIDE an envelope are correct and expected:
+// hidePlacement and freeImage are unwrapped (integrations/opencode/sprite-runtime.js).
 export function envelopeProblems(escapes) {
   const problems = [];
   let state = 'outside';
+  let envelopes = 0, placed = 0;
   const save = (e) => e.k === 'ESC' && e.code === '7';
   const restore = (e) => e.k === 'ESC' && e.code === '8';
   const move = (e) => e.k === 'CSI';
+  const isPlacement = (e) => /(^|,)a=p(,|$)/.test(e.keys);
+
+  const close = () => {
+    if (placed !== 1) {
+      problems.push(`placement envelope carried ${placed} placement commands, expected exactly one`);
+    }
+    state = 'outside';
+  };
 
   for (const escape of escapes) {
     if (state === 'outside') {
-      if (save(escape)) { state = 'saved'; continue; }
+      if (save(escape)) { state = 'saved'; envelopes += 1; placed = 0; continue; }
       if (move(escape)) { problems.push('cursor move outside a placement envelope'); continue; }
       if (restore(escape)) { problems.push('cursor restore with no matching save'); continue; }
-      continue;
+      continue;   // bare APCs out here are hidePlacement and freeImage, which are unwrapped
     }
     if (save(escape)) { problems.push('nested placement envelope'); continue; }
 
     if (state === 'saved') {
       if (move(escape)) { state = 'moved'; continue; }
-      if (restore(escape)) { problems.push('placement envelope contained no cursor move'); state = 'outside'; continue; }
+      if (restore(escape)) { problems.push('placement envelope contained no cursor move'); close(); continue; }
       problems.push('placement envelope wrote before moving the cursor');
       state = 'placing';
+      if (escape.k === 'APC') { placed += 1; if (!isPlacement(escape)) problems.push(`placement envelope carries a non-placement command ${JSON.stringify(escape.keys)}`); }
       continue;
     }
     if (state === 'moved') {
       if (move(escape)) { problems.push('placement envelope moved the cursor twice'); continue; }
-      if (restore(escape)) { problems.push('placement envelope placed nothing'); state = 'outside'; continue; }
-      if (escape.k === 'APC') { state = 'placing'; continue; }
+      if (restore(escape)) { close(); continue; }
+      if (escape.k === 'APC') {
+        state = 'placing';
+        placed += 1;
+        // placeAt() emits `a=p` and nothing else. An `a=d` here would delete inside an
+        // envelope built to place, which is not a thing this renderer does.
+        if (!isPlacement(escape)) {
+          problems.push(`placement envelope carries a non-placement command ${JSON.stringify(escape.keys)}`);
+        }
+        continue;
+      }
       problems.push(`unexpected ${escape.k} inside a placement envelope`);
       continue;
     }
     if (move(escape)) { problems.push('placement envelope moved the cursor after placing'); continue; }
-    if (restore(escape)) { state = 'outside'; continue; }
-    if (escape.k === 'APC') continue;
+    if (restore(escape)) { close(); continue; }
+    if (escape.k === 'APC') {
+      placed += 1;
+      if (!isPlacement(escape)) {
+        problems.push(`placement envelope carries a non-placement command ${JSON.stringify(escape.keys)}`);
+      }
+      continue;
+    }
     problems.push(`unexpected ${escape.k} inside a placement envelope`);
   }
   if (state !== 'outside') problems.push('placement envelope was never closed');
+  // sprite-runtime.js calls writeTerminal once per builder: one placeAt, or one
+  // hidePlacement, or one freeImage. Two envelopes in one write is not a shape it produces.
+  if (envelopes > 1) problems.push(`${envelopes} placement envelopes in one write, expected one`);
   return problems;
 }
 
@@ -1366,7 +1409,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 node --test test/gate-verify.test.js
 ```
 
-Expected: PASS, 20 tests, rising to 21 once Step 1b's golden test is added.
+Expected: PASS, 20 tests. Step 1b adds one more, for 21.
 
 - [ ] **Step 5: Commit**
 
@@ -1550,16 +1593,28 @@ either could belong to a different session:
 ```sh
 CELL="$FAMILIAR_TERMINAL-$FAMILIAR_GATE_AGENT"
 BUS=~/.local/state/familiar/agents.json
-SESSION_FILE="$FAMILIAR_GATE_DIR/reap-session-$CELL.txt"
+SESSION_FILE="$FAMILIAR_GATE_DIR/reap-session-$CELL.json"
 PID_FILE="$FAMILIAR_GATE_DIR/reap-pid-$CELL.txt"
 
-# 0. Name the session and its agent pid. Written to files as DATA and never evaluated:
-#    a session id arrives verbatim from the agent's JSON payload, which accepts any
-#    non-empty string (src/adapters/payload.js), so `eval` on it would be a command
-#    injection hole in a runbook people run on their own machines.
-node -e '
-const fs = require("node:fs");
-const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+# 0. Name the session and verify the process identity BEFORE anything is killed.
+#
+#    The session id is written as JSON, not as a line: it arrives verbatim from the
+#    agent's payload, which accepts any non-empty string (src/adapters/payload.js), so it
+#    may contain whitespace or newlines. Every later comparison decodes this file and
+#    compares the exact string in Node. `eval` on it would be a command injection hole,
+#    and line-oriented tools would silently mangle it.
+#
+#    Identity is pid PLUS starttime, which is Familiar's own definition
+#    (src/bus/transaction.js: "A pid alone is a number the kernel reuses; the pair is a
+#    process"). Comparing the stored start time against a fresh reading is what makes
+#    `kill -9` safe: a recycled pid now owned by another instance of the same agent has
+#    the same basename and would pass a `comm` check.
+node --input-type=module -e '
+import { readFileSync, writeFileSync } from "node:fs";
+import { startTimeOf } from "./src/bus/proc.js";
+
+const [busPath, sessionOut, pidOut] = process.argv.slice(2);
+const bus = JSON.parse(readFileSync(busPath, "utf8"));
 const ids = Object.keys(bus);
 if (ids.length !== 1) {
   throw new Error(`expected exactly one live session, found ${ids.length}`);
@@ -1568,21 +1623,28 @@ const record = bus[ids[0]];
 if (!Number.isInteger(record.pid) || record.pid <= 1) {
   throw new Error(`refusing to name pid ${JSON.stringify(record.pid)} as a kill target`);
 }
-fs.writeFileSync(process.argv[2], `${ids[0]}\n`);
-fs.writeFileSync(process.argv[3], `${record.pid}\n`);
-' "$BUS" "$SESSION_FILE" "$PID_FILE"
+const fresh = startTimeOf(record.pid);
+if (fresh !== record.starttime) {
+  throw new Error(
+    `pid ${record.pid} start time is ${fresh}, the bus recorded ${record.starttime}: ` +
+    "this pid has been recycled and is NOT the agent. Do not kill it."
+  );
+}
+writeFileSync(sessionOut, JSON.stringify(ids[0]));
+writeFileSync(pidOut, `${record.pid}\n`);
+process.stdout.write(`session verified, pid ${record.pid} starttime ${fresh}\n`);
+' "$BUS" "$SESSION_FILE" "$PID_FILE" | tee "$FAMILIAR_GATE_DIR/reap-identity-$CELL.txt"
 
 AGENT_PID="$(cat "$PID_FILE")"
 case "$AGENT_PID" in ''|*[!0-9]*) printf 'not a pid: %s\n' "$AGENT_PID" >&2; exit 1 ;; esac
 
-# 0b. Confirm that pid is the agent, BEFORE sending SIGKILL to it. A stale bus record
-#     whose pid has been reused would otherwise kill an unrelated process.
+# 0b. Record what that pid is, for the evidence and for a human sanity check.
 ps -p "$AGENT_PID" -o pid=,comm= | tee "$FAMILIAR_GATE_DIR/reap-target-$CELL.txt"
 ```
 
-Stop here and read that line. Its command basename must be the agent under test —
-`claude`, `codex`, or `opencode`. If it is anything else, do not continue: the bus record
-is stale and the pid belongs to something else. Then:
+The start-time comparison is the guard; the `ps` line is corroboration for the reader.
+Its basename should be the agent under test — `claude`, `codex`, or `opencode`. If step 0
+threw, do not continue and do not kill anything.
 
 ```sh
 kill -9 "$AGENT_PID"
@@ -1590,26 +1652,30 @@ kill -9 "$AGENT_PID"
 # 1. THAT session must still be on the bus. Any hook from any agent would have pruned
 #    it, which is why exactly one session may be live during this check.
 cp "$BUS" "$FAMILIAR_GATE_DIR/before-reap-$CELL.json"
-node -e '
-const fs = require("node:fs");
-const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const session = fs.readFileSync(process.argv[2], "utf8").trim();
-if (!(session in bus)) throw new Error("the session was already gone before reap ran");
-' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json" "$SESSION_FILE"
 
-# 2. reap must name THAT session. -F -f keeps the id a fixed string read from a file,
-#    so no part of it is ever interpreted as a pattern or by the shell.
+# 2. reap must name THAT session.
 "$FAMILIAR_GATE_BIN" reap | tee "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
-grep -q -F -f "$SESSION_FILE" "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
 
 # 3. and THAT session must be the one now absent.
 cp "$BUS" "$FAMILIAR_GATE_DIR/after-reap-$CELL.json"
+
+# All three comparisons in Node, against the exact decoded id. No shell, no grep: a
+# session id is agent-supplied text and is neither a pattern nor a line.
 node -e '
 const fs = require("node:fs");
-const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const session = fs.readFileSync(process.argv[2], "utf8").trim();
-if (session in bus) throw new Error("the session survived reap");
-' "$FAMILIAR_GATE_DIR/after-reap-$CELL.json" "$SESSION_FILE"
+const [beforePath, reapPath, afterPath, sessionPath] = process.argv.slice(2);
+const session = JSON.parse(fs.readFileSync(sessionPath, "utf8"));
+const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
+const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
+const reaped = fs.readFileSync(reapPath, "utf8");
+if (!(session in before)) throw new Error("the session was already gone before reap ran");
+if (!reaped.includes(session)) throw new Error("reap did not name the killed session");
+if (session in after) throw new Error("the session survived reap");
+process.stdout.write("present before, named by reap, absent after\n");
+' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json" \
+  "$FAMILIAR_GATE_DIR/reap-$CELL.txt" \
+  "$FAMILIAR_GATE_DIR/after-reap-$CELL.json" \
+  "$SESSION_FILE"
 ```
 
 The step-0 guard that exactly one session is on the bus is what makes the identity
@@ -1683,7 +1749,7 @@ find the claude-code process` diagnostic in the captured stderr, exit status zer
 Adapt the existing runbook's sections 7–11. The inventory for this gate is: six cell
 traces (`{kitty,ghostty}-{claude-code,codex,opencode}.jsonl`), `spot-check.jsonl`, the two
 `capability-none-*.jsonl`, `probe2.jsonl` and its stderr, `bg-comm.txt` and
-`bg-command.txt`, six reap artifacts per cell, `versions-kitty.txt` and `versions-ghostty.txt`, and the tester's notes.
+`bg-command.txt`, seven reap artifacts per cell, `versions-kitty.txt` and `versions-ghostty.txt`, and the tester's notes.
 
 The tester runs the verifier over every trace before sending, and records each result:
 
@@ -1767,7 +1833,8 @@ design. No cell has run. No claim in this file is promoted until its row says `p
   the tester pushed nothing.
 - Runbook: `docs/ref/2026-08-24-macos-terminal-gate-handoff.md` on that branch.
 - Evidence per cell: one `<terminal>-<agent>.jsonl` trace plus six reap artifacts
-  (`reap-session`, `reap-pid`, `reap-target`, `before-reap`, `reap`, `after-reap`).
+  (`reap-session.json`, `reap-pid`, `reap-identity`, `reap-target`, `before-reap`,
+  `reap`, `after-reap`).
 - Host, OS, terminal, agent, and Node versions: pending.
 - Terminal device (`rdev`) and asserted capability per run: pending.
 
@@ -1934,21 +2001,25 @@ node tools/gate-verify.mjs "$R/capability-none-opencode.jsonl" \
 
 test ! -s "$R/probe2.jsonl"                         # the fail-closed run wrote nothing
 
-# Cleanup, per cell, re-checked here rather than trusted from the tester's notes:
-# the recorded session is present before, named by reap, and absent after. -F -f keeps
-# the id a fixed string from a file; a session id is agent-supplied text, not a pattern.
+# Cleanup, per cell, re-checked here rather than trusted from the tester's notes: the
+# recorded session is present before, named by reap, and absent after. The id is decoded
+# from JSON and compared as an exact string -- it is agent-supplied text, so it is neither
+# a pattern nor guaranteed to be one line.
 for cell in kitty ghostty; do
   for agent in claude-code codex opencode; do
-    S="$R/reap-session-$cell-$agent.txt"
-    grep -q -F -f "$S" "$R/reap-$cell-$agent.txt"
     node -e '
 const fs = require("node:fs");
-const session = fs.readFileSync(process.argv[3], "utf8").trim();
-const before = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const after = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (!(session in before)) throw new Error(`${process.argv[1]}: session absent before reap`);
-if (session in after) throw new Error(`${process.argv[2]}: session survived reap`);
-' "$R/before-reap-$cell-$agent.json" "$R/after-reap-$cell-$agent.json" "$S"
+const [beforePath, reapPath, afterPath, sessionPath] = process.argv.slice(2);
+const session = JSON.parse(fs.readFileSync(sessionPath, "utf8"));
+const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
+const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
+if (!(session in before)) throw new Error(`${beforePath}: session absent before reap`);
+if (!fs.readFileSync(reapPath, "utf8").includes(session)) {
+  throw new Error(`${reapPath}: reap did not name the killed session`);
+}
+if (session in after) throw new Error(`${afterPath}: session survived reap`);
+' "$R/before-reap-$cell-$agent.json" "$R/reap-$cell-$agent.txt" \
+  "$R/after-reap-$cell-$agent.json" "$R/reap-session-$cell-$agent.json"
   done
 done
 ```
