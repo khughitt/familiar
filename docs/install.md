@@ -40,11 +40,23 @@ prints JSON; it does not edit your settings file.
 
 ### Codex lifecycle hooks
 
-`integrations/codex/hooks.json` is a review-only fixture. It contains a literal
-path placeholder, and its executor encoding remains unresolved until the
-physical-Mac gate is complete. Do not copy, merge, or install it. No Codex
-generation or installation behavior is documented until that gate has been
-completed.
+Generate the Codex hooks fragment:
+
+```sh
+familiar setup codex
+```
+
+Review stdout and merge it into `~/.codex/hooks.json`. The command only prints
+JSON; it does not edit that file. Codex asks for a one-time trust confirmation
+before it runs hooks.
+
+This configures lifecycle hooks only. Codex draws its own pet, so it has no
+status line entry — see Codex pets below for the art.
+
+Earlier versions shipped a review-only hooks fixture carrying a literal path
+placeholder. It is gone: the generated document embeds the real path of the
+`bin/familiar` you linked, shell-quoted for the `/bin/zsh -c` boundary Codex runs
+hook commands through.
 
 ## macOS integration
 

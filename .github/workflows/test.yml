@@ -63,3 +63,16 @@ jobs:
                   || value.statusLine.refreshInterval !== 2) process.exit(1);
             });
           '
+          familiar setup codex | node -e '
+            let text = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", chunk => text += chunk);
+            process.stdin.on("end", () => {
+              const value = JSON.parse(text);
+              const hooks = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"];
+              if (JSON.stringify(Object.keys(value.hooks ?? {})) !== JSON.stringify(hooks)
+                  || !hooks.every(name => value.hooks[name].length > 0)
+                  || !value.hooks.SessionEnd[0].hooks[0].command.endsWith(" hook SessionEnd --agent codex")
+                  || value.statusLine !== undefined) process.exit(1);
+            });
+          '

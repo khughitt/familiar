@@ -2,33 +2,31 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add non-mutating Claude Code setup output, declare Node 22, and keep
-Codex configuration gated until its executor boundary is measured.
+**Goal:** Add non-mutating Claude Code and Codex setup output and declare Node 22.
 
-**Architecture:** One pure setup module owns the Claude Code JSON document.
-`bin/familiar` resolves its own real path and only prints that document; it never
-reads or writes agent configuration. Claude Code commands use POSIX shell quoting
-at its documented `sh -c` boundary. Codex command encoding is filled in only
-after the physical-Mac process spike records its executor boundary.
+**Architecture:** One pure setup module owns both agents' JSON documents.
+`bin/familiar` resolves its own real path and only prints the requested document;
+it never reads or writes agent configuration. Both agents' commands use POSIX
+shell quoting: Claude Code's documented `sh -c` boundary and Codex's `/bin/zsh -c`,
+measured on a physical Mac, take the same single-quote form.
 
 **Tech Stack:** Node 22 ESM, `node:util.parseArgs`, `node:test`, Markdown.
 
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§1, 7, 8, 9, 10, 13.
 
-**Implementation status (2026-08-23):** The shared Node/install documentation
-scope and `familiar setup claude-code` are complete. `familiar setup codex`,
-Codex command encoding, and replacement of the committed review-only fixture
-remain gated on physical executor evidence.
+**Implementation status (2026-08-23):** Complete. The shared Node/install
+documentation scope and both `familiar setup claude-code` and
+`familiar setup codex` are implemented; the review-only
+`integrations/codex/hooks.json` fixture is deleted, superseded by generation.
 
 ## Global Constraints
 
-- The current command is `familiar setup claude-code`; universal `-h`/`--help`
-  remains available. `familiar setup codex` is pending the physical executor gate.
+- The commands are `familiar setup claude-code` and `familiar setup codex`;
+  universal `-h`/`--help` remains available.
 - Leaf commands accept no other flags or positional arguments.
 - Resolve the checkout's real `bin/familiar` path before command encoding and JSON serialization.
-- POSIX-shell-quote Claude Code paths. Do not expose Codex setup until Task 1 of
-  the process/runtime plan records its executor behavior and this plan is amended
-  if necessary.
+- POSIX-shell-quote both agents' paths; Task 1 of the process/runtime plan
+  measured Codex's `/bin/zsh -c` boundary, where the same form holds.
 - Never inspect, merge, or write `~/.claude` or `~/.codex`.
 - Keep Familiar's existing `~/.config` and `~/.local/state` paths on macOS.
 - Add `engines.node: ">=22"`; add no dependency or packaging channel.
@@ -46,27 +44,23 @@ writing them. If a physical Mac is unavailable, complete the Claude Code parts
 of this plan and omit every Codex-labeled branch, assertion, CLI leaf, and
 documentation instruction until the gate is resolved.
 
-**Approved deviation / implementation note:** A physical Mac was unavailable,
-so commits `8bd16a8` and `f65e3a3` completed the Claude Code scope only. The
-Codex generator, CLI leaf, and fixture deletion from the original plan were
-omitted and remain gated; the fixture is retained for review, not installation.
+**Approved deviation / implementation note:** A physical Mac was unavailable
+when commits `8bd16a8` and `f65e3a3` landed, so those completed the Claude Code
+scope only. The 2026-08-23 capture supplied the missing executor evidence, and
+the Codex generator, CLI leaf, and fixture deletion followed.
 
 **Files:**
 - Create: `src/install/setup.js`
 - Create: `test/setup.test.js`
-- Originally proposed delete after the gate: `integrations/codex/hooks.json`
-- Originally proposed modify after the gate: `test/codex.test.js`
+- Delete: `integrations/codex/hooks.json`
+- Modify: `test/codex.test.js`
 
 **Interfaces:**
-- Produces now: `shellQuote(value: string): string` and
-  `setupDocument(agent: 'claude-code', binPath: string): object`. The original
-  `'codex'` branch remains deferred.
+- Produces: `shellQuote(value: string): string` and
+  `setupDocument(agent: 'claude-code' | 'codex', binPath: string): object`.
 - Consumes: no filesystem or environment state; callers supply the resolved binary path.
 
 - [x] **Step 1: Write failing quoting and document tests**
-
-The Claude assertions below are complete. The original Codex assertion remains
-deferred, so this mixed step stays unchecked.
 
 Create `test/setup.test.js`:
 
@@ -96,7 +90,6 @@ test('Claude setup contains every lifecycle hook and the status line', () => {
   );
 });
 
-// Deferred until the Codex executor boundary is measured:
 test('Codex setup contains the six supported events and explicit agent selection', () => {
   const document = setupDocument('codex', '/tmp/Familiar Build/bin/familiar');
   assert.deepEqual(Object.keys(document.hooks), [
@@ -123,9 +116,6 @@ node --test test/setup.test.js
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `src/install/setup.js`.
 
 - [x] **Step 3: Implement the pure generator**
-
-The Claude generator below is complete. The originally proposed Codex branch
-remains deferred, so this mixed step stays unchecked.
 
 Create `src/install/setup.js` with the complete maps, not templates or string replacement:
 
@@ -163,7 +153,6 @@ function claudeCode(bin) {
   };
 }
 
-// Deferred until the Codex executor boundary is measured:
 function codex(bin) {
   const hook = (event, matcher) =>
     commandHook(commandFor(bin, event, 'codex'), matcher);
@@ -181,20 +170,20 @@ function codex(bin) {
 
 export function setupDocument(agent, binPath) {
   if (agent === 'claude-code') return claudeCode(binPath);
-  // Deferred: if (agent === 'codex') return codex(binPath);
+  if (agent === 'codex') return codex(binPath);
   throw new Error(`unknown setup target ${JSON.stringify(agent)}`);
 }
 ```
 
-- [ ] **Step 4: Replace the Codex fixture after executor evidence**
+- [x] **Step 4: Replace the Codex fixture after executor evidence**
 
-UNBLOCKED 2026-08-23, still unimplemented. The executor boundary is measured:
-Codex runs its single-string hook command through `/bin/zsh -c`, confirmed in
-both the Kitty and Ghostty captures with a deliberately unquoted path and a
-`; :` canary (docs/ref/2026-08-23-macos-agent-process-spike.md). Single-quote
-shell quoting is correct there. Until `setup codex` is written,
-`integrations/codex/hooks.json` remains a review-only fixture and is not
-documented as installable configuration.
+The executor boundary is measured: Codex runs its single-string hook command
+through `/bin/zsh -c`, confirmed in both the Kitty and Ghostty captures with a
+deliberately unquoted path and a `; :` canary
+(`docs/ref/2026-08-23-macos-agent-process-spike.md`). Single-quote shell quoting
+is correct there. `integrations/codex/hooks.json` is deleted, and the assertion
+it carried — that SessionEnd reaches Familiar — moved to `test/codex.test.js`
+against the generated document.
 
 - [x] **Step 5: Run focused tests**
 
@@ -206,13 +195,14 @@ node --test test/setup.test.js test/codex.test.js
 
 Expected: both files pass.
 
-- [ ] **Step 6: Commit the complete two-agent task**
+- [x] **Step 6: Commit the complete two-agent task**
 
-The Claude-only commit exists as `8bd16a8`. The original two-agent commit now
-waits only on writing Step 4, not on evidence.
+The Claude-only commit exists as `8bd16a8`; the Codex half landed separately
+once the executor evidence existed.
 
 ```bash
-git add src/install/setup.js test/setup.test.js test/codex.test.js integrations/codex/hooks.json
+git add src/install/setup.js test/setup.test.js test/codex.test.js
+git rm integrations/codex/hooks.json
 git commit -m "feat(setup): generate agent configuration"
 ```
 
@@ -227,8 +217,8 @@ git commit -m "feat(setup): generate agent configuration"
 
 **Interfaces:**
 - Consumes: `setupDocument('claude-code', realpathSync(fileURLToPath(import.meta.url)))` from Task 1.
-- Produces now: `familiar setup claude-code`, writing pretty two-space JSON
-  plus exactly one final newline. `setup codex` remains an unknown command.
+- Produces: `familiar setup claude-code` and `familiar setup codex`, each
+  writing pretty two-space JSON plus exactly one final newline.
 
 - [x] **Step 1: Add failing command-resolution and process tests**
 
@@ -398,9 +388,8 @@ familiar setup claude-code
 ```
 
 and instruct the user to review and merge stdout into
-`~/.claude/settings.json`. The Codex section must identify
-`integrations/codex/hooks.json` as review-only and not installable until the
-physical executor gate resolves its path placeholder and command encoding.
+`~/.claude/settings.json`. The Codex section must do the same for
+`familiar setup codex` and `~/.codex/hooks.json`.
 
 The macOS section must include:
 
@@ -446,8 +435,8 @@ The Linux-only section retains the existing Niri, Noctalia, and systemd material
 
 Keep README concise: state Node 22+, link to `docs/install.md`, and do not
 duplicate generated JSON. Extend `test/cli-help.test.js`'s current-surface scan
-so obsolete literal Claude hook/status-line paths fail. The Codex fixture path
-is intentionally named in installation documentation as review-only.
+so obsolete literal hook/status-line paths fail, along with any instruction to
+copy the deleted Codex hooks fixture.
 
 ```js
 const retiredClaudeSetup = /\/path\/to\/familiar\/bin\/familiar (?:hook|statusline)/u;
@@ -460,7 +449,7 @@ Apply that expression to user-facing Markdown alongside the existing retired CLI
 Run:
 
 ```bash
-rg -n 'familiar setup codex|cp integrations/codex/hooks|replace only the binary path' README.md docs/install.md docs/surfaces.md
+rg -n 'cp integrations/codex/hooks|replace only the binary path' README.md docs/install.md docs/surfaces.md
 npm test
 npm install --package-lock-only --ignore-scripts
 git diff --check

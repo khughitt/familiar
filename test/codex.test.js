@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 
 import { adapterFor, AGENTS, assertAdapter } from '../src/adapters/index.js';
 import { HOOK_EVENTS, stateForEvent, resolveAgentPid, printsPlaceholderCells, reduceState } from '../src/adapters/codex.js';
+import { setupDocument } from '../src/install/setup.js';
 import { STATES } from 'familiar-theme';
 
 // An adapter is four functions and a flag. These pin the parts where codex and claude-code
@@ -72,17 +73,22 @@ test('SessionEnd clears the record rather than setting a state', () => {
   assert.ok('SessionEnd' in HOOK_EVENTS);
 });
 
-test('the shipped Codex hooks invoke Familiar for SessionEnd', () => {
-  const fixture = JSON.parse(readFileSync(
-    new URL('../integrations/codex/hooks.json', import.meta.url),
-    'utf8',
-  ));
-  assert.deepEqual(fixture.hooks.SessionEnd, [{
+// `familiar setup codex` replaced the committed hooks fixture: one generator now owns both
+// agents' documents, so the events Codex is configured for cannot drift from the events this
+// adapter maps. What the fixture pinned -- that SessionEnd reaches Familiar, which is how a
+// session leaves the bus without waiting for `familiar reap` -- is pinned here instead.
+test('generated Codex setup invokes Familiar for SessionEnd', () => {
+  const document = setupDocument('codex', '/opt/familiar/bin/familiar');
+  assert.deepEqual(document.hooks.SessionEnd, [{
     hooks: [{
       type: 'command',
-      command: '/path/to/familiar/bin/familiar hook --agent codex SessionEnd',
+      command: "'/opt/familiar/bin/familiar' hook SessionEnd --agent codex",
     }],
   }]);
+});
+
+test('the review-only Codex hooks fixture is gone, superseded by the generator', () => {
+  assert.equal(existsSync(new URL('../integrations/codex/hooks.json', import.meta.url)), false);
 });
 
 test('codex offers no needs-input and no error, and the map does not pretend otherwise', () => {

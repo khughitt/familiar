@@ -51,7 +51,7 @@ const FAMILIES = new Map([
   ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate', 'add'])],
   ['install', new Set(['pets', 'opencode'])],
   ['scheme', new Set(['set'])],
-  ['setup', new Set(['claude-code'])],
+  ['setup', new Set(['claude-code', 'codex'])],
 ]);
 const ROOT_LEAVES = new Set(['whoami', 'hook', 'statusline', 'reap']);
 
@@ -129,6 +129,7 @@ Set up
   install pets                 Install the active theme as Codex pets
   install opencode             Install the OpenCode integration
   setup claude-code            Print Claude Code integration settings
+  setup codex                  Print Codex integration settings
 
 Runtime
   hook EVENT                   Record an agent lifecycle event
@@ -320,9 +321,11 @@ Usage:
 
 Commands:
   claude-code     Print Claude Code integration settings
+  codex           Print Codex integration settings
 
 Examples:
   familiar setup claude-code
+  familiar setup codex
 `,
   'setup claude-code': `Print Claude Code integration settings.
 
@@ -333,6 +336,17 @@ Prints JSON for you to merge into Claude Code settings; it never reads or writes
 
 Examples:
   familiar setup claude-code
+`,
+  'setup codex': `Print Codex integration settings.
+
+Usage:
+  familiar setup codex
+
+Prints JSON for you to merge into Codex settings; it never reads or writes those settings.
+Codex draws its own pet, so this configures lifecycle hooks only — see \`familiar install pets\`.
+
+Examples:
+  familiar setup codex
 `,
   hook: `Record an agent lifecycle event.
 
@@ -635,10 +649,11 @@ export function sheetRowCaptions(rows, tone) {
 }
 
 async function main({ command, args: rest }) {
-  if (command === 'setup claude-code') {
+  if (command === 'setup claude-code' || command === 'setup codex') {
     parseLeaf(rest, { help: command });
     const binPath = realpathSync(fileURLToPath(import.meta.url));
-    process.stdout.write(`${JSON.stringify(setupDocument('claude-code', binPath), null, 2)}\n`);
+    const agent = command.slice('setup '.length);
+    process.stdout.write(`${JSON.stringify(setupDocument(agent, binPath), null, 2)}\n`);
   } else if (command === 'whoami') {
     const { positionals } = parseLeaf(rest, {
       minPositionals: 0, maxPositionals: 1, help: 'whoami',

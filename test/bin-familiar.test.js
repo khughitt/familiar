@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,10 +61,45 @@ test('setup claude-code prints exact JSON without reading configuration', () => 
   assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
 });
 
-test('setup claude-code rejects extra arguments and unknown flags before work', () => {
+test('setup codex prints exact JSON without reading configuration', () => {
+  const runEnv = env();
+  const result = spawnSync(process.execPath, [bin, 'setup', 'codex'], {
+    encoding: 'utf8', env: runEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, `${JSON.stringify(setupDocument('codex', realpathSync(bin)), null, 2)}\n`);
+  assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
+});
+
+// Codex hands its single-string hook command to `/bin/zsh -c` -- measured on a real Mac with a
+// deliberately unquoted path and a `; :` canary (docs/ref/2026-08-23-macos-agent-process-spike.md).
+// So the emitted string is shell source, and a checkout path with a space or an apostrophe is
+// where naive concatenation breaks. Run it through a POSIX shell against a stand-in that reports
+// its own argv: the path must arrive as one argument, with `--agent codex` trailing the event.
+test('a generated Codex command survives a shell with an awkward checkout path', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-codex-quote-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const checkout = join(root, "Keith's Familiar Build");
+  mkdirSync(checkout, { recursive: true });
+  const stand = join(checkout, 'familiar');
+  writeFileSync(stand, '#!/bin/sh\nprintf \'%s\\n\' "$0" "$@"\n');
+  chmodSync(stand, 0o755);
+
+  const command = setupDocument('codex', stand).hooks.Stop[0].hooks[0].command;
+  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.split('\n').slice(0, -1), [
+    stand, 'hook', 'Stop', '--agent', 'codex',
+  ]);
+});
+
+test('setup rejects extra arguments and unknown flags before work', () => {
   for (const args of [
     ['setup', 'claude-code', 'extra'],
     ['setup', 'claude-code', '--write'],
+    ['setup', 'codex', 'extra'],
+    ['setup', 'codex', '--write'],
   ]) {
     const runEnv = env();
     const result = spawnSync(process.execPath, [bin, ...args], {

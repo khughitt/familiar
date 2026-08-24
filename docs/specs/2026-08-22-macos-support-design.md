@@ -1,8 +1,8 @@
 # macOS Core Support — Design
 
 **Status:** portable core implemented and CI-backed; live-hook ancestry and
-executor gate closed 2026-08-23 and the Darwin adapters activated on that
-evidence; physical terminal rendering remains provisional
+executor gate closed 2026-08-23, the Darwin adapters activated and `setup codex`
+implemented on that evidence; physical terminal rendering remains provisional
 **Date:** 2026-08-22
 
 Familiar's portable core now runs in Linux and macOS CI without pretending
@@ -12,8 +12,8 @@ The target support claim is deliberately split:
 
 - **Supported:** macOS 14+ on Apple Silicon, Node 22, checkout installation,
   Familiar configuration and themes, the CLI, Claude Code lifecycle and
-  status-line configuration, Codex hooks and native pets, and the OpenCode hook
-  and installer. Both gates this claim waited on have passed — CI is green, and
+  status-line configuration, generated Codex hooks and native pets, and the
+  OpenCode hook and installer. Both gates this claim waited on have passed — CI is green, and
   the live-hook capture in §2 confirmed the resolver predicate — and the Darwin
   adapters are active on that evidence.
 - **Provisional until physical-Mac smoke testing:** Familiar-rendered graphics,
@@ -30,10 +30,7 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
    loading the OpenCode sprite plugin. This is what holds every provisional
    label. No runbook exists for it yet; the process-runtime plan's Task 7 is its
    specification.
-2. **`setup codex` (§7).** Authorized by the measured `/bin/zsh -c` boundary and
-   not implemented. Until it exists, `integrations/codex/hooks.json` stays a
-   review-only fixture.
-3. **A background or daemon-hosted Claude Code session on Darwin.** The
+2. **A background or daemon-hosted Claude Code session on Darwin.** The
    `tty !== null` half of the resolver predicate rests on Linux evidence; that
    case has never been observed on a Mac. It belongs to the §11 pass.
 
@@ -113,9 +110,10 @@ exercised end to end with live agents.
 
 Darwin parser, Claude Code setup, CI, theme, and test-runner work proceeded
 independently and are complete. The live-hook gate is closed. Darwin adapter
-activation followed it on the same day; Codex setup command encoding is
-authorized but not yet implemented. A resolver miss is a named diagnostic at the hook's cosmetic
-boundary, not a silent no-op.
+activation followed it on the same day, and `familiar setup codex` was
+implemented on the same evidence, replacing the review-only hooks fixture. A
+resolver miss is a named diagnostic at the hook's cosmetic boundary, not a
+silent no-op.
 
 The permanent core matrix is green in [run 32631362471](https://github.com/khughitt/familiar/actions/runs/32631362471):
 Linux Node 22/26 and smoke passed, while macOS 14 / Node 22 ran all 833 tests
@@ -331,10 +329,11 @@ after spawn; its owner record cannot be minted from the earlier snapshot.
 
 ## 7. Public setup interface
 
-The implemented non-mutating setup command is:
+The implemented non-mutating setup commands are:
 
 ```text
 familiar setup claude-code
+familiar setup codex
 ```
 
 Apart from the CLI's universal `--help`, each leaf command accepts no positional
@@ -343,11 +342,14 @@ newline. Diagnostics go to stderr and failure is nonzero.
 
 - `setup claude-code` returns the settings fragment containing Familiar's
   lifecycle hooks and `statusLine` command.
+- `setup codex` returns the hooks fragment for `~/.codex/hooks.json`, carrying
+  the six events the Codex adapter maps and no `statusLine`: Codex draws its own
+  pet and exposes no cells to print into.
 
-Generated Codex setup is unimplemented but no longer gated: the §2 capture
-measured Codex executing its single-string hook command through `/bin/zsh -c`.
-The committed Codex hooks fixture remains the review source until `setup codex`
-lands.
+Both documents come from one generator, so the events Codex is configured for
+cannot drift from the events its adapter maps. The committed
+`integrations/codex/hooks.json` fixture is deleted; its literal path placeholder
+is exactly what generation removes.
 
 Command values use the realpath of `bin/familiar` in the running package. Under
 `npm link`, that is the checkout target rather than the npm-prefix symlink.
@@ -384,15 +386,14 @@ familiar theme add <theme-url-or-directory>
 restatement of existing metadata.
 
 `docs/install.md` is rewritten into shared setup, macOS, and Linux sections. Its
-hand-written Claude Code JSON is replaced by `familiar setup claude-code` output.
-Codex retains its committed fixture until §2 authorizes a setup command. The
-macOS path covers:
+hand-written Claude Code JSON and its copied Codex fixture are replaced by
+`familiar setup claude-code` and `familiar setup codex` output. The macOS path
+covers:
 
 1. Checkout installation, scheme, and theme.
 2. `setup claude-code` output merged into `~/.claude/settings.json`.
-3. `install pets`, project syncing, and a warning that the committed Codex hooks
-   fixture is review-only: do not copy, merge, or install it until executor
-   evidence resolves its literal path and command encoding.
+3. `setup codex` output merged into `~/.codex/hooks.json`, plus `install pets`
+   and project syncing for the pet art Codex draws itself.
 4. `install opencode`, whose global directory remains `~/.config/opencode` on
    both platforms.
 5. An optional user LaunchAgent invoking `familiar reap` every minute.
@@ -528,12 +529,12 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 
 | Decision | Choice |
 | --- | --- |
-| First support claim | portable core CI-backed; Darwin agent lifecycle authorized by the 2026-08-23 live-hook evidence |
+| First support claim | portable core CI-backed; Darwin agent lifecycle and Codex setup authorized by the 2026-08-23 live-hook evidence |
 | Live terminal claim | provisional until physical-Mac smoke |
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
 | Familiar paths | existing `~/.config` and `~/.local/state` paths |
-| Agent configuration | generated Claude Code JSON; committed Codex fixture pending executor evidence; never auto-merge either |
+| Agent configuration | generated Claude Code and Codex JSON from one generator; never auto-merge either |
 | Process source | Linux `/proc`; one memoized Darwin `/bin/ps` snapshot on the normal path, plus the two §3 targeted-read exceptions |
 | Linux `tty` | presence marker only; never a path component |
 | Darwin TTY | strict normalization to `ttys<hex>` and `/dev/<tty>` |

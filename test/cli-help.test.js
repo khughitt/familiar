@@ -70,7 +70,7 @@ test('root and bare families print offline help with status zero', (t) => {
   }
   for (const command of [
     'whoami [PATH]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
-    'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'hook EVENT', 'statusline', 'reap',
+    'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup codex', 'hook EVENT', 'statusline', 'reap',
   ]) {
     assert.equal(root.split(command).length - 1, 1, command);
   }
@@ -81,7 +81,7 @@ test('root and bare families print offline help with status zero', (t) => {
 const leaves = [
   ['whoami'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
-  ['install', 'opencode'], ['setup', 'claude-code'], ['hook'], ['statusline'], ['reap'],
+  ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'codex'], ['hook'], ['statusline'], ['reap'],
 ];
 
 test('every leaf owns -h and --help before config or work', (t) => {
@@ -153,7 +153,7 @@ test('unknown commands point to the nearest help scope', (t) => {
     assert.match(root.stderr, /familiar --help/);
   }
 
-  for (const [args, help] of [[['theme', 'cats'], 'theme'], [['setup', 'codex'], 'setup']]) {
+  for (const [args, help] of [[['theme', 'cats'], 'theme'], [['setup', 'cursor'], 'setup']]) {
     const family = run(args, f.env);
     assert.equal(family.status, 1);
     assert.match(family.stderr, new RegExp(`unknown ${args[0]} command.*${args[1]}`, 'i'));
@@ -223,7 +223,11 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
     'familiar theme (?!list\\b|add\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
     'u',
   );
-  const retiredClaudeSetup = /\/path\/to\/familiar\/bin\/familiar (?:hook|statusline)/u;
+  // Both agents' configuration is generated now, so a literal placeholder path in user-facing
+  // Markdown is stale by construction -- as is any instruction to copy the deleted Codex hooks
+  // fixture, which is what `familiar setup codex` replaced.
+  const retiredLiteralSetup =
+    /\/path\/to\/familiar\/bin\/familiar (?:hook|statusline)|integrations\/codex\/hooks\.json/u;
   const textExtensions = new Set(['.js', '.mjs', '.ts', '.tsx', '.md', '.yaml', '.yml']);
   const failures = [];
 
@@ -237,7 +241,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
         const name = relative(repoRoot, file);
         if (name === 'test/cli-help.test.js') continue;
         readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
-          if (retired.test(line) || (extname(name) === '.md' && retiredClaudeSetup.test(line))) {
+          if (retired.test(line) || (extname(name) === '.md' && retiredLiteralSetup.test(line))) {
             failures.push(`${name}:${index + 1}: ${line.trim()}`);
           }
         });
@@ -258,7 +262,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
     }
     if (extname(path)) {
       readFileSync(path, 'utf8').split('\n').forEach((line, index) => {
-        if (retired.test(line) || (extname(surface) === '.md' && retiredClaudeSetup.test(line))) {
+        if (retired.test(line) || (extname(surface) === '.md' && retiredLiteralSetup.test(line))) {
           failures.push(`${surface}:${index + 1}: ${line.trim()}`);
         }
       });
