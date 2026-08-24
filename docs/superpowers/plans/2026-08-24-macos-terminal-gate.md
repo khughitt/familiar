@@ -336,7 +336,7 @@ export function traceWrite(fd, bytes, descriptor = null, {
 node --test test/gate-trace.test.js
 ```
 
-Expected: PASS, 6 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Write the record-writer tests**
 
@@ -419,7 +419,7 @@ test('an unstattable fd records a null device rather than failing the write path
 node --test test/gate-trace.test.js
 ```
 
-Expected: PASS, 10 tests. The `len: 15` literal is the byte count of
+Expected: PASS, 11 tests. The `len: 15` literal is the byte count of
 `\x1b]11;#1a1b26\x1b\\\x07` — twelve bytes of OSC, two of ST, one of BEL.
 
 - [ ] **Step 7: Commit**
@@ -909,6 +909,13 @@ test('capability is asserted from outside, so a broken marker scrub cannot pass 
   );
 });
 
+test('a transmission addressed to no image fails', () => {
+  // `a=t` is well-formed and sets firstAction, but names nothing.
+  const { violations } = verifyTrace([rec([apc('a=t'), ...tint])], noRestore);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /no graphics chunk carried an image id, expected 42/);
+});
+
 test('the opencode placement envelope is accepted there and refused anywhere else', () => {
   const envelope = [
     { k: 'ESC', code: '7' },
@@ -920,22 +927,65 @@ test('the opencode placement envelope is accepted there and refused anywhere els
   const inProcess = { target: null, targetRdev: null };
   assert.deepEqual(verifyTrace([rec(envelope, sprite, inProcess)], noRestore).violations, []);
 
+  // Bare APCs outside an envelope are fine: hidePlacement and freeImage are unwrapped.
+  assert.deepEqual(
+    verifyTrace([rec([apc('a=d,d=i,i=42,p=1,q=2')], sprite, inProcess)], noRestore).violations,
+    [],
+  );
+
   // The hook never moves the cursor. If it did, that is a real defect.
   assert.match(
     verifyTrace([rec(envelope, noGraphics)], noRestore).violations[0],
     /cursor control from a non-sprite writer/,
   );
 
-  // An unbalanced envelope leaves the cursor where the sprite put it.
-  assert.match(
-    verifyTrace([rec(envelope.slice(0, 3), sprite, inProcess)], noRestore).violations[0],
-    /unbalanced/,
-  );
-
   // Anything else wearing the envelope's clothes is refused.
   assert.match(
     verifyTrace([rec([{ k: 'CSI', params: '2', final: 'J' }], sprite, inProcess)], noRestore).violations[0],
     /not part of the placement envelope/,
+  );
+});
+
+test('the envelope is checked as a sequence, so counting saves and restores cannot save it', () => {
+  const sprite = { source: 'opencode-sprite', backdrop: null, base: null, commands: null };
+  const inProcess = { target: null, targetRdev: null };
+  const problems = (escapes) =>
+    verifyTrace([rec(escapes, sprite, inProcess)], noRestore).violations.join(' | ');
+
+  // THE CASE COUNTING MISSES: perfectly balanced, and the cursor is left where the
+  // sprite put it.
+  const reversed = [
+    { k: 'ESC', code: '8' },
+    { k: 'CSI', params: '12;3', final: 'H' },
+    apc('a=p,i=42'),
+    { k: 'ESC', code: '7' },
+  ];
+  assert.match(problems(reversed), /restore with no matching save/);
+  assert.match(problems(reversed), /never closed/);
+
+  // No move at all: the placement lands wherever the cursor happened to be.
+  assert.match(
+    problems([{ k: 'ESC', code: '7' }, apc('a=p,i=42'), { k: 'ESC', code: '8' }]),
+    /wrote before moving the cursor/,
+  );
+
+  // Unclosed, and nested.
+  assert.match(
+    problems([{ k: 'ESC', code: '7' }, { k: 'CSI', params: '1;1', final: 'H' }, apc('a=p,i=42')]),
+    /never closed/,
+  );
+  assert.match(
+    problems([{ k: 'ESC', code: '7' }, { k: 'ESC', code: '7' }]),
+    /nested placement envelope/,
+  );
+
+  // Two complete envelopes in one write are fine.
+  const one = [
+    { k: 'ESC', code: '7' }, { k: 'CSI', params: '1;1', final: 'H' },
+    apc('a=p,i=42'), { k: 'ESC', code: '8' },
+  ];
+  assert.deepEqual(
+    verifyTrace([rec([...one, ...one], sprite, inProcess)], noRestore).violations, [],
   );
 });
 
@@ -1055,6 +1105,49 @@ const KEYS = /^[A-Za-z]=[^,]*(,[A-Za-z]=[^,]*)*$/;
 // with a row and a column (integrations/opencode/sprite.js placeAt).
 const CUP = /^\d+;\d+$/;
 
+// The envelope contract is a SEQUENCE: save, exactly one absolute move, the placement,
+// restore. Counting saves against restores accepts `ESC8, CSI, APC, ESC7`, which balances
+// perfectly and leaves the cursor exactly where the sprite put it -- the visible bug.
+// Bare APCs outside an envelope are fine: hidePlacement and freeImage are unwrapped.
+export function envelopeProblems(escapes) {
+  const problems = [];
+  let state = 'outside';
+  const save = (e) => e.k === 'ESC' && e.code === '7';
+  const restore = (e) => e.k === 'ESC' && e.code === '8';
+  const move = (e) => e.k === 'CSI';
+
+  for (const escape of escapes) {
+    if (state === 'outside') {
+      if (save(escape)) { state = 'saved'; continue; }
+      if (move(escape)) { problems.push('cursor move outside a placement envelope'); continue; }
+      if (restore(escape)) { problems.push('cursor restore with no matching save'); continue; }
+      continue;
+    }
+    if (save(escape)) { problems.push('nested placement envelope'); continue; }
+
+    if (state === 'saved') {
+      if (move(escape)) { state = 'moved'; continue; }
+      if (restore(escape)) { problems.push('placement envelope contained no cursor move'); state = 'outside'; continue; }
+      problems.push('placement envelope wrote before moving the cursor');
+      state = 'placing';
+      continue;
+    }
+    if (state === 'moved') {
+      if (move(escape)) { problems.push('placement envelope moved the cursor twice'); continue; }
+      if (restore(escape)) { problems.push('placement envelope placed nothing'); state = 'outside'; continue; }
+      if (escape.k === 'APC') { state = 'placing'; continue; }
+      problems.push(`unexpected ${escape.k} inside a placement envelope`);
+      continue;
+    }
+    if (move(escape)) { problems.push('placement envelope moved the cursor after placing'); continue; }
+    if (restore(escape)) { state = 'outside'; continue; }
+    if (escape.k === 'APC') continue;
+    problems.push(`unexpected ${escape.k} inside a placement envelope`);
+  }
+  if (state !== 'outside') problems.push('placement envelope was never closed');
+  return problems;
+}
+
 export function verifyTrace(records, {
   expectRdev = null, expectCapability = null, requireRestore = true,
 } = {}) {
@@ -1111,7 +1204,6 @@ export function verifyTrace(records, {
     // --- decompose what actually went out ---
     let firstAction = null, apcCount = 0, bel = 0;
     let osc11 = null, osc12 = null, has111 = false, has112 = false;
-    let save = 0, restore = 0, moves = 0;
     const ids = new Set();
     for (const escape of record.escapes) {
       if (escape.k === 'BEL') { bel += 1; continue; }
@@ -1125,14 +1217,15 @@ export function verifyTrace(records, {
           violations.push(`${where}: cursor control from a non-sprite writer`);
           continue;
         }
-        if (escape.k === 'ESC' && escape.code === '7') { save += 1; continue; }
-        if (escape.k === 'ESC' && escape.code === '8') { restore += 1; continue; }
-        if (escape.k === 'CSI' && escape.final === 'H' && CUP.test(escape.params)) { moves += 1; continue; }
-        violations.push(
-          `${where}: ${escape.k} ${JSON.stringify(escape.code ?? `${escape.params}${escape.final}`)} ` +
-          'is not part of the placement envelope',
-        );
-        continue;
+        const known = (escape.k === 'ESC' && (escape.code === '7' || escape.code === '8'))
+          || (escape.k === 'CSI' && escape.final === 'H' && CUP.test(escape.params));
+        if (!known) {
+          violations.push(
+            `${where}: ${escape.k} ${JSON.stringify(escape.code ?? `${escape.params}${escape.final}`)} ` +
+            'is not part of the placement envelope',
+          );
+        }
+        continue;   // ORDER is checked separately, below; counting these proves nothing.
       }
 
       if (escape.k === 'APC') {
@@ -1159,12 +1252,11 @@ export function verifyTrace(records, {
     apcChunks += apcCount;
     bells += bel;
 
-    // --- the envelope must be balanced, and a move must be inside one ---
-    if (save !== restore) {
-      violations.push(`${where}: placement envelope unbalanced, ${save} saves and ${restore} restores`);
-    }
-    if (moves > save) {
-      violations.push(`${where}: ${moves} cursor moves outside a save/restore envelope`);
+    // --- the envelope must occur in ORDER, not merely in equal numbers ---
+    if (sprite) {
+      for (const problem of envelopeProblems(record.escapes)) {
+        violations.push(`${where}: ${problem}`);
+      }
     }
 
     // --- graphics against the plan ---
@@ -1175,6 +1267,12 @@ export function verifyTrace(records, {
         violations.push(`${where}: expected graphics for image ${expect.imageId}, none transmitted`);
       } else if (firstAction === null) {
         violations.push(`${where}: graphics carried no action chunk to name the image`);
+      }
+      // At least one chunk must NAME the image. `a=t` alone is well-formed, sets
+      // firstAction, and leaves the id set empty -- so a transmission addressed to no
+      // image would otherwise pass every other check.
+      if (apcCount > 0 && ids.size === 0) {
+        violations.push(`${where}: no graphics chunk carried an image id, expected ${expect.imageId}`);
       }
       // EVERY id, not just the first: a later chunk addressing another image would place
       // or delete something that is not ours.
@@ -1268,7 +1366,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 node --test test/gate-verify.test.js
 ```
 
-Expected: PASS, 14 tests.
+Expected: PASS, 20 tests, rising to 21 once Step 1b's golden test is added.
 
 - [ ] **Step 5: Commit**
 
@@ -1441,56 +1539,83 @@ the whole gate exists to catch.
 tested rather than from anything Familiar computed: `kitty-animation` for Kitty,
 `static-graphics` for Ghostty.
 
-Abnormal termination, as the four-step sequence from §11.2. The session is identified
-**before** the kill and that same identity is carried through every step; a nonempty bus
-and a nonempty `reap` line prove nothing on their own, because either could belong to a
-different session:
+Abnormal termination, as the four-step sequence from §11.2. The normal-exit check above
+ended the cell's session, so **start a fresh one first**: launch the agent again in the
+same window, drive it to any state so it reaches the bus, and leave it running.
+
+The session is then identified before the kill, and that same identity is carried through
+every step. A nonempty bus and a nonempty `reap` line prove nothing on their own, because
+either could belong to a different session:
 
 ```sh
 CELL="$FAMILIAR_TERMINAL-$FAMILIAR_GATE_AGENT"
 BUS=~/.local/state/familiar/agents.json
+SESSION_FILE="$FAMILIAR_GATE_DIR/reap-session-$CELL.txt"
+PID_FILE="$FAMILIAR_GATE_DIR/reap-pid-$CELL.txt"
 
-# 0. Name the session and its agent pid, from the bus, before anything is killed.
-eval "$(node -e '
+# 0. Name the session and its agent pid. Written to files as DATA and never evaluated:
+#    a session id arrives verbatim from the agent's JSON payload, which accepts any
+#    non-empty string (src/adapters/payload.js), so `eval` on it would be a command
+#    injection hole in a runbook people run on their own machines.
+node -e '
 const fs = require("node:fs");
 const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 const ids = Object.keys(bus);
 if (ids.length !== 1) {
-  throw new Error(`expected exactly one live session, found ${ids.length}: ${ids.join(" ")}`);
+  throw new Error(`expected exactly one live session, found ${ids.length}`);
 }
-process.stdout.write(`SESSION=${ids[0]}\nAGENT_PID=${bus[ids[0]].pid}\n`);
-' "$BUS")"
-printf 'cell=%s session=%s agent_pid=%s\n' "$CELL" "$SESSION" "$AGENT_PID" \
-  | tee "$FAMILIAR_GATE_DIR/reap-identity-$CELL.txt"
+const record = bus[ids[0]];
+if (!Number.isInteger(record.pid) || record.pid <= 1) {
+  throw new Error(`refusing to name pid ${JSON.stringify(record.pid)} as a kill target`);
+}
+fs.writeFileSync(process.argv[2], `${ids[0]}\n`);
+fs.writeFileSync(process.argv[3], `${record.pid}\n`);
+' "$BUS" "$SESSION_FILE" "$PID_FILE"
 
+AGENT_PID="$(cat "$PID_FILE")"
+case "$AGENT_PID" in ''|*[!0-9]*) printf 'not a pid: %s\n' "$AGENT_PID" >&2; exit 1 ;; esac
+
+# 0b. Confirm that pid is the agent, BEFORE sending SIGKILL to it. A stale bus record
+#     whose pid has been reused would otherwise kill an unrelated process.
+ps -p "$AGENT_PID" -o pid=,comm= | tee "$FAMILIAR_GATE_DIR/reap-target-$CELL.txt"
+```
+
+Stop here and read that line. Its command basename must be the agent under test —
+`claude`, `codex`, or `opencode`. If it is anything else, do not continue: the bus record
+is stale and the pid belongs to something else. Then:
+
+```sh
 kill -9 "$AGENT_PID"
 
 # 1. THAT session must still be on the bus. Any hook from any agent would have pruned
-#    it, which is why no other session may be running on the machine.
+#    it, which is why exactly one session may be live during this check.
 cp "$BUS" "$FAMILIAR_GATE_DIR/before-reap-$CELL.json"
 node -e '
-const bus = require(process.argv[1]);
-if (!(process.argv[2] in bus)) {
-  throw new Error(`session ${process.argv[2]} was already gone before reap ran`);
-}' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json" "$SESSION"
+const fs = require("node:fs");
+const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const session = fs.readFileSync(process.argv[2], "utf8").trim();
+if (!(session in bus)) throw new Error("the session was already gone before reap ran");
+' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json" "$SESSION_FILE"
 
-# 2. reap must name THAT session, not merely print something.
+# 2. reap must name THAT session. -F -f keeps the id a fixed string read from a file,
+#    so no part of it is ever interpreted as a pattern or by the shell.
 "$FAMILIAR_GATE_BIN" reap | tee "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
-grep -q -- "$SESSION" "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
+grep -q -F -f "$SESSION_FILE" "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
 
 # 3. and THAT session must be the one now absent.
 cp "$BUS" "$FAMILIAR_GATE_DIR/after-reap-$CELL.json"
 node -e '
-const bus = require(process.argv[1]);
-if (process.argv[2] in bus) {
-  throw new Error(`session ${process.argv[2]} survived reap`);
-}' "$FAMILIAR_GATE_DIR/after-reap-$CELL.json" "$SESSION"
+const fs = require("node:fs");
+const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const session = fs.readFileSync(process.argv[2], "utf8").trim();
+if (session in bus) throw new Error("the session survived reap");
+' "$FAMILIAR_GATE_DIR/after-reap-$CELL.json" "$SESSION_FILE"
 ```
 
-The step-0 guard that exactly one session is on the bus is what makes `SESSION`
-unambiguous, and it is the mechanical form of the prerequisite that no other agent
-session runs during the pass. If it throws, stop and close the other session rather than
-picking a key by hand.
+The step-0 guard that exactly one session is on the bus is what makes the identity
+unambiguous, and it is the mechanical form of the prerequisite that no other agent session
+runs during the pass. If it throws, stop and close the other session rather than picking a
+key by hand.
 
 State that the terminal stays tinted after the force-kill and that this is correct, not a
 failure: nothing restores colours without a `SessionEnd`, and `reap` writes no terminal
@@ -1558,7 +1683,7 @@ find the claude-code process` diagnostic in the captured stderr, exit status zer
 Adapt the existing runbook's sections 7–11. The inventory for this gate is: six cell
 traces (`{kitty,ghostty}-{claude-code,codex,opencode}.jsonl`), `spot-check.jsonl`, the two
 `capability-none-*.jsonl`, `probe2.jsonl` and its stderr, `bg-comm.txt` and
-`bg-command.txt`, three reap artifacts per cell, `versions-kitty.txt` and `versions-ghostty.txt`, and the tester's notes.
+`bg-command.txt`, six reap artifacts per cell, `versions-kitty.txt` and `versions-ghostty.txt`, and the tester's notes.
 
 The tester runs the verifier over every trace before sending, and records each result:
 
@@ -1641,7 +1766,8 @@ design. No cell has run. No claim in this file is promoted until its row says `p
   `origin` only as transport to the test machine and deleted from the remote afterwards;
   the tester pushed nothing.
 - Runbook: `docs/ref/2026-08-24-macos-terminal-gate-handoff.md` on that branch.
-- Evidence per cell: one `<terminal>-<agent>.jsonl` trace plus four reap artifacts.
+- Evidence per cell: one `<terminal>-<agent>.jsonl` trace plus six reap artifacts
+  (`reap-session`, `reap-pid`, `reap-target`, `before-reap`, `reap`, `after-reap`).
 - Host, OS, terminal, agent, and Node versions: pending.
 - Terminal device (`rdev`) and asserted capability per run: pending.
 
@@ -1758,7 +1884,7 @@ git commit -m "docs(adapters): drop the stale codex title claim"
 **Interfaces:**
 - Consumes: every artifact from Tasks 1–5.
 
-- [ ] **Step 1: Confirm both branches are clean and the spike branch is unpushed**
+- [ ] **Step 1: Confirm both branches are clean, then push the capture branch as transport**
 
 ```bash
 git -C .worktrees/macos-terminal-spike status --short
@@ -1807,10 +1933,22 @@ node tools/gate-verify.mjs "$R/capability-none-opencode.jsonl" \
   --expect-rdev "$KITTY_RDEV" --expect-capability none --no-require-restore
 
 test ! -s "$R/probe2.jsonl"                         # the fail-closed run wrote nothing
+
+# Cleanup, per cell, re-checked here rather than trusted from the tester's notes:
+# the recorded session is present before, named by reap, and absent after. -F -f keeps
+# the id a fixed string from a file; a session id is agent-supplied text, not a pattern.
 for cell in kitty ghostty; do
   for agent in claude-code codex opencode; do
-    grep -q -f <(sed -n 's/.*session=\([^ ]*\).*/\1/p' "$R/reap-identity-$cell-$agent.txt") \
-      "$R/reap-$cell-$agent.txt"                    # reap named THAT session
+    S="$R/reap-session-$cell-$agent.txt"
+    grep -q -F -f "$S" "$R/reap-$cell-$agent.txt"
+    node -e '
+const fs = require("node:fs");
+const session = fs.readFileSync(process.argv[3], "utf8").trim();
+const before = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const after = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!(session in before)) throw new Error(`${process.argv[1]}: session absent before reap`);
+if (session in after) throw new Error(`${process.argv[2]}: session survived reap`);
+' "$R/before-reap-$cell-$agent.json" "$R/after-reap-$cell-$agent.json" "$S"
   done
 done
 ```
