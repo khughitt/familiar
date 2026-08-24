@@ -52,8 +52,7 @@ export const HOOK_EVENTS = {
 // printed is a few KB of escape codes landing nowhere. Not harmful (a virtual placement draws
 // nothing by definition), just a lie in the code about what we are doing.
 //
-// The title, the identity tint and the bell still go out: those need no cells, and the title is
-// the entire channel the window-manager integration has (see osc.js).
+// The identity tint and the bell still go out: those need no cells (see osc.js).
 export const printsPlaceholderCells = false;
 
 // codex's events are edges, like claude-code's: each names a state outright. See claude-code.js.
