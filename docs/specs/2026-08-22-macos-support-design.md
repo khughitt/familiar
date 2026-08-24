@@ -490,10 +490,17 @@ and the probe correlates the two.
 
 Records are one JSON line per write: timestamp, pid, agent, event, target path,
 the `ttyname` of the fd, and each escape decomposed into introducer, control
-keys, payload length, and payload SHA-256. Tint, cursor, and bell bytes are
-short and constant and are recorded verbatim. Graphics and title payloads are
-recorded as length and digest only: the graphics payload is bulk, and the title
-payload carries the project name.
+keys, payload length, and payload SHA-256. Tint, cursor, reset, and bell bytes
+are short and constant and are recorded verbatim. Graphics payloads are recorded
+as length and digest only, because they are bulk; the digest and the control keys
+are what verification needs, never the pixels.
+
+The escape vocabulary is closed and small — `osc.js` exports exactly `OSC 11`,
+`OSC 12`, `OSC 111`, `OSC 112`, and `BEL`, alongside the Kitty graphics `APC`.
+Anything else in the byte log is by definition unexpected and fails the cell.
+In particular Familiar takes no ownership of the terminal title, which two
+emitter tests assert directly, so a title escape appearing in a capture is a
+defect rather than a tolerated extra.
 
 | Claim | Machine-checked from the byte log | Tester only |
 | --- | --- | --- |
@@ -501,7 +508,7 @@ payload carries the project name.
 | Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
 | Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
 | Correct terminal | target path equals the resolved agent's canonical TTY; `ttyname(fd)` agrees | the bytes land in this window and no other |
-| Nothing leaked | no writes at all where capability is `none` | — |
+| Graphics correctly suppressed | at capability `none`, zero APC `_G` bytes, while the `OSC 11`/`OSC 12` and any bell bytes still reach the validated TTY | the window still tints and rings with no sprite |
 
 The tester's column is irreducible. The point of the first column is that a
 passing tester note over a malformed byte log is a failure.
@@ -513,9 +520,9 @@ of `pass` does not mean the same thing across the table:
 
 | Agent | States exposed | Bytes Familiar sends | Sprite drawn by |
 | --- | --- | --- | --- |
-| Claude Code | six: `idle`, `working`, `needs-input`, `needs-approval`, `done`, `error` | graphics, tint, bell, title | Familiar: the hook transmits, `familiar statusline` prints the placeholder cells |
-| Codex | four: `idle`, `working`, `needs-approval`, `done` | tint, bell, title | Codex natively, from `install pets` |
-| OpenCode | five: adds `error`, omits `needs-input` | tint, bell, title | `integrations/opencode/sprite-plugin.tsx`, inside OpenCode's process |
+| Claude Code | six: `idle`, `working`, `needs-input`, `needs-approval`, `done`, `error` | graphics, tint, bell | Familiar: the hook transmits, `familiar statusline` prints the placeholder cells |
+| Codex | four: `idle`, `working`, `needs-approval`, `done` | tint, bell | Codex natively, from `install pets` |
+| OpenCode | five: adds `error`, omits `needs-input` | tint, bell | `integrations/opencode/sprite-plugin.tsx`, inside OpenCode's process |
 
 Codex maps six events onto four states: it has neither a failure event nor an
 idle-prompt notification. OpenCode's `needs-input` would require question events
@@ -536,6 +543,24 @@ Claude Code is the only cell that exercises the hook and status-line
 rendezvous: two processes, with no channel between them, agreeing on
 `imageIdFor(sessionId)`. It is the mechanism most likely to break inside a real
 TUI, so it is checked explicitly rather than folded into "sprite: yes".
+
+Two per-cell checks are deliberately not states, and enumerating states alone
+would skip both.
+
+**Session exit.** `SessionEnd` and `dispose` map to `null`, not to a state, and
+`renderTransition` returns `oscReset()` on exactly that null transition. The
+colour restore therefore has one and only one trigger. Each cell ends with a
+normal session exit and requires `OSC 111` and `OSC 112` in the byte log; a
+matrix that promoted six correct states while leaving a terminal permanently
+tinted would be worse than no promotion.
+
+**Abnormal termination and `familiar reap`.** A force-terminated session emits
+no event at all, so nothing restores the colours and nothing removes the bus
+record. This check is therefore a state check with no byte component: force-kill
+one session per cell, run `familiar reap`, and require the record to be gone
+from the bus. That the terminal stays tinted afterwards is expected and is
+recorded as such — the tinting is cleared by the next session's transitions, not
+by reaping — so the tester does not log it as a failure.
 
 The pass is also the first live exercise of `familiar setup codex` (§7). The §2
 capture used a hand-written command string with a deliberate canary; the
@@ -583,10 +608,14 @@ macOS 14 has run a live agent, because it has not.
 
 ### 11.5 Promotion rule
 
-A cell passes when every state that adapter structurally exposes was exercised,
-its byte log verified, and its tester observation recorded. Any failing cell
-keeps the affected adapter or renderer provisional; the evidence note is
-committed alone and every provisional claim stands unchanged.
+A cell passes when three things hold: every state that adapter structurally
+exposes was exercised, with its byte log verified and its tester observation
+recorded; the normal session exit produced `OSC 111` and `OSC 112`; and an
+abnormally terminated session was removed from the bus by `familiar reap`. All
+three are required, because the first alone can be satisfied while cleanup is
+entirely untested. Any failing cell keeps the affected adapter or renderer
+provisional; the evidence note is committed alone and every provisional claim
+stands unchanged.
 
 A complete pass promotes only what was exercised: physical Kitty and Ghostty
 rendering on the tested macOS and Node versions, named. It removes the
@@ -689,7 +718,8 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Test lease | existing file lock; default retry budget clears stale guards |
 | OpenCode renderer | provisional; CI backs hook and installer only |
 | Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
-| Gate escape recording | tint, cursor, and bell verbatim; graphics and title as length and digest |
+| Gate cleanup coverage | per cell: `oscReset` on normal exit, and `familiar reap` after abnormal termination |
+| Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; any other escape fails the cell |
 | Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.3) |
 | Gate configuration | full matrix on Node 22, one cell repeated on the installed Node; the macOS 14 live-agent gap stays open |
 | Gate execution | one runbook parameterized by terminal, run twice; disposable capture branch, redacted note only on `main` |
