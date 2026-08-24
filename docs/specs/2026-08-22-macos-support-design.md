@@ -498,16 +498,26 @@ are short and constant and are recorded verbatim. Graphics payloads are recorded
 as length and digest only, because they are bulk; the digest and the control keys
 are what verification needs, never the pixels.
 
-The escape vocabulary is closed and small — `osc.js` exports exactly `OSC 11`,
-`OSC 12`, `OSC 111`, `OSC 112`, and `BEL`, alongside the Kitty graphics `APC`.
-Anything else in the byte log is by definition unexpected and fails the cell.
+The escape vocabulary is closed and small. From the hook's emitter it is exactly
+what `osc.js` exports — `OSC 11`, `OSC 12`, `OSC 111`, `OSC 112`, and `BEL` —
+alongside the Kitty graphics `APC`. Anything else in a hook write fails the cell.
 In particular Familiar takes no ownership of the terminal title, which two
 emitter tests assert directly, so a title escape appearing in a capture is a
 defect rather than a tolerated extra.
 
+The OpenCode sprite renderer adds one further form, and only there. `placeAt` in
+`integrations/opencode/sprite.js` wraps its placement `APC` in `ESC 7`, one
+absolute `CSI <row>;<col> H`, and `ESC 8`, so the visible cursor returns to where
+OpenTUI left it between frames. That envelope is admitted for that writer alone,
+and its *order* is checked, not merely its balance: a save, exactly one move, the
+placement, then the restore. The same escapes appearing in a hook write are a
+defect — the hook emitter never moves the cursor — and a reversed or unclosed
+envelope leaves the cursor where the sprite put it, which is a visible bug that
+counting saves and restores would not catch.
+
 | Claim | Machine-checked from the byte log | Tester only |
 | --- | --- | --- |
-| Sprite transmitted | APC `_G` payload well formed, `i=` equals `imageIdFor(sessionId)`, frame count and placement match the planned program | a sprite is on screen, positioned correctly, covering no dialog |
+| Sprite transmitted | APC `_G` keys well formed; every chunk that names an image names `imageIdFor(sessionId)` and at least one does; the transmit chunk's `c=`/`r=` equal the `boxFor` placement box; the chunk count matches the encoder's own | a sprite is on screen, positioned correctly, covering no dialog |
 | Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
 | Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
 | Correct terminal | target path equals the resolved agent's canonical TTY, and `fstat(fd).rdev` equals `stat(target).rdev` | the bytes land in this window and no other |
@@ -515,6 +525,20 @@ defect rather than a tolerated extra.
 
 The tester's column is irreducible. The point of the first column is that a
 passing tester note over a malformed byte log is a failure.
+
+Two boundaries on that first column, stated here rather than discovered during a
+run. **Frame-by-frame sequence is not machine-checked.** The placement box comes
+from `boxFor` and the frame count from `planAnimation`, so both are recorded and
+the box is verified; but validating the frame *sequence* would mean
+reimplementing `encodeKittyProgram`'s chunking rules inside the checker, and a
+second copy of the encoder is not an independent check of the first. Instead the
+checker is proved against real encoder output by a golden test, and the
+independent properties — image identity across every chunk, key grammar, and the
+placement box — are what carry the claim. **OpenCode's graphics are checked more
+shallowly than the hook's**, because its renderer plans and encodes inside
+`sprite-runtime.js` and its records therefore carry no planned frame count or
+placement; image identity, key grammar, and envelope order are what apply there.
+The evidence note records both boundaries.
 
 ### 11.2 The matrix is not uniform
 
@@ -774,7 +798,8 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
 | Gate cleanup coverage | per cell: `oscReset` on normal exit; SIGKILL, record present, `reaped <id>` on stdout, record absent |
 | Gate negative control | one marker-scrubbed physical-terminal run over Claude Code and OpenCode; required for any promotion |
-| Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; any other escape fails the cell |
+| Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; the OpenCode placement envelope order-checked for that writer alone; any other escape fails the cell |
+| Gate graphics depth | image identity, key grammar, and placement box are machine-checked; frame sequence is not, and OpenCode carries no planned frame count |
 | Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.4) |
 | Gate configuration | full matrix on Node 22, one cell repeated on the installed Node; the macOS 14 live-agent gap stays open |
 | Gate execution | one runbook parameterized by terminal, run twice; disposable capture branch, redacted note only on `main` |
