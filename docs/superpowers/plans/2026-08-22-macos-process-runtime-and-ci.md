@@ -11,9 +11,10 @@
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§2–4, 6, 9–11, 14.
 
 **Implementation status (2026-08-23):** Tasks 2–6 are complete for the portable
-core and permanent CI. Task 1's physical ancestry evidence, the Task 2 Darwin
-adapter activation it gates, and Task 7's physical terminal matrix remain
-pending; no macOS agent lifecycle or terminal-rendering support is claimed.
+core and permanent CI. Task 1's physical ancestry evidence and the Task 2 Darwin
+adapter activation it gates remain pending; no macOS agent lifecycle or
+terminal-rendering support is claimed. Task 7 is superseded by
+`docs/superpowers/plans/2026-08-24-macos-terminal-gate.md`.
 
 ## Global Constraints
 
@@ -744,7 +745,12 @@ Expected: tests pass, no whitespace errors, and a clean worktree.
 
 ---
 
-### Task 7: Run the physical terminal promotion gate
+### Task 7: Run the physical terminal promotion gate — SUPERSEDED
+
+**Superseded 2026-08-24** by `docs/superpowers/plans/2026-08-24-macos-terminal-gate.md`,
+which specifies the evidence standard, the negative control, the cleanup proof, and the
+background probes that this task's four steps left undefined. Do not execute the steps
+below; they remain for history.
 
 **Files:**
 - Create: `docs/ref/2026-08-22-macos-terminal-smoke.md`
