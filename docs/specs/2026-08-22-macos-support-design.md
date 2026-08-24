@@ -722,8 +722,11 @@ written once, and the second run re-tests the script. That matters: the
 had silently overwritten five lines of already-written evidence, with exit
 status 0 throughout.
 
-The capture branch is disposable, never merged, and never pushed, as
-`spike/macos-agent-handoff` was. Only the reviewed, redacted evidence note
+The capture branch is disposable and never merged. It is pushed to `origin`
+only as transport to the test machine, exactly as `spike/macos-agent-handoff`
+was, and deleted from the remote once artifacts are received; a `git bundle`
+is the offline alternative. The tester pushes nothing back — no branch, no
+capture, no amended commit. Only the reviewed, redacted evidence note
 `docs/ref/2026-08-24-macos-terminal-smoke.md` reaches `main`, together with any
 promotion it earns.
 
