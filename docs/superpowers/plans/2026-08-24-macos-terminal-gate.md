@@ -34,8 +34,13 @@ Ghostty, Claude Code / Codex / OpenCode.
   bundle` is the offline alternative.
 - The tee is instrumentation, not a feature. No `FAMILIAR_GATE_*` surface may appear in
   `HELP`, `docs/install.md`, or any document destined for `main`.
-- The escape vocabulary is closed: `OSC 11`, `OSC 12`, `OSC 111`, `OSC 112`, `BEL`, and
-  the Kitty graphics `APC`. Anything else fails the cell.
+- The escape vocabulary is closed: `OSC 11`, `OSC 12`, `OSC 111`, `OSC 112`, `BEL`, the
+  Kitty graphics `APC`, and — for the OpenCode sprite writer alone — the placement
+  envelope `ESC 7`, one `CSI <row>;<col> H`, and `ESC 8`. Anything else fails the cell,
+  and the envelope appearing in a hook write is itself a failure.
+- Nothing the code under test reports about itself may be the only check on that thing.
+  Capability and terminal device are asserted from outside; the ringing-state set lives
+  in the verifier, taken from the design rather than from `emit.js`.
 - Record `OSC 11`/`12`/`111`/`112` and `BEL` verbatim. Record every other payload —
   graphics and any out-of-vocabulary OSC — as length plus SHA-256 only.
 - Every write record carries the writer's own expectation. A write reaching a terminal
@@ -165,6 +170,17 @@ test('an out-of-vocabulary OSC keeps its code but never its payload', () => {
   ]);
 });
 
+test('the opencode placement envelope is recognised, not dumped into OTHER', () => {
+  // Exactly what integrations/opencode/sprite.js placeAt() produces.
+  const bytes = Buffer.from(`\x1b7\x1b[12;3H\x1b_Ga=p,i=99,p=1,c=8,r=4,q=2,C=1${ST}\x1b8`, 'binary');
+  assert.deepEqual(decomposeEscapes(bytes), [
+    { k: 'ESC', code: '7' },
+    { k: 'CSI', params: '12;3', final: 'H' },
+    { k: 'APC', keys: 'a=p,i=99,p=1,c=8,r=4,q=2,C=1', len: 0, sha256: sha('') },
+    { k: 'ESC', code: '8' },
+  ]);
+});
+
 test('bytes outside the vocabulary are recorded as hex rather than dropped', () => {
   assert.deepEqual(decomposeEscapes(Buffer.from('hi', 'binary')), [
     { k: 'OTHER', hex: '6869' },
@@ -213,6 +229,9 @@ const ST = '\x1b\\';
 // out-of-vocabulary escape we can name -- the title -- carries the project name.
 const VERBATIM_OSC = new Set(['11', '12', '111', '112']);
 
+// Sticky, so a multi-megabyte graphics buffer is not re-sliced on every scan step.
+const CSI = /\x1b\[([0-9;]*)([A-Za-z])/y;
+
 let context = { agent: process.env.FAMILIAR_GATE_AGENT ?? null, event: null };
 
 export function setTraceContext(next) {
@@ -238,6 +257,20 @@ export function decomposeEscapes(bytes) {
   let i = 0;
   while (i < text.length) {
     if (text[i] === '\x07') { out.push({ k: 'BEL' }); i += 1; continue; }
+
+    // THE OPENCODE PLACEMENT ENVELOPE. integrations/opencode/sprite.js placeAt() wraps its
+    // APC in DECSC, one absolute cursor move, and DECRC, so the visible cursor returns to
+    // where OpenTUI left it. Recognised narrowly -- these three forms and nothing else --
+    // because the alternative is every visible OpenCode placement landing in OTHER.
+    if (text.startsWith('\x1b7', i)) { out.push({ k: 'ESC', code: '7' }); i += 2; continue; }
+    if (text.startsWith('\x1b8', i)) { out.push({ k: 'ESC', code: '8' }); i += 2; continue; }
+    CSI.lastIndex = i;
+    const csi = CSI.exec(text);
+    if (csi) {
+      out.push({ k: 'CSI', params: csi[1], final: csi[2] });
+      i = CSI.lastIndex;
+      continue;
+    }
 
     const isOsc = text.startsWith('\x1b]', i);
     const isApc = text.startsWith('\x1b_G', i);
@@ -314,8 +347,8 @@ import { setTraceContext, traceWrite, tracePath } from '../src/render/term/trace
 
 const EXPECT = {
   source: 'emit', capability: 'kitty-animation', state: 'needs-approval',
-  rings: true, reset: false, imageId: 42, backdrop: '#1a1b26', base: '#e0af68',
-  commands: 3,
+  reset: false, imageId: 42, backdrop: '#1a1b26', base: '#e0af68',
+  commands: 3, frames: 2, placement: { cols: 8, rows: 4 },
 };
 
 test('nothing is written and nothing is stat-ed when the trace is not enabled', () => {
@@ -352,7 +385,8 @@ test('a record carries the write, both device identities, and the emitter expect
 test('an in-process write with no target records a null target rather than inventing one', () => {
   const lines = [];
   const sprite = { source: 'opencode-sprite', capability: 'kitty-animation', state: null,
-    rings: false, reset: false, imageId: 99, backdrop: null, base: null, commands: null };
+    reset: false, imageId: 99, backdrop: null, base: null,
+    commands: null, frames: null, placement: null };
   traceWrite(1, Buffer.from('\x07', 'binary'), { target: null, expect: sprite }, {
     env: { FAMILIAR_GATE_TRACE: '/tmp/t.jsonl' },
     now: () => 'T2',
@@ -435,7 +469,7 @@ test('a successful drain appends exactly one record carrying its descriptor', ()
     writeAllSync(Buffer.from('\x07'), {
       fd: 1,
       write: (_fd, _b, _o, len) => len,
-      trace: { target: null, expect: { source: 'emit', rings: true } },
+      trace: { target: null, expect: { source: 'emit', state: 'working' } },
     });
   });
   const lines = readTrace(file);
@@ -527,12 +561,14 @@ test('emit records what it meant to send alongside what it sent', () => {
   assert.equal(record.expect.source, 'emit');
   assert.equal(record.expect.capability, 'kitty-animation');
   assert.equal(record.expect.state, 'working');
-  assert.equal(record.expect.rings, false);
   assert.equal(record.expect.reset, false);
+  assert.equal(record.expect.rings, undefined, 'the ringing decision belongs to the verifier');
   assert.equal(record.expect.imageId, imageIdFor(clipsIntent().sessionId));
   assert.equal(record.expect.backdrop, clipsIntent().color.backdrop);
   assert.equal(record.expect.base, clipsIntent().color.base);
-  assert.ok(record.expect.commands > 0, 'the planned command count travels with the write');
+  assert.ok(record.expect.commands > 0, 'the encoder command count travels with the write');
+  assert.ok(record.expect.frames >= 1, 'the PROGRAM frame count travels with the write');
+  assert.ok(record.expect.placement.rows >= 1 && record.expect.placement.cols >= 1);
 });
 ```
 
@@ -571,11 +607,17 @@ with:
       readFrame: readCachedFrame,
     });
     graphics = encoded.bytes;
-    plannedCommands = encoded.metrics.commands;   // SPIKE-ONLY, see trace.js
+    // SPIKE-ONLY, see trace.js. `commands` comes from the encoder and can only prove that
+    // no bytes were lost between encoding and the terminal. `frames` and `placement` come
+    // from the PROGRAM and the sprite -- planAnimation and boxFor, neither of which the
+    // encoder produced -- so they are the checks that can actually catch a wrong encoding.
+    plannedCommands = encoded.metrics.commands;
+    plannedFrames = Array.isArray(program.frames) ? program.frames.length : 1;
+    plannedPlacement = { cols: placement.cols, rows: placement.rows };
 ```
 
-Declare `let plannedCommands = null;` beside `let graphics = Buffer.alloc(0);`, and change
-the write to carry the descriptor:
+Declare `let plannedCommands = null, plannedFrames = null, plannedPlacement = null;` beside
+`let graphics = Buffer.alloc(0);`, and change the write to carry the descriptor:
 
 ```js
     if (!checkTty(fd)) return;
@@ -588,17 +630,26 @@ the write to carry the descriptor:
         source: 'emit',
         capability,
         state: nextState,
-        rings: nextState !== null && RINGS.has(nextState),
         reset: nextState === null,
         imageId: graphics.length > 0 ? imageIdFor(intent.sessionId) : null,
         backdrop: nextState === null ? null : intent.color.backdrop,
         base: nextState === null ? null : intent.color.base,
         commands: plannedCommands,
+        frames: plannedFrames,
+        placement: plannedPlacement,
       },
     } });
 ```
 
-`RINGS` is already module-private in this file; do not export it.
+**No `rings` field, deliberately.** Recording "this state rings" from the same `RINGS` set
+that decides whether to emit the bell would make the bell check circular: change `RINGS`
+and both sides change together. The record carries `state` only, and the verifier owns its
+own ringing set, taken from the design rather than from the code under test. `RINGS` stays
+module-private here; do not export it.
+
+The event-to-state mapping itself is **out of this gate's scope** and is not independently
+checked here — it is covered by each adapter's unit tests in CI. What this gate checks is
+that the state the emitter acted on produced the right bytes on the right device.
 
 - [ ] **Step 8: Run to verify it passes**
 
@@ -623,9 +674,14 @@ never reaches `emit()`, so it supplies its own descriptor. Replace that line wit
         expect: {
           source: 'opencode-sprite',
           capability,
-          state: null, rings: false, reset: false,
+          state: null, reset: false,
           imageId: imageIdFor(`opencode:${pid}`),
-          backdrop: null, base: null, commands: null,
+          backdrop: null, base: null,
+          // The runtime plans and encodes inside sprite-runtime.js, so these are not
+          // available here. OpenCode graphics are therefore checked for image identity,
+          // key grammar, and placement-envelope shape only -- not frame count. The
+          // evidence note must say so rather than implying parity with the hook path.
+          commands: null, frames: null, placement: null,
         },
       },
     }),
@@ -695,8 +751,8 @@ import { verifyTrace } from '../tools/gate-verify.mjs';
 
 const EXPECT = {
   source: 'emit', capability: 'kitty-animation', state: 'working',
-  rings: false, reset: false, imageId: 42, backdrop: '#1a1b26', base: '#e0af68',
-  commands: 1,
+  reset: false, imageId: 42, backdrop: '#1a1b26', base: '#e0af68',
+  commands: 1, frames: null, placement: null,
 };
 const tint = [
   { k: 'OSC', code: '11', payload: '#1a1b26' },
@@ -709,6 +765,7 @@ const rec = (escapes, expect = {}, over = {}) => ({
   len: 1, expect: { ...EXPECT, ...expect }, escapes, ...over,
 });
 const noRestore = { requireRestore: false };
+const noGraphics = { imageId: null, commands: null };
 
 test('a write matching its own expectation has no violations', () => {
   const { violations } = verifyTrace([rec([apc('a=t,f=100,i=42'), ...tint])], noRestore);
@@ -716,8 +773,6 @@ test('a write matching its own expectation has no violations', () => {
 });
 
 test('an fd on a different device than the opened target is a violation', () => {
-  // A tint-only write, so the device mismatch is the ONLY thing that can fail here.
-  const noGraphics = { imageId: null, commands: null };
   const { violations } = verifyTrace([rec([...tint], noGraphics, { fdRdev: 999 })], noRestore);
   assert.equal(violations.length, 1);
   assert.match(violations[0], /rdev 999/);
@@ -725,13 +780,25 @@ test('an fd on a different device than the opened target is a violation', () => 
 
 test('two null devices are not a match', () => {
   const { violations } = verifyTrace(
-    [rec([...tint], {}, { fdRdev: null, targetRdev: null })], noRestore,
+    [rec([...tint], noGraphics, { fdRdev: null, targetRdev: null })], noRestore,
   );
   assert.ok(violations.some((v) => /no device identity/.test(v)));
 });
 
+test("the run's terminal constrains hook writes too, not only in-process ones", () => {
+  // A resolver that picked the wrong tty opens it AND writes to it, so target === fd.
+  // Only the externally captured device catches that.
+  const consistentlyWrong = { target: '/dev/ttys009', targetRdev: 111, fdRdev: 111 };
+  const { violations } = verifyTrace(
+    [rec([...tint], noGraphics, consistentlyWrong)],
+    { ...noRestore, expectRdev: 268435460 },
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /this run's terminal is 268435460/);
+});
+
 test('an in-process write is checked against the expected device instead of a target', () => {
-  const sprite = { source: 'opencode-sprite', rings: false, backdrop: null, base: null, commands: null };
+  const sprite = { source: 'opencode-sprite', backdrop: null, base: null, commands: null };
   const base = { target: null, targetRdev: null, fdRdev: 268435460 };
   assert.deepEqual(
     verifyTrace([rec([apc('a=t,i=42')], sprite, base)], { ...noRestore, expectRdev: 268435460 }).violations,
@@ -739,7 +806,7 @@ test('an in-process write is checked against the expected device instead of a ta
   );
   assert.match(
     verifyTrace([rec([apc('a=t,i=42')], sprite, base)], { ...noRestore, expectRdev: 111 }).violations[0],
-    /expected 111/,
+    /this run's terminal is 111/,
   );
 });
 
@@ -750,29 +817,46 @@ test('the tint must carry the exact theme colours, not merely be present', () =>
   assert.match(violations[0], /OSC 11 .*expected #1a1b26/);
 });
 
-test('a graphics id that is not the expected image id fails', () => {
-  const { violations } = verifyTrace([rec([apc('a=t,i=7'), ...tint])], noRestore);
+test('every chunk must address the expected image, not just the first', () => {
+  const { violations } = verifyTrace(
+    [rec([apc('a=t,i=42'), apc('a=d,d=i,i=7'), ...tint], { commands: 2 })], noRestore,
+  );
   assert.equal(violations.length, 1);
-  assert.match(violations[0], /not the expected 42/);
+  assert.match(violations[0], /addresses image 7, expected 42/);
 });
 
-test('fewer graphics commands than the encoder planned fails', () => {
+test('malformed graphics keys fail whatever they would decode to', () => {
+  // An empty pair. Not `a=t;i=42` -- splitBody cuts on the first `;`, so a key string
+  // the parser produced can never contain one, and testing that would test nothing.
+  const { violations } = verifyTrace([rec([apc('a=t,,i=42'), ...tint])], noRestore);
+  assert.ok(violations.some((v) => /malformed graphics keys/.test(v)));
+});
+
+test('graphics chunks lost between the encoder and the terminal are caught', () => {
   const { violations } = verifyTrace(
     [rec([apc('a=t,i=42'), ...tint], { commands: 3 })], noRestore,
   );
   assert.equal(violations.length, 1);
-  assert.match(violations[0], /1 graphics commands, planned 3/);
+  assert.match(violations[0], /1 graphics chunks reached the terminal, encoder produced 3/);
 });
 
-test('a bell is required for a ringing state and forbidden otherwise', () => {
+test('the placement box must be the one boxFor computed from the sprite', () => {
+  const placed = (c, r) => rec(
+    [apc(`a=T,U=1,f=100,i=42,c=${c},r=${r}`), ...tint],
+    { placement: { cols: 8, rows: 4 } },
+  );
+  assert.deepEqual(verifyTrace([placed(8, 4)], noRestore).violations, []);
+  assert.match(verifyTrace([placed(9, 4)], noRestore).violations[0], /placed 9x4 cells/);
+});
+
+test('the bell is decided from the recorded state, not from a flag the writer set', () => {
   assert.deepEqual(
     verifyTrace([rec([apc('a=t,i=42'), ...tint, { k: 'BEL' }],
-      { state: 'needs-approval', rings: true })], noRestore).violations,
+      { state: 'needs-approval' })], noRestore).violations,
     [],
   );
   assert.match(
-    verifyTrace([rec([apc('a=t,i=42'), ...tint],
-      { state: 'needs-approval', rings: true })], noRestore).violations[0],
+    verifyTrace([rec([apc('a=t,i=42'), ...tint], { state: 'needs-approval' })], noRestore).violations[0],
     /0 bells/,
   );
   assert.match(
@@ -785,15 +869,12 @@ test('a session end must restore both background and cursor', () => {
   const end = { reset: true, imageId: null, backdrop: null, base: null, commands: null, state: null };
   const both = [{ k: 'OSC', code: '111', payload: '' }, { k: 'OSC', code: '112', payload: '' }];
   assert.deepEqual(verifyTrace([rec(both, end)]).violations, []);
-  assert.match(
-    verifyTrace([rec([both[0], both[0]], end)]).violations[0],
-    /112=false/,
-  );
+  assert.match(verifyTrace([rec([both[0], both[0]], end)]).violations[0], /112=false/);
 });
 
 test('a restore outside a session end is a violation', () => {
   const { violations } = verifyTrace(
-    [rec([{ k: 'OSC', code: '111', payload: '' }, { k: 'OSC', code: '112', payload: '' }])],
+    [rec([{ k: 'OSC', code: '111', payload: '' }, { k: 'OSC', code: '112', payload: '' }], noGraphics)],
     noRestore,
   );
   assert.ok(violations.some((v) => /outside a session-end/.test(v)));
@@ -804,24 +885,65 @@ test('a cell trace with no restore at all fails, which is the point of requireRe
   assert.ok(violations.some((v) => /never restored/.test(v)));
 });
 
-test('graphics under capability none fail, and tint must survive', () => {
+test('capability is asserted from outside, so a broken marker scrub cannot pass itself', () => {
   const none = { capability: 'none', imageId: null, commands: null };
-  assert.deepEqual(verifyTrace([rec([...tint], none)], noRestore).violations, []);
+  const asNone = { ...noRestore, expectCapability: 'none' };
+
+  assert.deepEqual(verifyTrace([rec([...tint], none)], asNone).violations, []);
+
+  // Graphics under a self-reported `none` is caught either way.
   assert.match(
-    verifyTrace([rec([apc('a=t,i=42'), ...tint], none)], noRestore).violations[0],
+    verifyTrace([rec([apc('a=t,i=42'), ...tint], none)], asNone).violations[0],
     /capability none/,
   );
+
+  // THE CASE THE EXTERNAL ASSERTION EXISTS FOR: the scrub failed, so the writer
+  // classified as graphics-capable and its output agrees with its own expectation.
+  const scrubFailed = verifyTrace([rec([apc('a=t,i=42'), ...tint])], asNone);
+  assert.match(scrubFailed.violations[0], /required to classify as "none"/);
+
+  // Tint must survive degradation.
   assert.match(
-    verifyTrace([rec([{ k: 'BEL' }], { ...none, rings: true })], noRestore).violations[0],
+    verifyTrace([rec([{ k: 'BEL' }], { ...none, state: 'error' })], asNone).violations[0],
     /OSC 11 was null/,
+  );
+});
+
+test('the opencode placement envelope is accepted there and refused anywhere else', () => {
+  const envelope = [
+    { k: 'ESC', code: '7' },
+    { k: 'CSI', params: '12;3', final: 'H' },
+    apc('a=p,i=42,p=1,c=8,r=4,q=2,C=1'),
+    { k: 'ESC', code: '8' },
+  ];
+  const sprite = { source: 'opencode-sprite', backdrop: null, base: null, commands: null };
+  const inProcess = { target: null, targetRdev: null };
+  assert.deepEqual(verifyTrace([rec(envelope, sprite, inProcess)], noRestore).violations, []);
+
+  // The hook never moves the cursor. If it did, that is a real defect.
+  assert.match(
+    verifyTrace([rec(envelope, noGraphics)], noRestore).violations[0],
+    /cursor control from a non-sprite writer/,
+  );
+
+  // An unbalanced envelope leaves the cursor where the sprite put it.
+  assert.match(
+    verifyTrace([rec(envelope.slice(0, 3), sprite, inProcess)], noRestore).violations[0],
+    /unbalanced/,
+  );
+
+  // Anything else wearing the envelope's clothes is refused.
+  assert.match(
+    verifyTrace([rec([{ k: 'CSI', params: '2', final: 'J' }], sprite, inProcess)], noRestore).violations[0],
+    /not part of the placement envelope/,
   );
 });
 
 test('out-of-vocabulary, unterminated and untagged writes each fail', () => {
   const out = verifyTrace([
-    rec([{ k: 'OTHER', hex: '6869' }]),
-    rec([{ k: 'UNTERMINATED', hex: '1b5d' }]),
-    rec([{ k: 'OSC', code: '2', len: 4, sha256: 'x' }]),
+    rec([{ k: 'OTHER', hex: '6869' }], noGraphics),
+    rec([{ k: 'UNTERMINATED', hex: '1b5d' }], noGraphics),
+    rec([{ k: 'OSC', code: '2', len: 4, sha256: 'x' }], noGraphics),
     rec([...tint], undefined, { expect: null }),
   ], noRestore);
   assert.ok(out.violations.some((v) => /out-of-vocabulary bytes/.test(v)));
@@ -834,7 +956,7 @@ test('the summary counts what a reviewer reads first', () => {
   const end = { reset: true, imageId: null, backdrop: null, base: null, commands: null, state: null };
   const { summary } = verifyTrace([
     rec([apc('a=t,i=42,m=1'), apc('m=0'), ...tint], { commands: 2 }),
-    rec([...tint, { k: 'BEL' }], { state: 'error', rings: true, imageId: null, commands: null }),
+    rec([...tint, { k: 'BEL' }], { state: 'error', imageId: null, commands: null }),
     rec([{ k: 'OSC', code: '111', payload: '' }, { k: 'OSC', code: '112', payload: '' }], end),
   ]);
   assert.deepEqual(summary, {
@@ -842,6 +964,63 @@ test('the summary counts what a reviewer reads first', () => {
   });
 });
 ```
+
+- [ ] **Step 1b: Write the golden test against real encoder output**
+
+The checks above are hand-written key strings. One test proves the verifier accepts what
+`encodeKittyProgram` actually produces, which is the only thing that can catch a grammar
+this plan guessed wrong. Append to `test/gate-verify.test.js`:
+
+```js
+import { decomposeEscapes } from '../src/render/term/trace.js';
+import { encodeKittyProgram } from '../src/render/term/kitty-animation.js';
+import { imageIdFor } from '../src/render/term/placeholder.js';
+
+test('real encoder output satisfies the verifier, and a corrupted id does not', () => {
+  // Reuse whatever program fixture test/kitty-animation.test.js already builds rather
+  // than inventing a second one; read that file and lift its smallest animation case.
+  const { program, root, readFrame, rows } = smallestAnimationFixture();
+  const id = imageIdFor('session-under-test');
+  const placement = { kind: 'virtual', ...boxFor(readFrame(root), rows) };
+  const encoded = encodeKittyProgram(program, { id, placement, lifecycle: 'create', readFrame });
+
+  const expect = {
+    source: 'emit', capability: 'kitty-animation', state: 'working', reset: false,
+    imageId: id, backdrop: null, base: null,
+    commands: encoded.metrics.commands,
+    frames: program.frames.length,
+    placement: { cols: placement.cols, rows: placement.rows },
+  };
+  const record = {
+    t: 'T', pid: 1, kind: 'write', agent: 'claude-code', event: 'PreToolUse',
+    fd: 7, target: '/dev/ttys004', targetRdev: 1, fdRdev: 1,
+    len: encoded.bytes.length, expect, escapes: decomposeEscapes(encoded.bytes),
+  };
+  assert.deepEqual(verifyTrace([record], { requireRestore: false }).violations, []);
+
+  // Corrupt one non-first chunk's image id: the id-set check must catch it.
+  const corrupted = { ...record, escapes: record.escapes.map((e, index) =>
+    (e.k === 'APC' && index > 0 && /i=\d+/.test(e.keys)
+      ? { ...e, keys: e.keys.replace(/i=\d+/, 'i=1') }
+      : e)) };
+  const { violations } = verifyTrace([corrupted], { requireRestore: false });
+  assert.ok(violations.some((v) => /addresses image 1/.test(v)));
+});
+```
+
+Write `smallestAnimationFixture()` by lifting the existing fixture construction from
+`test/kitty-animation.test.js` — read that file first and reuse its clip set, root sprite,
+and `readFrame` stub. Import `boxFor` from `../src/render/term/box.js`. If the corruption
+test finds no APC chunk past index 0 carrying an id, the fixture is a single-chunk static
+program: pick a larger one so the chunked path is exercised.
+
+**What this gate does not check.** Frame-by-frame sequence validation is deliberately
+absent. Reimplementing the encoder's chunking rules inside the verifier would produce a
+second copy of the encoder, and a copy of a thing is not an independent check of it. The
+golden test above covers the real byte stream end to end; `frames` is recorded in every
+trace as reviewable evidence; and the independent checks that can catch a wrong encoding —
+image identity across every chunk, key grammar, and the `boxFor` placement box — are
+implemented above. The evidence note states this limit rather than implying parity.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -864,7 +1043,21 @@ import { readFileSync } from 'node:fs';
 // record: the emitter's own expectation travels with the bytes it produced, so this
 // never has to reconstruct intent from the byte stream or correlate two records.
 
-export function verifyTrace(records, { expectRdev = null, requireRestore = true } = {}) {
+// The ringing states, taken from the DESIGN (§11.2), not from emit.js. If this list and
+// emit.js's RINGS ever disagree, the gate fails -- which is the entire point of not
+// letting the code under test tell us what it was supposed to do.
+const RINGING = new Set(['needs-input', 'needs-approval', 'error']);
+
+// APC control keys are `k=v` pairs. Anything else is malformed, whatever it decodes to.
+const KEYS = /^[A-Za-z]=[^,]*(,[A-Za-z]=[^,]*)*$/;
+
+// The only cursor control the OpenCode placement envelope may contain: an absolute move
+// with a row and a column (integrations/opencode/sprite.js placeAt).
+const CUP = /^\d+;\d+$/;
+
+export function verifyTrace(records, {
+  expectRdev = null, expectCapability = null, requireRestore = true,
+} = {}) {
   const violations = [];
   const agents = new Set();
   let writes = 0, apcChunks = 0, bells = 0, restores = 0;
@@ -880,38 +1073,79 @@ export function verifyTrace(records, { expectRdev = null, requireRestore = true 
       violations.push(`${where}: a write reached a terminal with no expectation attached`);
       continue;
     }
+    const sprite = expect.source === 'opencode-sprite';
 
-    // --- device identity. Two nulls are not a match. ---
+    // --- capability, asserted from OUTSIDE. Without this the negative control would be
+    // --- checking the classifier against itself: a broken marker scrub classifies as
+    // --- graphics-capable, emits graphics, and agrees with its own expectation.
+    if (expectCapability !== null && expect.capability !== expectCapability) {
+      violations.push(
+        `${where}: classified as ${JSON.stringify(expect.capability)}, but this run was ` +
+        `required to classify as ${JSON.stringify(expectCapability)}`,
+      );
+    }
+
+    // --- device identity. Two nulls are not a match, and the externally captured device
+    // --- constrains EVERY write: target === fd only proves emit wrote to what it opened,
+    // --- which a resolver that picked the wrong tty also satisfies.
     if (record.fdRdev === null || record.fdRdev === undefined) {
       violations.push(`${where}: the written fd has no device identity`);
-    } else if (record.target !== null && record.target !== undefined) {
-      if (record.targetRdev === null || record.targetRdev === undefined) {
-        violations.push(`${where}: target ${record.target} could not be identified`);
-      } else if (record.targetRdev !== record.fdRdev) {
+    } else {
+      if (record.target !== null && record.target !== undefined) {
+        if (record.targetRdev === null || record.targetRdev === undefined) {
+          violations.push(`${where}: target ${record.target} could not be identified`);
+        } else if (record.targetRdev !== record.fdRdev) {
+          violations.push(
+            `${where}: wrote to rdev ${record.fdRdev}, but opened ${record.target} ` +
+            `(rdev ${record.targetRdev})`,
+          );
+        }
+      }
+      if (expectRdev !== null && record.fdRdev !== expectRdev) {
         violations.push(
-          `${where}: wrote to rdev ${record.fdRdev}, but opened ${record.target} ` +
-          `(rdev ${record.targetRdev})`,
+          `${where}: reached rdev ${record.fdRdev}, but this run's terminal is ${expectRdev}`,
         );
       }
-    } else if (expectRdev !== null && record.fdRdev !== expectRdev) {
-      violations.push(
-        `${where}: in-process write reached rdev ${record.fdRdev}, expected ${expectRdev}`,
-      );
     }
 
     // --- decompose what actually went out ---
     let firstAction = null, apcCount = 0, bel = 0;
     let osc11 = null, osc12 = null, has111 = false, has112 = false;
+    let save = 0, restore = 0, moves = 0;
+    const ids = new Set();
     for (const escape of record.escapes) {
       if (escape.k === 'BEL') { bel += 1; continue; }
       if (escape.k === 'OTHER') { violations.push(`${where}: out-of-vocabulary bytes ${escape.hex}`); continue; }
       if (escape.k === 'UNTERMINATED') { violations.push(`${where}: unterminated escape ${escape.hex}`); continue; }
+
+      if (escape.k === 'ESC' || escape.k === 'CSI') {
+        // The placement envelope belongs to opencode's renderer alone. The hook's emit()
+        // never moves the cursor, and a cursor move appearing there would be a real defect.
+        if (!sprite) {
+          violations.push(`${where}: cursor control from a non-sprite writer`);
+          continue;
+        }
+        if (escape.k === 'ESC' && escape.code === '7') { save += 1; continue; }
+        if (escape.k === 'ESC' && escape.code === '8') { restore += 1; continue; }
+        if (escape.k === 'CSI' && escape.final === 'H' && CUP.test(escape.params)) { moves += 1; continue; }
+        violations.push(
+          `${where}: ${escape.k} ${JSON.stringify(escape.code ?? `${escape.params}${escape.final}`)} ` +
+          'is not part of the placement envelope',
+        );
+        continue;
+      }
+
       if (escape.k === 'APC') {
         apcCount += 1;
-        // Only a chunk carrying an action names the image; continuations carry m= alone.
+        if (!KEYS.test(escape.keys)) {
+          violations.push(`${where}: malformed graphics keys ${JSON.stringify(escape.keys)}`);
+        }
+        const id = /(^|,)i=(\d+)(,|$)/.exec(escape.keys);
+        if (id) ids.add(Number(id[2]));
         if (firstAction === null && /(^|,)a=/.test(escape.keys)) firstAction = escape.keys;
         continue;
       }
+
       if (escape.k === 'OSC') {
         if (escape.code === '11') osc11 = escape.payload;
         else if (escape.code === '12') osc12 = escape.payload;
@@ -925,6 +1159,14 @@ export function verifyTrace(records, { expectRdev = null, requireRestore = true 
     apcChunks += apcCount;
     bells += bel;
 
+    // --- the envelope must be balanced, and a move must be inside one ---
+    if (save !== restore) {
+      violations.push(`${where}: placement envelope unbalanced, ${save} saves and ${restore} restores`);
+    }
+    if (moves > save) {
+      violations.push(`${where}: ${moves} cursor moves outside a save/restore envelope`);
+    }
+
     // --- graphics against the plan ---
     if (expect.capability === 'none') {
       if (apcCount > 0) violations.push(`${where}: graphics emitted under capability none`);
@@ -933,13 +1175,32 @@ export function verifyTrace(records, { expectRdev = null, requireRestore = true 
         violations.push(`${where}: expected graphics for image ${expect.imageId}, none transmitted`);
       } else if (firstAction === null) {
         violations.push(`${where}: graphics carried no action chunk to name the image`);
-      } else if (!new RegExp(`(^|,)i=${expect.imageId}(,|$)`).test(firstAction)) {
-        violations.push(
-          `${where}: graphics id in "${firstAction}" is not the expected ${expect.imageId}`,
-        );
+      }
+      // EVERY id, not just the first: a later chunk addressing another image would place
+      // or delete something that is not ours.
+      for (const id of ids) {
+        if (id !== expect.imageId) {
+          violations.push(`${where}: graphics chunk addresses image ${id}, expected ${expect.imageId}`);
+        }
       }
       if (expect.commands !== null && expect.commands !== undefined && apcCount !== expect.commands) {
-        violations.push(`${where}: ${apcCount} graphics commands, planned ${expect.commands}`);
+        // Byte integrity between encoder and terminal, not an independent check of the
+        // encoder: `commands` is the encoder's own count.
+        violations.push(`${where}: ${apcCount} graphics chunks reached the terminal, encoder produced ${expect.commands}`);
+      }
+      // Placement comes from boxFor(sprite, theme rows) -- neither the encoder nor the
+      // trace produced it -- so this IS independent of the code that wrote the bytes.
+      if (expect.placement && firstAction !== null && /(^|,)a=[tT](,|$)/.test(firstAction)) {
+        const cols = /(^|,)c=(\d+)(,|$)/.exec(firstAction);
+        const rows = /(^|,)r=(\d+)(,|$)/.exec(firstAction);
+        if (!cols || !rows) {
+          violations.push(`${where}: transmit chunk "${firstAction}" carries no placement box`);
+        } else if (Number(cols[2]) !== expect.placement.cols || Number(rows[2]) !== expect.placement.rows) {
+          violations.push(
+            `${where}: placed ${cols[2]}x${rows[2]} cells, the sprite box is ` +
+            `${expect.placement.cols}x${expect.placement.rows}`,
+          );
+        }
       }
     }
 
@@ -951,9 +1212,9 @@ export function verifyTrace(records, { expectRdev = null, requireRestore = true 
       violations.push(`${where}: OSC 12 was ${osc12 === null ? 'null' : osc12}, expected ${expect.base}`);
     }
 
-    // --- bell: state-specific, in both directions ---
-    if (expect.source === 'emit') {
-      const wanted = expect.rings ? 1 : 0;
+    // --- bell: decided HERE from the recorded state, never from a flag the writer set ---
+    if (!sprite) {
+      const wanted = expect.state !== null && RINGING.has(expect.state) ? 1 : 0;
       if (bel !== wanted) {
         violations.push(
           `${where}: ${bel} bells for state ${JSON.stringify(expect.state ?? null)}, expected ${wanted}`,
@@ -982,14 +1243,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const file = args[0];
   if (!file) {
     process.stderr.write(
-      'usage: gate-verify.mjs <trace.jsonl> [--expect-rdev N] [--no-require-restore]\n',
+      'usage: gate-verify.mjs <trace.jsonl> [--expect-rdev N] ' +
+      '[--expect-capability none|static-graphics|kitty-animation] [--no-require-restore]\n',
     );
     process.exit(2);
   }
   const rdevAt = args.indexOf('--expect-rdev');
+  const capAt = args.indexOf('--expect-capability');
   const records = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const { violations, summary } = verifyTrace(records, {
     expectRdev: rdevAt === -1 ? null : Number(args[rdevAt + 1]),
+    expectCapability: capAt === -1 ? null : args[capAt + 1],
     requireRestore: !args.includes('--no-require-restore'),
   });
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
@@ -1081,8 +1345,11 @@ Section 2:
 ```sh
 export FAMILIAR_NODE_TMP="$(node -e 'process.stdout.write(require("node:os").tmpdir())')"
 export FAMILIAR_GATE_DIR="$FAMILIAR_NODE_TMP/familiar-macos-terminal-gate"
-test ! -e "$FAMILIAR_GATE_DIR"
-mkdir -m 700 "$FAMILIAR_GATE_DIR"
+# The Kitty run and the Ghostty run share this directory ON PURPOSE: section 8's
+# inventory needs all six cell traces together. So it is created once and reused, and
+# what must not already exist is a per-cell FILE, checked in section 5.
+mkdir -p -m 700 "$FAMILIAR_GATE_DIR"
+chmod 700 "$FAMILIAR_GATE_DIR"
 export FAMILIAR_GATE_ROOT="$(pwd -P)"
 export FAMILIAR_GATE_BIN="$FAMILIAR_GATE_ROOT/bin/familiar"
 test -x "$FAMILIAR_GATE_BIN"
@@ -1095,15 +1362,26 @@ is deliberately **not** set here — it is set per cell in section 5.
 
 Versions are captured exactly as the existing runbook's section 2 does it — every value
 through a command substitution, never a bare command inside a redirected block. Copy that
-block and add `familiar-commit` and `node-major` lines.
+block, write it to `$FAMILIAR_GATE_VERSIONS` rather than a shared `versions.txt` (the two
+runs share one directory), and add `familiar-commit` and `node-major` lines.
 
 Record the device the matrix expects, which the verifier needs for OpenCode's in-process
 writes:
 
 ```sh
 export FAMILIAR_GATE_RDEV="$(node -e 'process.stdout.write(String(require("node:fs").fstatSync(1).rdev))')"
-printf 'terminal-rdev=%s\n' "$FAMILIAR_GATE_RDEV" >> "$FAMILIAR_GATE_DIR/versions.txt"
+case "$FAMILIAR_TERMINAL" in
+  kitty)   export FAMILIAR_GATE_CAPABILITY=kitty-animation ;;
+  ghostty) export FAMILIAR_GATE_CAPABILITY=static-graphics ;;
+esac
+export FAMILIAR_GATE_VERSIONS="$FAMILIAR_GATE_DIR/versions-$FAMILIAR_TERMINAL.txt"
+printf 'terminal-rdev=%s\n' "$FAMILIAR_GATE_RDEV" >> "$FAMILIAR_GATE_VERSIONS"
+printf 'expected-capability=%s\n' "$FAMILIAR_GATE_CAPABILITY" >> "$FAMILIAR_GATE_VERSIONS"
 ```
+
+Both values are asserted **from outside** when the traces are verified. The capability in
+particular must not be taken from Familiar's own classification: that is precisely what
+the section 6 negative control is testing.
 
 - [ ] **Step 4: Write section 4 — install the generated configuration**
 
@@ -1132,7 +1410,11 @@ For the current `$FAMILIAR_TERMINAL`, for each agent in turn:
 ```sh
 export FAMILIAR_GATE_AGENT=claude-code        # then codex, then opencode
 export FAMILIAR_GATE_TRACE="$FAMILIAR_GATE_DIR/$FAMILIAR_TERMINAL-$FAMILIAR_GATE_AGENT.jsonl"
+test ! -e "$FAMILIAR_GATE_TRACE"      # never append to a previous attempt's evidence
 ```
+
+If that `test` fails, move the earlier file aside under a new name; do not delete it and
+do not append to it.
 
 Include the per-agent state lists from §11.2 of the spec verbatim — six for Claude Code,
 four for Codex, five for OpenCode — and both expected-behaviour notes: Codex's
@@ -1145,43 +1427,74 @@ Each cell ends with the two non-state checks. Normal exit is checked by the veri
 rather than by grep, because the verifier is what knows a restore needs both halves:
 
 ```sh
-node "$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs" "$FAMILIAR_GATE_TRACE"
+node "$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs" "$FAMILIAR_GATE_TRACE" \
+  --expect-rdev "$FAMILIAR_GATE_RDEV" \
+  --expect-capability "$FAMILIAR_GATE_CAPABILITY"
 ```
 
 Expected: exit 0. A `never restored colours` violation means the session-end transition
-did not happen or did not restore both background and cursor.
+did not happen or did not restore both background and cursor. A `this run's terminal is`
+violation means bytes reached a device that is not this window — the wrong-target failure
+the whole gate exists to catch.
 
-Abnormal termination, as the four-step sequence from §11.2. Every artifact is scoped to
-the agent as well as the terminal, so one cell cannot overwrite another's proof:
+`FAMILIAR_GATE_CAPABILITY` is set once per terminal in section 2, from the terminal being
+tested rather than from anything Familiar computed: `kitty-animation` for Kitty,
+`static-graphics` for Ghostty.
+
+Abnormal termination, as the four-step sequence from §11.2. The session is identified
+**before** the kill and that same identity is carried through every step; a nonempty bus
+and a nonempty `reap` line prove nothing on their own, because either could belong to a
+different session:
 
 ```sh
 CELL="$FAMILIAR_TERMINAL-$FAMILIAR_GATE_AGENT"
-AGENT_PID=<the resolved agent pid>       # from the target field of this cell's trace
+BUS=~/.local/state/familiar/agents.json
+
+# 0. Name the session and its agent pid, from the bus, before anything is killed.
+eval "$(node -e '
+const fs = require("node:fs");
+const bus = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const ids = Object.keys(bus);
+if (ids.length !== 1) {
+  throw new Error(`expected exactly one live session, found ${ids.length}: ${ids.join(" ")}`);
+}
+process.stdout.write(`SESSION=${ids[0]}\nAGENT_PID=${bus[ids[0]].pid}\n`);
+' "$BUS")"
+printf 'cell=%s session=%s agent_pid=%s\n' "$CELL" "$SESSION" "$AGENT_PID" \
+  | tee "$FAMILIAR_GATE_DIR/reap-identity-$CELL.txt"
+
 kill -9 "$AGENT_PID"
-# 1. the record must still be THERE. Any hook from any agent would prune it, which is
-#    why no other session may be running.
-cp ~/.local/state/familiar/agents.json "$FAMILIAR_GATE_DIR/before-reap-$CELL.json"
-node -e 'const a=require(process.argv[1]);if(!Object.keys(a).length)throw new Error("bus already empty: the kill was not abnormal, or another hook pruned it")' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json"
-# 2. reap must NAME the session it removed. Silence means it removed nothing.
-"$FAMILIAR_GATE_BIN" reap | tee "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
-test -s "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
-# 3. and only now is absence meaningful.
-cp ~/.local/state/familiar/agents.json "$FAMILIAR_GATE_DIR/after-reap-$CELL.json"
-```
 
-To obtain `AGENT_PID`, read the last `target` device and pid from this cell's trace:
-
-```sh
+# 1. THAT session must still be on the bus. Any hook from any agent would have pruned
+#    it, which is why no other session may be running on the machine.
+cp "$BUS" "$FAMILIAR_GATE_DIR/before-reap-$CELL.json"
 node -e '
-const fs=require("node:fs");
-const rows=fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean).map(JSON.parse);
-console.log(rows.at(-1).target, rows.at(-1).pid);
-' "$FAMILIAR_GATE_TRACE"
+const bus = require(process.argv[1]);
+if (!(process.argv[2] in bus)) {
+  throw new Error(`session ${process.argv[2]} was already gone before reap ran`);
+}' "$FAMILIAR_GATE_DIR/before-reap-$CELL.json" "$SESSION"
+
+# 2. reap must name THAT session, not merely print something.
+"$FAMILIAR_GATE_BIN" reap | tee "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
+grep -q -- "$SESSION" "$FAMILIAR_GATE_DIR/reap-$CELL.txt"
+
+# 3. and THAT session must be the one now absent.
+cp "$BUS" "$FAMILIAR_GATE_DIR/after-reap-$CELL.json"
+node -e '
+const bus = require(process.argv[1]);
+if (process.argv[2] in bus) {
+  throw new Error(`session ${process.argv[2]} survived reap`);
+}' "$FAMILIAR_GATE_DIR/after-reap-$CELL.json" "$SESSION"
 ```
 
-That prints the hook's pid, not the agent's; the agent pid is the one `reap` names and
-the one visible in `agents.json`. State that the terminal stays tinted after the
-force-kill and that this is correct, not a failure.
+The step-0 guard that exactly one session is on the bus is what makes `SESSION`
+unambiguous, and it is the mechanical form of the prerequisite that no other agent
+session runs during the pass. If it throws, stop and close the other session rather than
+picking a key by hand.
+
+State that the terminal stays tinted after the force-kill and that this is correct, not a
+failure: nothing restores colours without a `SessionEnd`, and `reap` writes no terminal
+bytes at all.
 
 Finish the section with the Node spot-check: after the Kitty matrix completes under Node
 22, switch to the machine's installed Node, repeat the Claude Code / Kitty cell alone
@@ -1201,7 +1514,10 @@ env -u KITTY_WINDOW_ID -u KITTY_PID -u TERM_PROGRAM \
 
 The tester drives one ringing state and one normal exit, then repeats with `opencode` in
 place of `claude`, `FAMILIAR_GATE_AGENT=opencode`, and its own
-`capability-none-opencode.jsonl`. The two suppression sites are different code: the
+`capability-none-opencode.jsonl`. Both traces are verified with
+`--expect-capability none`, which is the check that matters here: without it, a marker
+scrub that silently failed would classify as graphics-capable, emit graphics, agree with
+its own recorded expectation, and pass. The two suppression sites are different code: the
 hook's `emit()` skips the graphics block, while `sprite-plugin.tsx` returns before
 registering with the renderer. Required: the window still tints and still rings, and no
 sprite appears in either. Codex is excluded — it transmits no graphics for a `none`
@@ -1242,22 +1558,36 @@ find the claude-code process` diagnostic in the captured stderr, exit status zer
 Adapt the existing runbook's sections 7–11. The inventory for this gate is: six cell
 traces (`{kitty,ghostty}-{claude-code,codex,opencode}.jsonl`), `spot-check.jsonl`, the two
 `capability-none-*.jsonl`, `probe2.jsonl` and its stderr, `bg-comm.txt` and
-`bg-command.txt`, three reap artifacts per cell, `versions.txt`, and the tester's notes.
+`bg-command.txt`, three reap artifacts per cell, `versions-kitty.txt` and `versions-ghostty.txt`, and the tester's notes.
 
 The tester runs the verifier over every trace before sending, and records each result:
 
+Each cell was already verified as it was captured, in section 5, with that run's
+`--expect-rdev` and `--expect-capability`. This section re-runs them together as a final
+sweep, reading each run's device from its own `versions-<terminal>.txt`:
+
 ```bash
-for cell in kitty-claude-code kitty-codex kitty-opencode \
-            ghostty-claude-code ghostty-codex ghostty-opencode; do
-  node "$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs" "$FAMILIAR_GATE_DIR/$cell.jsonl" \
-    --expect-rdev "$FAMILIAR_GATE_RDEV"
+KITTY_RDEV=$(sed -n 's/^terminal-rdev=//p' "$FAMILIAR_GATE_DIR/versions-kitty.txt")
+GHOSTTY_RDEV=$(sed -n 's/^terminal-rdev=//p' "$FAMILIAR_GATE_DIR/versions-ghostty.txt")
+V="$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs"
+
+for agent in claude-code codex opencode; do
+  node "$V" "$FAMILIAR_GATE_DIR/kitty-$agent.jsonl" \
+    --expect-rdev "$KITTY_RDEV" --expect-capability kitty-animation
+  node "$V" "$FAMILIAR_GATE_DIR/ghostty-$agent.jsonl" \
+    --expect-rdev "$GHOSTTY_RDEV" --expect-capability static-graphics
 done
-node "$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs" "$FAMILIAR_GATE_DIR/capability-none-claude-code.jsonl"
-node "$FAMILIAR_GATE_ROOT/tools/gate-verify.mjs" "$FAMILIAR_GATE_DIR/capability-none-opencode.jsonl" --no-require-restore
+
+node "$V" "$FAMILIAR_GATE_DIR/spot-check.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability kitty-animation
+node "$V" "$FAMILIAR_GATE_DIR/capability-none-claude-code.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability none
+node "$V" "$FAMILIAR_GATE_DIR/capability-none-opencode.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability none --no-require-restore
 ```
 
-Note that `--expect-rdev` differs per terminal window: capture it per run in section 2
-and use that run's value. Redaction targets the same secret shapes the previous run swept
+Because the two runs happen in different terminal windows, `--expect-rdev` differs
+between them; that is exactly why it is recorded per run rather than assumed. Redaction targets the same secret shapes the previous run swept
 for (`sk-`, `ghp_`, `AKIA`, `Bearer`, `key=`/`token=`) plus `/Users/<name>`; the traces
 carry no payloads by construction, which the verifier's clean exit corroborates.
 
@@ -1307,9 +1637,13 @@ design. No cell has run. No claim in this file is promoted until its row says `p
 
 **Provenance**
 
-- Capture branch: `spike/macos-terminal-gate`, disposable, never merged, never pushed.
+- Capture branch: `spike/macos-terminal-gate`, disposable and never merged. Pushed to
+  `origin` only as transport to the test machine and deleted from the remote afterwards;
+  the tester pushed nothing.
 - Runbook: `docs/ref/2026-08-24-macos-terminal-gate-handoff.md` on that branch.
+- Evidence per cell: one `<terminal>-<agent>.jsonl` trace plus four reap artifacts.
 - Host, OS, terminal, agent, and Node versions: pending.
+- Terminal device (`rdev`) and asserted capability per run: pending.
 
 ## 1. Matrix
 
@@ -1344,6 +1678,15 @@ pending.
 
 - macOS 14 with a live agent. CI runs macOS 14 without agents; this capture runs a
   later macOS. The gap §2 records stays open.
+- Frame-by-frame graphics sequence. The verifier checks image identity across every
+  chunk, key grammar, the `boxFor` placement box, and chunk count against the encoder;
+  it deliberately does not reimplement the encoder's chunking rules, because a copy of
+  the encoder is not an independent check of it.
+- OpenCode graphics depth. Its renderer plans and encodes inside `sprite-runtime.js`, so
+  its records carry no planned frame count or placement; its graphics are checked for
+  image identity, key grammar, and placement-envelope shape only.
+- The event-to-state mapping, which each adapter's unit tests cover in CI. This gate
+  checks that the state the emitter acted on produced the right bytes on the right device.
 - tmux, Intel Macs, macOS 13, and terminals other than Kitty and Ghostty.
 ```
 
@@ -1421,29 +1764,55 @@ git commit -m "docs(adapters): drop the stale codex title claim"
 git -C .worktrees/macos-terminal-spike status --short
 git -C .worktrees/macos-terminal-gate status --short
 git -C .worktrees/macos-terminal-spike log --oneline main..spike/macos-terminal-gate
-git branch -vv | grep macos-terminal
+git push origin spike/macos-terminal-gate
+git rev-parse spike/macos-terminal-gate
 ```
 
-Expected: both worktrees clean, four commits on the spike branch, and **no upstream
-tracking on `spike/macos-terminal-gate`**.
+Expected: both worktrees clean, four commits on the spike branch, and the push accepted.
+The branch is pushed **only as transport**; Task 6 Step 6 deletes it from the remote once
+the artifacts are in hand. If pushing is not acceptable for this run, produce a bundle
+instead and name it in the handoff message:
+
+```bash
+git bundle create /tmp/familiar-gate.bundle spike/macos-terminal-gate
+```
 
 - [ ] **Step 2: Write the handoff message**
 
 It names: the branch `spike/macos-terminal-gate` and the exact commit SHA; the runbook
-path; that the run happens **twice**, `FAMILIAR_TERMINAL=kitty` then `ghostty`, with the
-appendix and negative control run once under Kitty; that Node 22 is selected via nvm for
-the matrix; that no other agent session may run on the machine during the reap checks;
-that the branch must never be pushed and no raw artifact committed; and the artifact
-list from Task 4 Step 8 to return.
+path; that the run happens **twice**, `FAMILIAR_TERMINAL=kitty` then `ghostty`, sharing
+one output directory, with the appendix and negative control run once under Kitty; that
+Node 22 is selected via nvm for the matrix; that exactly one agent session may be live on
+the machine during each reap check; that the tester pushes nothing back and commits no raw
+artifact; and the artifact list from Task 4 Step 8 to return.
 
 - [ ] **Step 3: On return, verify the artifacts mechanically before reading the notes**
 
 ```bash
-node tools/gate-verify.mjs <returned>/kitty.jsonl
-node tools/gate-verify.mjs <returned>/ghostty.jsonl
-node tools/gate-verify.mjs <returned>/capability-none.jsonl none
-node tools/gate-verify.mjs <returned>/spot-check.jsonl
-grep -c '"kind":"write"' <returned>/probe2.jsonl    # expected: 0
+R=<the returned artifact directory>
+KITTY_RDEV=$(sed -n 's/^terminal-rdev=//p' "$R"/versions-kitty.txt)
+GHOSTTY_RDEV=$(sed -n 's/^terminal-rdev=//p' "$R"/versions-ghostty.txt)
+
+for agent in claude-code codex opencode; do
+  node tools/gate-verify.mjs "$R/kitty-$agent.jsonl" \
+    --expect-rdev "$KITTY_RDEV" --expect-capability kitty-animation
+  node tools/gate-verify.mjs "$R/ghostty-$agent.jsonl" \
+    --expect-rdev "$GHOSTTY_RDEV" --expect-capability static-graphics
+done
+node tools/gate-verify.mjs "$R/spot-check.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability kitty-animation
+node tools/gate-verify.mjs "$R/capability-none-claude-code.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability none
+node tools/gate-verify.mjs "$R/capability-none-opencode.jsonl" \
+  --expect-rdev "$KITTY_RDEV" --expect-capability none --no-require-restore
+
+test ! -s "$R/probe2.jsonl"                         # the fail-closed run wrote nothing
+for cell in kitty ghostty; do
+  for agent in claude-code codex opencode; do
+    grep -q -f <(sed -n 's/.*session=\([^ ]*\).*/\1/p' "$R/reap-identity-$cell-$agent.txt") \
+      "$R/reap-$cell-$agent.txt"                    # reap named THAT session
+  done
+done
 ```
 
 Verify independently of the tester's notes, as §8 of the 2026-08-23 evidence note did:
@@ -1474,7 +1843,17 @@ git add docs/ref/2026-08-24-macos-terminal-smoke.md docs/install.md docs/specs/2
 git commit -m "docs(macos): promote verified terminal support"
 ```
 
-- [ ] **Step 6: Verify promoted claims against the evidence**
+- [ ] **Step 6: Delete the transport branch from the remote**
+
+```bash
+git push origin --delete spike/macos-terminal-gate
+git branch -vv | grep macos-terminal
+```
+
+Expected: the remote branch is gone and the local capture branch has no upstream. The
+local branch and worktree stay until the evidence note is accepted.
+
+- [ ] **Step 7: Verify promoted claims against the evidence**
 
 ```bash
 grep -n 'provisional\|verified\|tmux\|Intel\|macOS 13\|macOS 14' docs/install.md docs/specs/2026-08-22-macos-support-design.md docs/ref/2026-08-24-macos-terminal-smoke.md
