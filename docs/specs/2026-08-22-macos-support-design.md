@@ -27,12 +27,13 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
 
 1. **The physical terminal promotion gate (§11).** Claude Code, Codex, and
    OpenCode rendering in current Kitty and Ghostty on a real Mac, including
-   loading the OpenCode sprite plugin. This is what holds every provisional
-   label. No runbook exists for it yet; the process-runtime plan's Task 7 is its
-   specification.
+   loading the OpenCode sprite plugin and the first live exercise of
+   `familiar setup codex`. This is what holds every provisional label. §11
+   specifies the pass; the runbook implementing it is not yet written.
 2. **A background or daemon-hosted Claude Code session on Darwin.** The
    `tty !== null` half of the resolver predicate rests on Linux evidence; that
-   case has never been observed on a Mac. It belongs to the §11 pass.
+   case has never been observed on a Mac. §11.3 specifies the two probes that
+   close it.
 
 ## 1. Scope
 
@@ -463,23 +464,167 @@ substitute for the two physical-Mac gates in §§2 and 11.
 ## 11. Manual promotion gates
 
 The live-hook ancestor capture in §2 was completed on 2026-08-23 and is the
-prerequisite for Darwin adapter activation. With implementation CI green, the
-remaining physical-Mac smoke pass runs Claude Code, Codex, and OpenCode in
-current Kitty and Ghostty releases. For each
-applicable pair it checks launch/idle, working, approval, done/error where
-exposed, session exit, and `familiar reap` after abnormal termination.
+prerequisite for Darwin adapter activation. What remains is the physical
+terminal gate: Claude Code, Codex, and OpenCode exercised in current Kitty and
+Ghostty releases on a real Mac. This section specifies that pass. The runbook
+implementing it lives on the disposable capture branch, as §2's did.
 
-The pass records agent and terminal versions, resolved ancestor basename, raw
-and canonical TTY, inherited graphics markers, and concise failures. One gap
-the §2 captures left open belongs to this pass: a background or daemon-hosted
-Claude Code session, the case the `tty !== null` predicate exists for. The
-Ghostty environment markers were closed by the 2026-08-23 Ghostty capture. It
-also
-loads the OpenCode sprite plugin, so the optional native renderer dependency is
-exercised rather than merely installed.
+### 11.1 Evidence standard
 
-Failures keep the affected adapter or renderer provisional. The live-rendering
-label is removed only when the smoke evidence exists.
+§2's checks produced text a reviewer could verify without being present. §11's
+do not. A sprite drawn, a window tinted, a bell rung are things a person sees,
+and a gate resting on "the tester said it looked right" would promote a subtly
+wrong byte stream that still looked plausible. Every claim is therefore split
+into a machine-checked half and a half only the tester can answer, and a cell
+passes only if both hold.
+
+The machine-checked half comes from an opt-in tee at `writeAllSync`
+(`src/render/term/io.js`). That is the one choke point every terminal write
+already passes through: the hook's `emit()`, which opens `/dev/ttys<hex>` on
+Darwin and writes with an explicit fd, and the OpenCode sprite plugin, which
+calls the same function with the default `fd = 1` inside OpenCode's own
+process. One tee therefore covers both the hook path and the renderer that has
+never been loaded, without editing either call site. Because `writeAllSync`
+receives an fd and not a path, `emit()` records the resolved `terminal.path`
+and the probe correlates the two.
+
+Records are one JSON line per write: timestamp, pid, agent, event, target path,
+the `ttyname` of the fd, and each escape decomposed into introducer, control
+keys, payload length, and payload SHA-256. Tint, cursor, and bell bytes are
+short and constant and are recorded verbatim. Graphics and title payloads are
+recorded as length and digest only: the graphics payload is bulk, and the title
+payload carries the project name.
+
+| Claim | Machine-checked from the byte log | Tester only |
+| --- | --- | --- |
+| Sprite transmitted | APC `_G` payload well formed, `i=` equals `imageIdFor(sessionId)`, frame count and placement match the planned program | a sprite is on screen, positioned correctly, covering no dialog |
+| Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
+| Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
+| Correct terminal | target path equals the resolved agent's canonical TTY; `ttyname(fd)` agrees | the bytes land in this window and no other |
+| Nothing leaked | no writes at all where capability is `none` | — |
+
+The tester's column is irreducible. The point of the first column is that a
+passing tester note over a malformed byte log is a failure.
+
+### 11.2 The matrix is not uniform
+
+The three adapters expose different states and send different bytes, so a row
+of `pass` does not mean the same thing across the table:
+
+| Agent | States exposed | Bytes Familiar sends | Sprite drawn by |
+| --- | --- | --- | --- |
+| Claude Code | six: `idle`, `working`, `needs-input`, `needs-approval`, `done`, `error` | graphics, tint, bell, title | Familiar: the hook transmits, `familiar statusline` prints the placeholder cells |
+| Codex | four: `idle`, `working`, `needs-approval`, `done` | tint, bell, title | Codex natively, from `install pets` |
+| OpenCode | five: adds `error`, omits `needs-input` | tint, bell, title | `integrations/opencode/sprite-plugin.tsx`, inside OpenCode's process |
+
+Codex maps six events onto four states: it has neither a failure event nor an
+idle-prompt notification. OpenCode's `needs-input` would require question events
+that are not on the stable server stream. These exclusions are structural, so
+the evidence note records them inline beside the cell rather than leaving three
+full `pass` rows to be read as six states everywhere. The bell rule narrows with
+them: Claude Code can ring on all three ringing states, OpenCode on
+`needs-approval` and `error`, and Codex on `needs-approval` alone.
+
+Two behaviours the runbook states in advance so they are not recorded as
+failures. Codex's `SessionStart` fires at the first turn, not at window open, so
+an opened but unspoken-to Codex window showing nothing is correct. OpenCode's
+hook path observes no tool events at all — §7 of
+`docs/ref/2026-08-23-macos-agent-process-spike.md` — so `working` comes from
+`session.busy` and `done` only from the `reduceState` idle-after-active path.
+
+Claude Code is the only cell that exercises the hook and status-line
+rendezvous: two processes, with no channel between them, agreeing on
+`imageIdFor(sessionId)`. It is the mechanism most likely to break inside a real
+TUI, so it is checked explicitly rather than folded into "sprite: yes".
+
+The pass is also the first live exercise of `familiar setup codex` (§7). The §2
+capture used a hand-written command string with a deliberate canary; the
+generated document has never configured a real agent. The runbook generates it,
+merges it into `~/.codex/hooks.json`, and all six mapped events firing is what
+verifies that the generator and the adapter agree.
+
+### 11.3 The background and daemon appendix
+
+The gap §2 carried forward is a background or daemon-hosted Claude Code
+session, the case the `tty !== null` half of the predicate exists for. Two
+probes close it, run once, under Kitty; the predicate is terminal-independent.
+
+**Probe 1 — induce the real case.** Inside an interactive session, drive
+Claude Code into a background subtree and capture the chain from a hook firing
+under it. Darwin raises the stakes relative to Linux: there, the pty host
+reports `comm` as the version string and never matches, whereas Darwin `comm`
+is an executable path whose basename may well be `claude`. A process whose
+purpose is hosting pseudo-terminals is a plausible owner of one. Three
+outcomes, all recorded: the intermediate process appears with a null TTY and is
+correctly skipped, closing the gap; it appears owning a TTY, which is a
+resolver defect that halts the gate and reopens this design; or the case cannot
+be induced on the installed version, in which case the predicate's second half
+remains Linux-evidenced. The third outcome does not block the rendering
+promotion — resolver discrimination and terminal rendering are independent
+claims.
+
+**Probe 2 — the fail-closed contract.** A headless `claude -p` under `launchd`
+with stdio fully detached, hooks configured, and no controlling terminal
+anywhere in the chain. Expected: the named `could not find the claude-code
+process` diagnostic, exit zero, and zero writes in the byte log. This is the
+only Darwin exercise of §10's rule that resolver failure reaches the cosmetic
+diagnostic rather than being swallowed.
+
+### 11.4 Configuration exercised
+
+The full matrix runs under Node 22, matching both `engines.node` and the
+version CI tests, so promoted claims and the supported configuration agree. One
+cell — Claude Code in Kitty — is then repeated under the Mac's installed Node
+to confirm nothing is version-specific.
+
+The macOS half of §2's configuration gap stays open. CI runs macOS 14 with no
+live agents; the physical Mac is macOS 26. No promotion may state or imply that
+macOS 14 has run a live agent, because it has not.
+
+### 11.5 Promotion rule
+
+A cell passes when every state that adapter structurally exposes was exercised,
+its byte log verified, and its tester observation recorded. Any failing cell
+keeps the affected adapter or renderer provisional; the evidence note is
+committed alone and every provisional claim stands unchanged.
+
+A complete pass promotes only what was exercised: physical Kitty and Ghostty
+rendering on the tested macOS and Node versions, named. It removes the
+corresponding provisional warnings from `docs/install.md` and nothing else.
+tmux, Intel, macOS 13, other terminals, and macOS 14 live-agent behaviour remain
+unclaimed.
+
+A probe 1 result showing an intermediate `claude` owning a TTY overrides all of
+the above: it is a wrong-target defect, and no rendering evidence promotes
+anything while it stands.
+
+### 11.6 Execution shape
+
+One runbook, parameterized by terminal, run twice — Kitty, then Ghostty — with
+the §11.3 appendix run once. Setup, configuration backup, and restore are
+written once, and the second run re-tests the script. That matters: the
+2026-08-23 Ghostty run caught a `ghostty --version` file-description seek that
+had silently overwritten five lines of already-written evidence, with exit
+status 0 throughout.
+
+The capture branch is disposable, never merged, and never pushed, as
+`spike/macos-agent-handoff` was. Only the reviewed, redacted evidence note
+`docs/ref/2026-08-22-macos-terminal-smoke.md` reaches `main`, together with any
+promotion it earns.
+
+Four guards carry forward from that run's recorded deviations, as rules rather
+than notes:
+
+1. The suite-green stop condition names the known status-line
+   `BRANCH_TIMEOUT_MS` failure in advance, so a real regression is
+   distinguishable from the known one.
+2. No shell loop variable is named `path`; zsh ties it to `PATH`, and last time
+   the loop wiped `PATH` mid-script after printing a success line.
+3. Every version is captured through a command substitution, never inside a
+   redirected block.
+4. The hook command carries a run-scoped environment gate, so a second agent
+   session picking up the temporary hook from shared configuration cannot write
+   uncorrelated records.
 
 ## 12. Alternatives rejected
 
@@ -543,5 +688,10 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Theme traversal | Linux handle-bound; Darwin verified pathname walker |
 | Test lease | existing file lock; default retry budget clears stale guards |
 | OpenCode renderer | provisional; CI backs hook and installer only |
+| Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
+| Gate escape recording | tint, cursor, and bell verbatim; graphics and title as length and digest |
+| Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.3) |
+| Gate configuration | full matrix on Node 22, one cell repeated on the installed Node; the macOS 14 live-agent gap stays open |
+| Gate execution | one runbook parameterized by terminal, run twice; disposable capture branch, redacted note only on `main` |
 | macOS CI | one `macos-14` / Node 22 full-suite and install-smoke job |
 | Deferred | native helpers, Homebrew, Intel/macOS 13 claims, other terminals, Niri/Noctalia ports |
