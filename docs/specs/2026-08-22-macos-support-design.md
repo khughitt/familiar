@@ -489,8 +489,11 @@ receives an fd and not a path, `emit()` records the resolved `terminal.path`
 and the probe correlates the two.
 
 Records are one JSON line per write: timestamp, pid, agent, event, target path,
-the `ttyname` of the fd, and each escape decomposed into introducer, control
-keys, payload length, and payload SHA-256. Tint, cursor, reset, and bell bytes
+the `rdev` of the written fd, and each escape decomposed into introducer, control
+keys, payload length, and payload SHA-256. The device is identified by `rdev`
+rather than by name because Node exposes no `ttyname`; comparing
+`fstat(fd).rdev` against `stat(/dev/<tty>).rdev` is also the stronger check, being
+device identity rather than a string that matched. Tint, cursor, reset, and bell bytes
 are short and constant and are recorded verbatim. Graphics payloads are recorded
 as length and digest only, because they are bulk; the digest and the control keys
 are what verification needs, never the pixels.
@@ -507,7 +510,7 @@ defect rather than a tolerated extra.
 | Sprite transmitted | APC `_G` payload well formed, `i=` equals `imageIdFor(sessionId)`, frame count and placement match the planned program | a sprite is on screen, positioned correctly, covering no dialog |
 | Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
 | Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
-| Correct terminal | target path equals the resolved agent's canonical TTY; `ttyname(fd)` agrees | the bytes land in this window and no other |
+| Correct terminal | target path equals the resolved agent's canonical TTY, and `fstat(fd).rdev` equals `stat(target).rdev` | the bytes land in this window and no other |
 | Graphics correctly suppressed | at capability `none`, zero APC `_G` bytes, while the `OSC 11`/`OSC 12` and any bell bytes still reach the validated TTY | the window still tints and rings with no sprite |
 
 The tester's column is irreducible. The point of the first column is that a
@@ -689,7 +692,7 @@ status 0 throughout.
 
 The capture branch is disposable, never merged, and never pushed, as
 `spike/macos-agent-handoff` was. Only the reviewed, redacted evidence note
-`docs/ref/2026-08-22-macos-terminal-smoke.md` reaches `main`, together with any
+`docs/ref/2026-08-24-macos-terminal-smoke.md` reaches `main`, together with any
 promotion it earns.
 
 Four guards carry forward from that run's recorded deviations, as rules rather
