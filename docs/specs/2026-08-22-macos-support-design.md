@@ -32,7 +32,7 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
    specifies the pass; the runbook implementing it is not yet written.
 2. **A background or daemon-hosted Claude Code session on Darwin.** The
    `tty !== null` half of the resolver predicate rests on Linux evidence; that
-   case has never been observed on a Mac. §11.3 specifies the two probes that
+   case has never been observed on a Mac. §11.4 specifies the two probes that
    close it.
 
 ## 1. Scope
@@ -467,7 +467,7 @@ The live-hook ancestor capture in §2 was completed on 2026-08-23 and is the
 prerequisite for Darwin adapter activation. What remains is the physical
 terminal gate: Claude Code, Codex, and OpenCode exercised in current Kitty and
 Ghostty releases on a real Mac. This section specifies that pass. The runbook
-implementing it lives on the disposable capture branch, as §2's did.
+implementing it will live on the disposable capture branch, as §2's did.
 
 ### 11.1 Evidence standard
 
@@ -556,11 +556,57 @@ tinted would be worse than no promotion.
 
 **Abnormal termination and `familiar reap`.** A force-terminated session emits
 no event at all, so nothing restores the colours and nothing removes the bus
-record. This check is therefore a state check with no byte component: force-kill
-one session per cell, run `familiar reap`, and require the record to be gone
-from the bus. That the terminal stays tinted afterwards is expected and is
-recorded as such — the tinting is cleared by the next session's transitions, not
-by reaping — so the tester does not log it as a failure.
+record. This check has no byte component, and observing an absent record after
+`reap` would not establish anything: `pruneDead` also runs inside the ordinary
+hook commit path (`src/bus/transaction.js`), so any hook fired by any agent
+anywhere on the machine removes dead records as a side effect. Absence is
+therefore consistent with `reap` having done nothing at all.
+
+The check is a four-step sequence, and each step exists to close that hole:
+
+1. `SIGKILL` the agent, never a graceful quit, which would emit `SessionEnd`
+   and take the normal cleanup path instead.
+2. Before anything else runs, read the bus and require the killed session's
+   record to still be **present**. This is the step that gives the later
+   absence meaning, and it is why no other agent session may be running on the
+   machine during the check.
+3. Run `familiar reap` and require its stdout to name that session:
+   `reaped <id>`. `reap` prints nothing when it removes nothing, so this line
+   is the positive evidence that `reap` itself did the removal.
+4. Read the bus again and require the record to be gone.
+
+That the terminal stays tinted throughout is expected and is recorded as such —
+the tinting is cleared by the next session's transitions, not by reaping — so
+the tester does not log it as a failure.
+
+### 11.3 The capability `none` negative control
+
+Every cell in the matrix runs in Kitty or Ghostty and therefore classifies as
+graphics-capable, so the suppression rule in §11.1 would be defined and never
+executed. One negative control run closes that, in a real terminal rather than
+a fixture.
+
+Launch the agent from a shell with every marker the classifier reads cleared —
+`GRAPHICS_MARKERS` in `src/render/term/capability.js` is exported so that
+scrubbing clears exactly the source of truth `graphicsCapability` consumes —
+and with `TERM` set to a non-graphics value such as `xterm-256color`. The TUI
+keeps working, the resolved TTY is still a genuine terminal device, and the
+inherited hook environment classifies as `none`. Darwin reads the graphics
+environment from the hook's inherited environment (§4), so scrubbing at agent
+launch is what reaches the classifier.
+
+The control covers Claude Code and OpenCode, because those are the only two
+transmitters and their suppression sites differ: the hook's `emit()` skips the
+graphics block, while `sprite-plugin.tsx` returns before registering anything
+with the renderer. Codex is excluded because it transmits no graphics for a
+`none` classification to suppress.
+
+Required in one run, in Kitty: zero APC `_G` bytes in the byte log; `OSC 11`
+and `OSC 12` still present; a bell still present on a ringing state; and the
+tester confirming the window tints and rings with no sprite drawn. A control
+that produces graphics bytes is a failure of the same severity as a missing
+sprite in a normal cell — it means Familiar transmits into terminals that
+cannot decode it.
 
 The pass is also the first live exercise of `familiar setup codex` (§7). The §2
 capture used a hand-written command string with a deliberate canary; the
@@ -568,7 +614,7 @@ generated document has never configured a real agent. The runbook generates it,
 merges it into `~/.codex/hooks.json`, and all six mapped events firing is what
 verifies that the generator and the adapter agree.
 
-### 11.3 The background and daemon appendix
+### 11.4 The background and daemon appendix
 
 The gap §2 carried forward is a background or daemon-hosted Claude Code
 session, the case the `tty !== null` half of the predicate exists for. Two
@@ -595,7 +641,7 @@ process` diagnostic, exit zero, and zero writes in the byte log. This is the
 only Darwin exercise of §10's rule that resolver failure reaches the cosmetic
 diagnostic rather than being swallowed.
 
-### 11.4 Configuration exercised
+### 11.5 Configuration exercised
 
 The full matrix runs under Node 22, matching both `engines.node` and the
 version CI tests, so promoted claims and the supported configuration agree. One
@@ -606,14 +652,19 @@ The macOS half of §2's configuration gap stays open. CI runs macOS 14 with no
 live agents; the physical Mac is macOS 26. No promotion may state or imply that
 macOS 14 has run a live agent, because it has not.
 
-### 11.5 Promotion rule
+### 11.6 Promotion rule
 
 A cell passes when three things hold: every state that adapter structurally
 exposes was exercised, with its byte log verified and its tester observation
 recorded; the normal session exit produced `OSC 111` and `OSC 112`; and an
-abnormally terminated session was removed from the bus by `familiar reap`. All
-three are required, because the first alone can be satisfied while cleanup is
-entirely untested. Any failing cell keeps the affected adapter or renderer
+abnormally terminated session was proven removed by `familiar reap` through the
+four-step sequence in §11.2. All three are required, because the first alone can
+be satisfied while cleanup is entirely untested.
+
+The pass as a whole additionally requires the §11.3 capability `none` negative
+control. It is not a cell and does not belong to any terminal row, but no
+promotion may proceed without it: without it the graphics-suppression rule is
+asserted and never tested. Any failing cell keeps the affected adapter or renderer
 provisional; the evidence note is committed alone and every provisional claim
 stands unchanged.
 
@@ -627,10 +678,10 @@ A probe 1 result showing an intermediate `claude` owning a TTY overrides all of
 the above: it is a wrong-target defect, and no rendering evidence promotes
 anything while it stands.
 
-### 11.6 Execution shape
+### 11.7 Execution shape
 
 One runbook, parameterized by terminal, run twice — Kitty, then Ghostty — with
-the §11.3 appendix run once. Setup, configuration backup, and restore are
+the §11.4 appendix run once. Setup, configuration backup, and restore are
 written once, and the second run re-tests the script. That matters: the
 2026-08-23 Ghostty run caught a `ghostty --version` file-description seek that
 had silently overwritten five lines of already-written evidence, with exit
@@ -718,9 +769,10 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Test lease | existing file lock; default retry budget clears stale guards |
 | OpenCode renderer | provisional; CI backs hook and installer only |
 | Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
-| Gate cleanup coverage | per cell: `oscReset` on normal exit, and `familiar reap` after abnormal termination |
+| Gate cleanup coverage | per cell: `oscReset` on normal exit; SIGKILL, record present, `reaped <id>` on stdout, record absent |
+| Gate negative control | one marker-scrubbed physical-terminal run over Claude Code and OpenCode; required for any promotion |
 | Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; any other escape fails the cell |
-| Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.3) |
+| Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.4) |
 | Gate configuration | full matrix on Node 22, one cell repeated on the installed Node; the macOS 14 live-agent gap stays open |
 | Gate execution | one runbook parameterized by terminal, run twice; disposable capture branch, redacted note only on `main` |
 | macOS CI | one `macos-14` / Node 22 full-suite and install-smoke job |
