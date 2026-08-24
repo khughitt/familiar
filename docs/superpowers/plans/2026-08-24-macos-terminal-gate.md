@@ -1409,7 +1409,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 node --test test/gate-verify.test.js
 ```
 
-Expected: PASS, 20 tests. Step 1b adds the golden test, for 21 in the finished file.
+Expected: PASS, 21 tests — the 20 from Step 1 plus Step 1b's golden test.
 
 - [ ] **Step 5: Commit**
 
@@ -1669,11 +1669,12 @@ const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
 const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
 const reaped = fs.readFileSync(reapPath, "utf8");
 if (!(session in before)) throw new Error("the session was already gone before reap ran");
-// Exact, not a substring: `reap` prints eviction lines first and its `reaped <ids>` line
-// last (bin/familiar), and with exactly one session that line is the whole tail. endsWith
-// also survives an id containing a newline, which the payload contract permits.
-if (!reaped.endsWith(`reaped ${session}\n`)) {
-  throw new Error("reap did not end by naming exactly the killed session");
+// Whole-string equality. `reap`'s eviction lines go to stderr (bin/familiar
+// reportEvictions), so the tee'd stdout is exactly its `reaped <ids>` line and nothing
+// else -- and with exactly one live session that line is fully determined. Equality also
+// survives an id containing a newline, which the payload contract permits.
+if (reaped !== `reaped ${session}\n`) {
+  throw new Error("reap stdout was not exactly the killed session");
 }
 if (session in after) throw new Error("the session survived reap");
 process.stdout.write("present before, named by reap, absent after\n");
@@ -2019,8 +2020,8 @@ const session = JSON.parse(fs.readFileSync(sessionPath, "utf8"));
 const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
 const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
 if (!(session in before)) throw new Error(`${beforePath}: session absent before reap`);
-if (!fs.readFileSync(reapPath, "utf8").endsWith(`reaped ${session}\n`)) {
-  throw new Error(`${reapPath}: reap did not end by naming exactly the killed session`);
+if (fs.readFileSync(reapPath, "utf8") !== `reaped ${session}\n`) {
+  throw new Error(`${reapPath}: reap stdout was not exactly the killed session`);
 }
 if (session in after) throw new Error(`${afterPath}: session survived reap`);
 ' "$R/before-reap-$cell-$agent.json" "$R/reap-$cell-$agent.txt" \
