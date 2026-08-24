@@ -54,7 +54,7 @@ pending.
   the encoder is not an independent check of it.
 - OpenCode graphics depth. Its renderer plans and encodes inside `sprite-runtime.js`, so
   its records carry no planned frame count or placement; its graphics are checked for
-  image identity, key grammar, and placement-envelope shape only.
+  image identity, key grammar, and placement-envelope order only.
 - The event-to-state mapping, which each adapter's unit tests cover in CI. This gate
   checks that the state the emitter acted on produced the right bytes on the right device.
 - tmux, Intel Macs, macOS 13, and terminals other than Kitty and Ghostty.

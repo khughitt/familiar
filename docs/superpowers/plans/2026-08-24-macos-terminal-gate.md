@@ -679,7 +679,7 @@ never reaches `emit()`, so it supplies its own descriptor. Replace that line wit
           backdrop: null, base: null,
           // The runtime plans and encodes inside sprite-runtime.js, so these are not
           // available here. OpenCode graphics are therefore checked for image identity,
-          // key grammar, and placement-envelope shape only -- not frame count. The
+          // key grammar, and placement-envelope order only -- not frame count. The
           // evidence note must say so rather than implying parity with the hook path.
           commands: null, frames: null, placement: null,
         },
@@ -1883,7 +1883,7 @@ pending.
   the encoder is not an independent check of it.
 - OpenCode graphics depth. Its renderer plans and encodes inside `sprite-runtime.js`, so
   its records carry no planned frame count or placement; its graphics are checked for
-  image identity, key grammar, and placement-envelope shape only.
+  image identity, key grammar, and placement-envelope order only.
 - The event-to-state mapping, which each adapter's unit tests cover in CI. This gate
   checks that the state the emitter acted on produced the right bytes on the right device.
 - tmux, Intel Macs, macOS 13, and terminals other than Kitty and Ghostty.
