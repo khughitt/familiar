@@ -964,7 +964,7 @@ async function main({ command, args: rest }) {
     );
     process.stdout.write(`\n  ${member.label} · ${themeId} · slot${member.slots.length === 1 ? '' : 's'} ${member.slots.join(', ')}\n  ${member.persona}\n\n`);
     for (const state of states) {
-      // Caption UNDER the art, for the same floor-anchoring reason as the theme grid
+      // Caption UNDER the art, for the same constant-box reason as the theme grid
       // below — see the note there. The pose text is long enough to wrap, which made
       // the mis-association worse here than anywhere else.
       // ALWAYS pass the env explicitly. preview IS the interactive process, so its own
@@ -1149,14 +1149,15 @@ async function main({ command, args: rest }) {
         fault = error.message;
       }
 
-      // THE CAPTION GOES UNDER THE SPRITE, and the reason is that sprites are
-      // FLOOR-ANCHORED. transmit() always advances by the full `rows` regardless of
-      // how much of that box the art fills, so a sleeping loaf leaves most of its box
-      // empty at the TOP. With the label printed first, that empty space opens up
-      // between a label and the sprite it names, and closes the gap to the sprite
-      // ABOVE it — every short pose captions the wrong cat. Printing the caption
-      // afterwards puts it hard against the art's bottom edge, which is the one edge
-      // the art is guaranteed to reach.
+      // THE CAPTION GOES UNDER THE SPRITE, and the reason is that transmit() always
+      // advances by the full `rows` regardless of how much of that box the art fills,
+      // so a sleeping loaf leaves most of its box empty at the TOP. With the label
+      // printed first, that empty space opens up between a label and the sprite it
+      // names, and closes the gap to the sprite ABOVE it — every short pose captions
+      // the wrong cat. Printing the caption afterwards puts it against the bottom of
+      // a box of CONSTANT height, which is what makes the association read correctly
+      // — for a floor-anchored member the art reaches that edge, and for a
+      // center-anchored one the box does.
       if (rendered) process.stdout.write(rendered);
 
       process.stdout.write(
@@ -1217,7 +1218,10 @@ async function main({ command, args: rest }) {
       member: memberOrThrow(pack, id),
       frames: STATES.map((state) => {
         const assets = assetsFor(pack, id, mode);
-        return scaleTo(decodeRgba(readFileSync(assets[state].terminal)), { height: FRAME_H });
+        return {
+          ...scaleTo(decodeRgba(readFileSync(assets[state].terminal)), { height: FRAME_H }),
+          anchor: memberOrThrow(pack, id).anchor,
+        };
       }),
     }));
     const boxW = Math.max(...decoded.flatMap((row) => row.frames.map((f) => f.w)));
@@ -1248,7 +1252,7 @@ async function main({ command, args: rest }) {
       if (graphical) {
         process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows }));
       }
-      // Caption UNDER the art, same floor-anchoring reason as `theme` — see the note there.
+      // Caption UNDER the art, same constant-box reason as `theme` — see the note there.
       process.stdout.write(captions[index]);
     }
     if (interactive && !graphical) {

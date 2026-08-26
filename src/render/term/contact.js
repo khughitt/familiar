@@ -12,11 +12,13 @@
 // PURE, and takes decoded rasters rather than PNG buffers, so the layout can be tested
 // without a codec: {w, h, buf} in, {w, h, buf} out. The caller owns decode and encode.
 
-// Bottom-aligned, because every sprite this composes is FLOOR-ANCHORED — compile.mjs
-// puts each member's six poses on one canvas sized to the largest, sitting on a shared
-// floor. Within a member the frames are therefore identical in size and the alignment
-// is a no-op; across members (a grid) it is what keeps the floors on one line instead
-// of hanging the short ones from the ceiling.
+// Bottom-aligned BY DEFAULT, because a compiled sprite is floor-anchored unless its
+// member declares `anchor: center` — compile.mjs puts each member's six poses on one
+// canvas sized to the largest, sitting on a shared floor. Within a member the frames
+// are therefore identical in size and the alignment is a no-op; across members (a
+// grid) it is what keeps the floors on one line instead of hanging the short ones from
+// the ceiling. The alignment follows the FRAME's declared anchor, so a center-anchored
+// member floats in the strip rather than being dropped onto a floor it has no feet for.
 export function composeStrip(frames, { gap = 0 } = {}) {
   if (!Array.isArray(frames) || !frames.length) {
     throw new Error('contact: a strip needs at least one frame');
@@ -29,7 +31,7 @@ export function composeStrip(frames, { gap = 0 } = {}) {
   const buf = new Uint8Array(w * h * 4);
   let x0 = 0;
   for (const frame of frames) {
-    const dy = h - frame.h;
+    const dy = frame.anchor === 'center' ? (h - frame.h) >> 1 : h - frame.h;
     for (let y = 0; y < frame.h; y++) {
       for (let x = 0; x < frame.w; x++) {
         const s = (y * frame.w + x) * 4;
@@ -100,18 +102,21 @@ export function scaleTo(frame, { height }) {
 // One box for every frame on the sheet, so column N lines up down the whole grid. The
 // box is the WIDEST scaled frame, not an average: a member cropped wider than its
 // neighbours (the persian's flared coat, the meerkat's dig) must not be clipped to make
-// the columns tidy. Frames are centred horizontally and sat on the floor.
+// the columns tidy. Frames are centred horizontally and placed against the frame's own
+// anchor edge — the floor by default, the middle of the box for a center-anchored one.
 export function padTo(frame, { width, height }) {
   if (frame.w > width || frame.h > height) {
     throw new Error(`contact: frame ${frame.w}x${frame.h} does not fit a ${width}x${height} box`);
   }
   const buf = new Uint8Array(width * height * 4);
   const dx = Math.floor((width - frame.w) / 2);
-  const dy = height - frame.h;
+  const dy = frame.anchor === 'center' ? (height - frame.h) >> 1 : height - frame.h;
   for (let y = 0; y < frame.h; y++) {
     const src = y * frame.w * 4;
     const dst = ((y + dy) * width + dx) * 4;
     buf.set(frame.buf.subarray(src, src + frame.w * 4), dst);
   }
-  return { w: width, h: height, buf };
+  // The anchor belongs to the MEMBER, not to this padding step, so it survives into
+  // whatever composes the padded frames next.
+  return { w: width, h: height, buf, anchor: frame.anchor };
 }

@@ -211,3 +211,20 @@ test('a non-graphical terminal says so and names --out', () => {
   assert.match(result.stdout, /m3/);
   assert.doesNotMatch(result.stdout, /\x1b_G/);
 });
+
+test('a center-anchored frame floats mid-strip', () => {
+  const strip = composeStrip([
+    solid(2, 6, [1, 2, 3, 255]),
+    { ...solid(2, 2, [9, 9, 9, 255]), anchor: 'center' },
+  ]);
+  assert.deepEqual(at(strip, 2, 0), [0, 0, 0, 0], 'empty above');
+  assert.deepEqual(at(strip, 2, 2), [9, 9, 9, 255], 'present in the middle');
+  assert.deepEqual(at(strip, 2, 5), [0, 0, 0, 0], 'empty below');
+});
+
+test('padTo floats a center-anchored frame in its box', () => {
+  const box = padTo({ ...solid(2, 2, [9, 9, 9, 255]), anchor: 'center' }, { width: 4, height: 6 });
+  assert.deepEqual(at(box, 1, 0), [0, 0, 0, 0], 'empty above');
+  assert.deepEqual(at(box, 1, 2), [9, 9, 9, 255], 'present in the middle');
+  assert.deepEqual(at(box, 1, 5), [0, 0, 0, 0], 'empty below');
+});
