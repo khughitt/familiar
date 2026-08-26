@@ -849,6 +849,7 @@ async function main({ command, args: rest }) {
       writeFileSync(join(dir, SPRITESHEET_PATH), encodeRgba(spritesheet({
         animationSet,
         roots: poses,
+        anchor: member.anchor,
         motionPolicy: ctx.motionPolicy,
         readFrame: (path) => decodeRgba(readFileSync(path)),
       })));

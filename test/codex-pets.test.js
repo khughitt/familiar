@@ -193,6 +193,49 @@ test('the cat stands on a floor and keeps 1-bit alpha', () => {
   }
 });
 
+// fitFrame PLACES THE IMAGE; compile.mjs canonicalise is what centres the ink
+// INSIDE a center-anchored master. The shipped property is the composition of
+// the two, so the source here is what a center-anchored member actually
+// compiles to — ink centred in its own canvas. pip's fixture masters are
+// floor-compiled (8x8 with one blank row on top and none beneath), and
+// asserting centred ink against one of those would be asking fitFrame to move
+// ink it never touches.
+function centredMaster() {
+  const w = 8, h = 6;                        // ink rows 1..4: one blank row each side
+  const buf = new Uint8Array(w * h * 4);
+  for (let y = 1; y <= 4; y++) {
+    for (let x = 1; x < 7; x++) buf.set([120, 90, 60, 255], (y * w + x) * 4);
+  }
+  return { w, h, buf };
+}
+
+const inkRows = (cell) => {
+  let first = -1, last = -1;
+  for (let y = 0; y < FRAME.height; y++) {
+    for (let x = 0; x < FRAME.width; x++) {
+      if (cell[((y * FRAME.width) + x) * 4 + 3] !== 0) { if (first < 0) first = y; last = y; }
+    }
+  }
+  return { first, last };
+};
+
+test('a center-anchored member floats in its cell', () => {
+  const cell = fitFrame(centredMaster(), FRAME, { anchor: 'center' });
+  const { first, last } = inkRows(cell);
+  const above = first, below = FRAME.height - 1 - last;
+  assert.ok(Math.abs(above - below) <= 1, `not centred: ${above} above, ${below} below`);
+});
+
+test('center lifts the same master clear of the floor; floor stays the default', () => {
+  const image = sprite('pip', 'idle');
+  const floor = fitFrame(image, FRAME);
+  const center = fitFrame(image, FRAME, { anchor: 'center' });
+  assert.deepEqual([...floor], [...fitFrame(image, FRAME, {})], 'no anchor means floor');
+  assert.ok(inkRows(center).last < inkRows(floor).last, 'center is lifted off the floor');
+  assert.equal(inkRows(floor).first - inkRows(center).first,
+    inkRows(floor).last - inkRows(center).last, 'a pure translation, not a rescale');
+});
+
 test('a missing required root is refused, not rendered as a hole', () => {
   const roots = posesOf('pip');
   delete roots.working;

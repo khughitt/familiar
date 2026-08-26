@@ -64,14 +64,16 @@ export function sampleTimeline(frames, count, { includeEndpoints } = { includeEn
   });
 }
 
-// Box-filter fit, aspect preserved, centred horizontally, anchored to the floor. Alpha remains
-// binary so the resample cannot add a halo against Codex's unknown terminal background.
-export function fitFrame({ w, h, buf }, { width, height }) {
+// Box-filter fit, aspect preserved, centred horizontally, anchored to the member's declared
+// anchor edge -- `floor` (the default) puts the last ink row on the cell's floor, `center`
+// floats it. Alpha remains binary so the resample cannot add a halo against Codex's unknown
+// terminal background.
+export function fitFrame({ w, h, buf }, { width, height }, { anchor = 'floor' } = {}) {
   const scale = Math.max(w / width, h / height);
   const dw = Math.max(1, Math.round(w / scale));
   const dh = Math.max(1, Math.round(h / scale));
   const ox = (width - dw) >> 1;
-  const oy = height - dh;
+  const oy = anchor === 'center' ? (height - dh) >> 1 : height - dh;
   const out = new Uint8Array(width * height * 4);
 
   for (let y = 0; y < dh; y++) {
@@ -175,7 +177,7 @@ export function spritesheet(input, frame = FRAME) {
   const buf = new Uint8Array(w * h * 4);
 
   cells.forEach((image, index) => {
-    const cell = fitFrame(image, frame);
+    const cell = fitFrame(image, frame, { anchor: input.anchor ?? 'floor' });
     const ox = (index % columns) * width;
     const oy = ((index / columns) | 0) * height;
     for (let y = 0; y < height; y++) {
