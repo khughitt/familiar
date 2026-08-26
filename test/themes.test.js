@@ -22,10 +22,8 @@ const packs = [
   { id: 'fixture', dir: fixtureDir },
 ];
 
-test('at least one theme ships', () => {
-  assert.ok(shippedThemes.length === 0 || shippedThemes.includes('cats'));
-});
-
+// Shipped themes are whatever directories exist; each must validate, none is
+// required by name.
 for (const { id, dir } of packs) {
   const load = () => loadThemePackSync(dir);
 

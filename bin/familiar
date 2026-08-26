@@ -478,9 +478,9 @@ async function context({ paths = resolvePaths(), config } = {}) {
 
 // Resolve every live record's identity ONCE — one per project in practice, and a
 // cache hit on every event after the first. Nothing is BAKED any more: the sprite
-// baker is gone, the terminal ships the master's bytes to kitty verbatim and the bar
-// tints one 22px mask at paint time. Animation manifests and their program budgets
-// are admitted at this same member boundary before anything reaches the bus.
+// baker is gone, the terminal ships the master's bytes to kitty verbatim. Animation
+// manifests and their program budgets are admitted at this same member boundary
+// before anything reaches the bus.
 //
 // The identity map is RETURNED, not thrown away: resolveAll needs exactly the
 // same map, and recomputing it there would mean a second full pin-match +
