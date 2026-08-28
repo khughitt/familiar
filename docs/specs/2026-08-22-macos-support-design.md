@@ -290,7 +290,11 @@ Codex uses native pets rather than Familiar-rendered sprites. OpenCode's sprite
 renderer executes inside OpenCode with its own environment. The §11 gate loaded and
 exercised it on a physical Mac and it **failed**: the sprite transmits three images
 per session and then re-places them thousands of times without ever changing pose,
-on both terminals and both graphics capabilities. It stays provisional.
+on both terminals and both graphics capabilities. Root cause found and confirmed by
+macOS CI — the runtime filtered its watch callback on a filename Darwin never
+reports — and fixed on `fix/opencode-sprite-watch`. The renderer stays provisional
+until its cells are re-run, since a second failure, an unreachable `needs-approval`,
+is untouched by that fix.
 
 ## 5. Theme traversal
 

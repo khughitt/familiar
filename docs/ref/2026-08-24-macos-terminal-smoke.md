@@ -112,10 +112,21 @@ Claude Code hook path in the same trace sends one image per state. Terminal capa
 not the variable — Ghostty is `static-graphics` and takes the `create` path on every
 transmission, and its pet froze anyway. What separates the two is which process transmits:
 the hook (`source: emit`) tracks state, the plugin (`source: opencode-sprite`) does not.
-The suspect path is `sprite-runtime.js` `refresh()` → `sprite-state.js`
-`recordForPid(intent, pid)`, where a frame re-transmits only when the pose changes; either
-the `intent.json` watcher is not firing per transition on macOS or the per-pid record is
-not changing with state. Not root-caused here.
+**Root-caused after the run, and confirmed by CI on `macos-14`.** `sprite-runtime.js`
+watched the state directory and filtered its callback on `filename === 'intent.json'`. The
+bus never writes that name: it writes `intent.json.tmp.<suffix>` and renames it over the
+target, and the platforms describe that rename differently. Linux inotify delivers four
+events and names the destination in the last, so the filter matched. Darwin FSEvents
+delivers one event and names the *watched directory*, never the entry inside it — so the
+filter could not match under any timing. `refresh()` fired once at `start()` and never
+again, which is precisely a pet that renders its opening pose and holds it. Fixed on
+`fix/opencode-sprite-watch` by refreshing on any event in that directory; a
+real-filesystem test now prints the observed filenames on both platforms, and the macOS
+job asserts the Darwin line is present.
+
+This also explains why nothing upstream of the renderer looked wrong: the hook wrote each
+transition to `intent.json` correctly and the bus committed it correctly. Only the reader
+was deaf.
 
 Both OpenCode cells pass `gate-verify`, and that is correct behaviour rather than a hole
 in the checker. Each record is checked against the emitter's own recorded expectation, and
