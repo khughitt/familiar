@@ -23,9 +23,15 @@ checkout. It validates the complete pack before atomically installing it into
 macOS agent lifecycle is supported. The portable core is CI-backed, and the
 Darwin agent resolver was activated on live-hook evidence captured on a physical
 Mac on 2026-08-23 (`docs/ref/2026-08-23-macos-agent-process-spike.md`), covering
-Claude Code, Codex, and OpenCode in both Kitty and Ghostty. What remains
-provisional on macOS is Familiar's own terminal rendering — graphics, tint, and
-bell — which waits on the physical terminal checklist below.
+Claude Code, Codex, and OpenCode in both Kitty and Ghostty.
+
+Familiar's own terminal rendering — graphics, tint, and bell — is confirmed for
+**Claude Code and Codex** in Kitty 0.46.2 and Ghostty 1.3.1 on macOS 26.6.2, under
+Node 22 and Node 25, by a byte-level physical-Mac gate run 2026-08-24 to 2026-08-28
+(`docs/ref/2026-08-24-macos-terminal-smoke.md`). That claim covers exactly those
+terminal and agent versions. **The OpenCode sprite renderer remains provisional**:
+the same gate exercised it and found the sprite never changes pose. tmux, Intel
+Macs, macOS 13, and other terminals stay unclaimed.
 
 ### Claude Code
 
@@ -102,7 +108,12 @@ by hand, rather than rewriting a commented file as plain JSON or creating a
 `.json` sibling that shadows it.
 
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
-provisional pending the physical-Mac gate.
+provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
+Ghostty and recorded two failures: the sprite transmits three images per session and
+then re-places them without ever changing pose, and `needs-approval` never reaches
+Familiar's bus, so the pet cannot signal an approval and OpenCode can only ring on
+`error`. Familiar's hook-side tint and bell for OpenCode verified clean in the same
+run. See `docs/ref/2026-08-24-macos-terminal-smoke.md`.
 
 ### Reap abandoned sessions
 
@@ -149,14 +160,14 @@ security software — can exceed it on its own, so the same repository may show 
 sha on macOS where it shows a branch name on Linux. It corrects itself once git
 is warm. Nothing is wrong with the repository or the status line.
 
-### Provisional terminal checklist
+### Terminal checklist for unclaimed combinations
 
-Until the physical-Mac gate is complete, smoke-test Claude Code, Codex, and
-OpenCode in current Kitty and Ghostty releases. For each applicable pair,
-check launch/idle, working, approval when exposed, done/error, session exit,
-and `familiar reap` after abnormal termination. Record the agent and terminal
-versions and any failure; passing a checklist is not a live-terminal support
-claim.
+The physical-Mac gate covers Claude Code and Codex in Kitty 0.46.2 and Ghostty
+1.3.1 only. On any other terminal, on Intel or macOS 13, inside tmux, or with the
+OpenCode renderer, smoke-test before relying on rendering: check launch/idle,
+working, approval when exposed, done/error, session exit, and `familiar reap`
+after abnormal termination. Record the agent and terminal versions and any
+failure; passing a checklist is not a live-terminal support claim.
 
 ## Linux-only integrations
 

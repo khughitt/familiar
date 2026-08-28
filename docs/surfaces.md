@@ -9,8 +9,10 @@ core independent of frontend and desktop integrations.
 The lifecycle claims below now describe Linux and macOS. macOS has a CI-backed
 portable core, and its live-hook ancestry gate closed on 2026-08-23
 (`docs/ref/2026-08-23-macos-agent-process-spike.md`), on which evidence the
-Darwin adapters were activated. Familiar-rendered terminal output on macOS
-remains provisional pending the physical terminal gate.
+Darwin adapters were activated. Familiar-rendered terminal output on macOS is
+confirmed for Claude Code and Codex in Kitty and Ghostty by the physical terminal
+gate of 2026-08-24 (`docs/ref/2026-08-24-macos-terminal-smoke.md`); the OpenCode
+sprite renderer remains provisional, having failed that gate.
 
 | surface | state source | current contract |
 | --- | --- | --- |

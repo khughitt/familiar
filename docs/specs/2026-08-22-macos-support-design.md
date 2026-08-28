@@ -2,7 +2,10 @@
 
 **Status:** portable core implemented and CI-backed; live-hook ancestry and
 executor gate closed 2026-08-23, the Darwin adapters activated and `setup codex`
-implemented on that evidence; physical terminal rendering remains provisional
+implemented on that evidence; the §11 terminal gate executed 2026-08-24 to
+2026-08-28 (`docs/ref/2026-08-24-macos-terminal-smoke.md`), promoting Claude Code
+and Codex rendering in Kitty and Ghostty and leaving the OpenCode sprite renderer
+provisional on two recorded failures
 **Date:** 2026-08-22
 
 Familiar's portable core now runs in Linux and macOS CI without pretending
@@ -16,24 +19,34 @@ The target support claim is deliberately split:
   OpenCode hook and installer. Both gates this claim waited on have passed — CI is green, and
   the live-hook capture in §2 confirmed the resolver predicate — and the Darwin
   adapters are active on that evidence.
-- **Provisional until physical-Mac smoke testing:** Familiar-rendered graphics,
-  tint, and bell delivery in Kitty and Ghostty, including OpenCode's TUI sprite
-  renderer.
+- **Confirmed by physical-Mac smoke testing (2026-08-24):** Familiar-rendered
+  graphics, tint, and bell delivery for Claude Code and Codex in Kitty 0.46.2 and
+  Ghostty 1.3.1.
+- **Provisional:** OpenCode's TUI sprite renderer, which failed that gate.
 - **Expected, not claimed:** Intel Macs and macOS 13.
 
 Linux behavior and its Node 22/26 CI remain supported unchanged.
 
 **Remaining work**, in the order it unblocks things:
 
-1. **The physical terminal promotion gate (§11).** Claude Code, Codex, and
-   OpenCode rendering in current Kitty and Ghostty on a real Mac, including
-   loading the OpenCode sprite plugin and the first live exercise of
-   `familiar setup codex`. This is what holds every provisional label. §11
-   specifies the pass; the runbook implementing it is not yet written.
-2. **A background or daemon-hosted Claude Code session on Darwin.** The
-   `tty !== null` half of the resolver predicate rests on Linux evidence; that
-   case has never been observed on a Mac. §11.4 specifies the two probes that
-   close it.
+1. **The OpenCode sprite renderer.** The §11 gate ran on 2026-08-24 and promoted
+   Claude Code and Codex; `familiar setup codex` was exercised live for the first
+   time and fired all six configured events. The OpenCode renderer failed on two
+   findings — a pose that never changes and a `needs-approval` that never reaches
+   the bus — and holds the only remaining provisional label. Neither is
+   root-caused; see the evidence note.
+2. **The `tty !== null` predicate in a live launchd context.** §11.4's probes ran
+   and carried most of the way. Probe 1 observed the case directly on a Mac for the
+   first time: seven background and daemon-hosted `claude` processes — pty hosts,
+   spares, the app bundle, a detached CLI — every one of them owning no controlling
+   terminal, against two foreground sessions that did. The predicate's premise holds
+   on Darwin. The fail-closed contract is closed too, by a replacement probe that ran
+   `familiar hook` under launchd with no controlling terminal: the diagnostic reached
+   stderr, the hook exited 0, and no bytes were written. What remains open is narrow:
+   that chain contained no `claude` process at all, so the resolver failed on the
+   `comm` half. Exercising the `tty !== null` half in situ needs a launchd-hosted
+   `claude` that fires a level-bearing hook, and `claude -p` does not — `SessionEnd`
+   carries `level === null` and skips the resolver entirely.
 
 ## 1. Scope
 
@@ -274,8 +287,10 @@ environment is therefore a sound capability source on Darwin for both supported
 terminals. tmux remains unmeasured and unclaimed.
 
 Codex uses native pets rather than Familiar-rendered sprites. OpenCode's sprite
-renderer executes inside OpenCode with its own environment, but remains
-provisional until the renderer is loaded and exercised on a physical Mac.
+renderer executes inside OpenCode with its own environment. The §11 gate loaded and
+exercised it on a physical Mac and it **failed**: the sprite transmits three images
+per session and then re-places them thousands of times without ever changing pose,
+on both terminals and both graphics capabilities. It stays provisional.
 
 ## 5. Theme traversal
 
@@ -398,7 +413,8 @@ covers:
 4. `install opencode`, whose global directory remains `~/.config/opencode` on
    both platforms.
 5. An optional user LaunchAgent invoking `familiar reap` every minute.
-6. The provisional Kitty/Ghostty smoke checklist.
+6. The Kitty/Ghostty checklist, now scoped to the combinations the §11 gate did
+   not cover.
 
 The Linux section retains Niri, Noctalia, and systemd instructions. User-facing
 docs must not imply those integrations exist on macOS.
@@ -464,10 +480,18 @@ substitute for the two physical-Mac gates in §§2 and 11.
 ## 11. Manual promotion gates
 
 The live-hook ancestor capture in §2 was completed on 2026-08-23 and is the
-prerequisite for Darwin adapter activation. What remains is the physical
-terminal gate: Claude Code, Codex, and OpenCode exercised in current Kitty and
-Ghostty releases on a real Mac. This section specifies that pass. The runbook
-implementing it will live on the disposable capture branch, as §2's did.
+prerequisite for Darwin adapter activation. The physical terminal gate — Claude
+Code, Codex, and OpenCode exercised in current Kitty and Ghostty releases on a
+real Mac — **was executed 2026-08-24 to 2026-08-28**. This section specifies that
+pass; `docs/ref/2026-08-24-macos-terminal-smoke.md` records what it found. The
+runbook implementing it lived on the disposable capture branch, as §2's did.
+
+Outcome: Claude Code and Codex passed every cell, the capability `none` control
+passed, all six reap sets proved removal by identity, and probe 1 confirmed on
+hardware that background and daemon-hosted `claude` processes own no controlling
+terminal — the premise the `tty !== null` predicate rests on. OpenCode failed both
+cells. Two Familiar installer defects surfaced that are outside this gate's scope;
+§11.8 records them.
 
 ### 11.1 Evidence standard
 
@@ -699,9 +723,12 @@ be satisfied while cleanup is entirely untested.
 The pass as a whole additionally requires the §11.3 capability `none` negative
 control. It is not a cell and does not belong to any terminal row, but no
 promotion may proceed without it: without it the graphics-suppression rule is
-asserted and never tested. Any failing cell keeps the affected adapter or renderer
-provisional; the evidence note is committed alone and every provisional claim
-stands unchanged.
+asserted and never tested. A failing cell keeps **that adapter or
+renderer** provisional and does not hold back the ones that passed: promotion is
+per-adapter, and the evidence note records the failures alongside the promotions
+rather than being committed alone. What a failing cell never does is narrow into a
+caveat on a promoted claim — the adapter it belongs to stays provisional outright
+until its cells are re-run and pass.
 
 A complete pass promotes only what was exercised: physical Kitty and Ghostty
 rendering on the tested macOS and Node versions, named. It removes the
@@ -743,6 +770,29 @@ than notes:
 4. The hook command carries a run-scoped environment gate, so a second agent
    session picking up the temporary hook from shared configuration cannot write
    uncorrelated records.
+
+### 11.8 Findings outside the gate's scope
+
+The run surfaced two installer defects that are not terminal-rendering findings and
+do not bear on any promotion above. Both are recorded here because the gate is where
+they were found and reproduced, not because §11 owns their fix.
+
+`familiar install pets` compiles every pet into `~/.codex/pets` but selects none, and
+Codex draws nothing without a `[tui] pet` setting. For Codex the pet is the entire
+state signal, since Familiar sends only tint and bell — so on a fresh machine the
+documented install steps leave Codex rendering nothing at all. The documented remedy
+is also a dead end there: `--sync-projects` iterates catalog identities holding a
+`path` pin, and `identities.yaml` does not exist after a clean `theme add`, so it is a
+no-op on exactly the machines that need it. The gate worked around it by hand-writing
+the project-local config that sync would have produced.
+
+`familiar install opencode` refuses whenever an `opencode.jsonc` exists — the correct
+refusal, since rewriting a commented file as plain JSON would lose the comments — but
+it exits before writing `tui.json`, so the refusal takes the sprite renderer's
+registration down with it. Following §8's install steps literally on a machine with a
+`.jsonc` config leaves the renderer uninstalled, and the OpenCode cells would then run
+with no sprite and no indication why. The refusal should still write the half it can,
+or name both files it did not write.
 
 ## 12. Alternatives rejected
 
@@ -793,7 +843,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Decision | Choice |
 | --- | --- |
 | First support claim | portable core CI-backed; Darwin agent lifecycle and Codex setup authorized by the 2026-08-23 live-hook evidence |
-| Live terminal claim | provisional until physical-Mac smoke |
+| Live terminal claim | Claude Code and Codex promoted for Kitty 0.46.2 and Ghostty 1.3.1 on macOS 26.6.2, Node 22 and 25, by the 2026-08-24 gate; OpenCode renderer still provisional |
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
 | Familiar paths | existing `~/.config` and `~/.local/state` paths |
@@ -805,7 +855,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Darwin start time | `lstart`, one-second identity granularity |
 | Theme traversal | Linux handle-bound; Darwin verified pathname walker |
 | Test lease | existing file lock; default retry budget clears stale guards |
-| OpenCode renderer | provisional; CI backs hook and installer only |
+| OpenCode renderer | provisional; CI backs hook and installer only, and the 2026-08-24 gate recorded a frozen pose and an unreachable `needs-approval` |
 | Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
 | Gate cleanup coverage | per cell: `oscReset` on normal exit; stored pid+starttime verified, SIGKILL, record present, `reaped <id>` on stdout, record absent |
 | Gate terminal identity | internal target/fd agreement plus every write checked against the run's independently captured window device |
