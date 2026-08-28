@@ -93,18 +93,26 @@ export function createSpriteRuntime({
     try {
       ensureDirectory(stateDir);
       // RE-READ ON ANY EVENT IN THIS DIRECTORY. There used to be a
-      // `filename === 'intent.json'` filter here, and it silently froze the sprite on
-      // macOS: intent.json is committed by writing `intent.json.tmp.<suffix>` and
-      // renaming it, and Node documents `filename` as not guaranteed on any platform.
-      // Linux inotify reports the rename's DESTINATION, so the filter matched and CI
-      // stayed green; macOS FSEvents does not, so refresh() never fired after the one
-      // at start() and the pet held its opening pose for the life of the session.
+      // `filename === 'intent.json'` filter here, and it froze the sprite on macOS.
+      // intent.json is committed by writing `intent.json.tmp.<suffix>` and renaming it
+      // over the target, and the two platforms describe that rename differently --
+      // measured, not assumed, by the real-filesystem test in sprite-runtime.test.mjs,
+      // which prints what it saw so CI settles it on both:
+      //
+      //   linux   rename:intent.json.tmp.X, change:...tmp.X, rename:...tmp.X, rename:intent.json
+      //   darwin  rename:<the watched directory's own name>
+      //
+      // Linux inotify names the rename's DESTINATION in its last event, so the filter
+      // matched and CI stayed green. Darwin FSEvents delivers ONE event naming the
+      // DIRECTORY -- never the entry inside it -- so the filter could not match, ever.
+      // refresh() therefore fired once at start() and never again, and the pet held its
+      // opening pose for the life of the session. The physical-Mac terminal gate saw
+      // exactly that on both Kitty and Ghostty.
       //
       // Dropping the filter is cheap. stateDir holds only agents.json, agents.lock and
       // intent.json, every bus transaction writes intent.json anyway, refresh()
       // coalesces concurrent calls, and state.apply() is a no-op when the pose has not
-      // moved. An unreliable field is not worth an optimization that costs correctness
-      // on one platform.
+      // moved -- and on Darwin there is only the one event to answer.
       const next = watchDirectory(stateDir, () => { void refresh(); });
       let replaced = false;
       const replace = () => {
