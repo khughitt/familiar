@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
@@ -647,10 +647,95 @@ function codexProjectSyncFixture(t) {
   return { runEnv, project, codexHome };
 }
 
+// The fresh-machine shape: pets installed, a theme chosen, and no identities.yaml at all,
+// which is what `theme add` leaves behind. This is the case that made --sync-projects a no-op.
+function unpinnedSyncFixture(t) {
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
+  rmSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), { force: true });
+  return { runEnv, project, codexHome };
+}
+
+test('pets --sync-projects selects a pet in the current repository with no identity pins', (t) => {
+  const { runEnv, project, codexHome } = unpinnedSyncFixture(t);
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    cwd: project, encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.match(
+    readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
+    /^\[tui\]\npet = "custom:familiar-[a-z0-9-]+"$/m,
+  );
+  assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
+  assert.equal(
+    result.stdout,
+    `wrote 1 pets to ${join(codexHome, 'pets')}\nsynced 1 project pet config\n`,
+  );
+});
+
+test('pets --sync-projects counts a pinned project once when it is also the current directory', (t) => {
+  const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    cwd: project, encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(
+    result.stdout,
+    `wrote 1 pets to ${join(codexHome, 'pets')}\nsynced 1 project pet config\n`,
+  );
+  assert.equal(
+    readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8')
+      .split('\n').filter((line) => line === '.codex/config.toml').length,
+    1,
+  );
+});
+
+test('pets --sync-projects writes nothing outside a repository and says which directory it skipped', (t) => {
+  const { runEnv, codexHome } = unpinnedSyncFixture(t);
+  const loose = mkdtempSync(join(tmpdir(), 'familiar-codex-loose-'));
+  t.after(() => rmSync(loose, { recursive: true, force: true }));
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    cwd: loose, encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(loose, '.codex')), false);
+  assert.equal(
+    result.stdout,
+    `wrote 1 pets to ${join(codexHome, 'pets')}\nsynced 0 project pet configs\n`
+      + `did not sync the current directory (${loose}): not a Git repository\n`,
+  );
+});
+
+// A home directory under version control is a real setup, and there `<root>/.codex/config.toml`
+// IS the user-wide Codex config. Rewriting it as a managed file would take the user's own
+// selection with it.
+test('pets --sync-projects refuses to manage the user-wide config when the Codex home is the repository', (t) => {
+  const { runEnv, codexHome } = unpinnedSyncFixture(t);
+  const home = dirname(codexHome);
+  const initialized = spawnSync('git', ['init', '-q'], { cwd: home, encoding: 'utf8' });
+  assert.equal(initialized.status, 0, initialized.stderr);
+  runEnv.CODEX_HOME = join(home, '.codex');
+  const userConfig = join(home, '.codex', 'config.toml');
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(userConfig, '[tui]\npet = "custom:mine"\n');
+
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
+    cwd: home, encoding: 'utf8', env: runEnv,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(userConfig, 'utf8'), '[tui]\npet = "custom:mine"\n');
+  assert.match(result.stdout, /its Codex config is the user-wide one/);
+});
+
 test('pets --sync-projects creates a managed project config and excludes it locally', (t) => {
   const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -672,7 +757,7 @@ test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {
   writeFileSync(join(project, '.codex'), '');
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -685,7 +770,7 @@ test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {
 test('pets --sync-projects replaces only its managed config and does not duplicate the exclusion', (t) => {
   const { runEnv, project } = codexProjectSyncFixture(t);
   const first = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(first.status, 0, first.stderr);
   writeFileSync(
@@ -695,7 +780,7 @@ test('pets --sync-projects replaces only its managed config and does not duplica
   );
 
   const second = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(second.status, 0, second.stderr);
   assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-pip/);
@@ -715,7 +800,7 @@ test('pets --sync-projects leaves a tracked project config untouched and prints 
   assert.equal(added.status, 0, added.stderr);
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(configPath, 'utf8'), original);
@@ -737,7 +822,7 @@ test('pets --sync-projects leaves a tracked config symlink untouched as project 
   assert.equal(added.status, 0, added.stderr);
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(target, 'utf8'), original);
@@ -756,7 +841,7 @@ test('pets --sync-projects refuses an unmanaged untracked config before writing 
   const originalExclude = readFileSync(excludePath, 'utf8');
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
@@ -775,7 +860,7 @@ test('pets --sync-projects reports and skips an identity path that is not presen
   );
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, new RegExp(`skipped missing identity path: ${missing}`));
@@ -790,7 +875,7 @@ test('pets --sync-projects refuses a symlinked .codex directory before writing o
   symlinkSync(outside, join(project, '.codex'), 'dir');
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
-    encoding: 'utf8', env: runEnv,
+    cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /refusing symlinked Codex config directory/);

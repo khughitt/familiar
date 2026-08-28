@@ -300,14 +300,19 @@ Usage:
 
 Options:
   --out DIR          Write pets to DIR
-  --sync-projects    Sync path entries from identities.yaml into project Codex configs
+  --sync-projects    Select a pet in this project and each identities.yaml path entry
 
 Motion policies:
   full             Duration-sample canonical animation clips where available
   reduced          Install static state roots in every occupied cell
   off              refuses installation and writes no pet files
 
-Without --sync-projects, this command does not change the user-owned [tui] pet setting.
+Without --sync-projects, this command does not change the user-owned [tui] pet setting;
+it installs the pet files and prints how to select one.
+
+--sync-projects writes <project>/.codex/config.toml for the current repository and for
+each identities.yaml path entry, and adds that file to the repository's local exclusions.
+It never rewrites a tracked config, an unmanaged one, or the user-wide config.
 
 Examples:
   familiar install pets
@@ -830,7 +835,7 @@ async function main({ command, args: rest }) {
 
     const ctx = await context({ paths, config });
     const projectSync = values['sync-projects']
-      ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack })
+      ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack, cwd: process.cwd() })
       : null;
 
     let written = 0;
@@ -885,6 +890,10 @@ async function main({ command, args: rest }) {
       }
       for (const path of projectSync.missing) {
         process.stdout.write(`skipped missing identity path: ${path}\n`);
+      }
+      if (projectSync.unpinnedSkip) {
+        const { path, reason } = projectSync.unpinnedSkip;
+        process.stdout.write(`did not sync the current directory (${path}): ${reason}\n`);
       }
     }
   } else if (command === 'reap') {

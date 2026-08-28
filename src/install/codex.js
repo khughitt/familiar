@@ -15,6 +15,8 @@ const MANAGED_CONFIG = new RegExp(
 );
 const EXCLUDE = '.codex/config.toml';
 
+const codexHome = () => resolve(process.env.CODEX_HOME ?? join(homedir(), '.codex'));
+
 const pinPath = (path) => path.startsWith('~/')
   ? resolve(homedir(), path.slice(2))
   : resolve(path);
@@ -78,7 +80,13 @@ function assertExcludeTarget(path) {
 const selectionText = (member) => `[tui]\npet = "custom:familiar-${member}"\n`;
 const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member)}`;
 
-export async function planCodexProjectSync({ catalog, pack }) {
+// The identity pins are the CONFIGURED targets; `cwd` is the one the user is standing in.
+// Syncing pins alone makes `--sync-projects` a no-op on a fresh machine -- `identities.yaml`
+// does not exist until someone pins a path, so the documented way to select a pet does
+// nothing on exactly the machines that have never selected one. The current project is
+// therefore a target too, and takes the same route as a pin: same refusals, same conflict
+// rules, same exclusion. Pins are processed first, so an explicit pin still wins.
+export async function planCodexProjectSync({ catalog, pack, cwd = null }) {
   const configs = [];
   const excludes = [];
   const manual = [];
@@ -86,10 +94,14 @@ export async function planCodexProjectSync({ catalog, pack }) {
   const seen = new Set();
   const seenExcludes = new Set();
   const conflicts = [];
-
+  const targets = [];
   for (const pin of catalog.identities) {
-    if (!pin.path) continue;
-    const path = pinPath(pin.path);
+    if (pin.path) targets.push({ path: pinPath(pin.path), pinned: true });
+  }
+  if (cwd !== null) targets.push({ path: resolve(cwd), pinned: false });
+  let unpinnedSkip = null;
+
+  for (const { path, pinned } of targets) {
     if (!existsSync(path)) {
       missing.push(path);
       continue;
@@ -97,7 +109,19 @@ export async function planCodexProjectSync({ catalog, pack }) {
     if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
 
     const { remote, repoRoot } = await gitContext(path);
+    // A repository is what makes the current directory a PROJECT. Without this, running the
+    // command from a home directory would aim at `~/.codex/config.toml` -- the user-wide Codex
+    // config -- and rewrite it as a Familiar-managed file. A pinned path stays exempt: pinning
+    // is an explicit choice about a specific directory.
+    if (!pinned && !repoRoot) {
+      unpinnedSkip = { path, reason: 'not a Git repository' };
+      continue;
+    }
     const root = repoRoot ?? path;
+    if (!pinned && join(root, EXCLUDE) === join(codexHome(), 'config.toml')) {
+      unpinnedSkip = { path: root, reason: 'its Codex config is the user-wide one' };
+      continue;
+    }
     const target = join(root, EXCLUDE);
     if (seen.has(target)) continue;
     seen.add(target);
@@ -143,7 +167,7 @@ export async function planCodexProjectSync({ catalog, pack }) {
   if (conflicts.length) {
     throw new Error(`refusing unmanaged project config ${conflicts.join(', ')}`);
   }
-  return { configs, excludes, manual, missing };
+  return { configs, excludes, manual, missing, unpinnedSkip };
 }
 
 export function applyCodexProjectSync(plan) {

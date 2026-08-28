@@ -68,16 +68,22 @@ hook commands through.
 
 ### Codex pets
 
-Install the current theme's pets and synchronize every `path:` entry in
-`~/.config/familiar/identities.yaml` into its project:
+Install the current theme's pets and select one for the repository you are in,
+along with every `path:` entry in `~/.config/familiar/identities.yaml`:
 
 ```sh
 familiar install pets --sync-projects
 ```
 
+Run it from inside the project you want a pet in. Codex draws nothing until a
+`[tui] pet` setting exists, so on a machine with no `identities.yaml` — which is
+what a fresh `familiar theme add` leaves — the current repository is the only
+thing to select, and this is what selects it.
+
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. It never overwrites an existing tracked config; review
-its printed setting instead. It refuses an existing unmanaged untracked config.
+its printed setting instead. It refuses an existing unmanaged untracked config,
+and it leaves the user-wide `~/.codex/config.toml` alone.
 To install pets without synchronizing projects, run `familiar install pets`.
 
 Choose a user-wide default in `~/.codex/config.toml`:
