@@ -155,6 +155,73 @@ test('sprite-runtime: refresh and watcher callbacks only queue work and request 
   assert.equal(h.renderRequests(), 2);
 });
 
+// The watcher rests on one platform assumption: committing intent.json -- write a temp file,
+// rename it over the target -- wakes a watcher on the DIRECTORY. If a platform delivered no
+// event at all, the sprite would freeze no matter how the callback filters, so this runs
+// against the real filesystem rather than the fake watcher. The macOS CI job greps for its
+// name, which is the whole point: this is the assumption that broke on Darwin.
+test('an atomic intent commit wakes a directory watcher on this platform', async () => {
+  const { mkdtempSync, writeFileSync, renameSync, rmSync, watch } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-intent-watch-'));
+  const seen = [];
+  const watcher = watch(dir, (event, filename) => { seen.push([event, filename]); });
+  try {
+    // Give the watch a moment to attach before the write it is meant to observe.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const temp = join(dir, 'intent.json.tmp.a1b2c3');
+    writeFileSync(temp, '{}');
+    renameSync(temp, join(dir, 'intent.json'));
+
+    const deadline = Date.now() + 4000;
+    while (seen.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.ok(
+      seen.length > 0,
+      'an atomic rename into the state directory produced no watch event; the sprite runtime '
+      + 'cannot see intent changes on this platform',
+    );
+    // Report, never assert: WHICH name the platform gives is exactly what differs between
+    // Linux and Darwin, so the CI log is where that gets settled without a physical Mac.
+    console.log(
+      `intent-watch filenames on ${process.platform}: `
+      + JSON.stringify(seen.map(([event, filename]) => `${event}:${filename}`)),
+    );
+  } finally {
+    watcher.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// macOS reports directory events for an atomic rename without naming the destination:
+// `filename` arrives as the temp file, or as null. Filtering on `filename === 'intent.json'`
+// froze the pet in its opening pose there while Linux inotify kept CI green. These pin the
+// two shapes the platform actually produces.
+for (const [label, filename] of [
+  ['an unnamed event', null],
+  ['the temp file the rename came from', 'intent.json.tmp.a1b2c3'],
+]) {
+  test(`sprite-runtime: re-reads intent on ${label}`, async () => {
+    const h = harness();
+    h.setIntent(record('/a.png'));
+    await h.runtime.start();
+    assert.equal(h.renderRequests(), 1);
+
+    h.setIntent(record('/b.png'));
+    h.watchers[0].change(filename);
+    await tick();
+
+    assert.equal(
+      h.events.filter((e) => e === 'read:/state/intent.json').length, 2,
+      'the watcher must re-read intent.json whatever the platform called the event',
+    );
+    assert.equal(h.renderRequests(), 2);
+  });
+}
+
 test('sprite-runtime: first full Kitty frame uploads one complete animation before placement; later frames place only', async () => {
   const h = harness({
     readPng: () => validPng,

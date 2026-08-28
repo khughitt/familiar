@@ -43,6 +43,8 @@ jobs:
           grep -F 'Darwin real snapshot keeps this process identity stable' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin ps keeps comm last and canonicalizes tty' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin copies a stable local pack through its pathname walker' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'an atomic intent commit wakes a directory watcher on this platform' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'intent-watch filenames on darwin:' "$RUNNER_TEMP/familiar-tests.log"
       - name: linked command smoke
         run: |
           set -o pipefail
