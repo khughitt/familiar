@@ -784,7 +784,9 @@ documented install steps leave Codex rendering nothing at all. The documented re
 is also a dead end there: `--sync-projects` iterates catalog identities holding a
 `path` pin, and `identities.yaml` does not exist after a clean `theme add`, so it is a
 no-op on exactly the machines that need it. The gate worked around it by hand-writing
-the project-local config that sync would have produced.
+the project-local config that sync would have produced. **Fixed** on
+`fix/codex-pet-sync-cwd`: the current repository is now a sync target alongside the
+pins, guarded so it can never reach the user-wide config.
 
 `familiar install opencode` refuses whenever an `opencode.jsonc` exists — the correct
 refusal, since rewriting a commented file as plain JSON would lose the comments — but
