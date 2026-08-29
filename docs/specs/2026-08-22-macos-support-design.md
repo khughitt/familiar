@@ -2,7 +2,10 @@
 
 **Status:** portable core implemented and CI-backed; live-hook ancestry and
 executor gate closed 2026-08-23, the Darwin adapters activated and `setup codex`
-implemented on that evidence; physical terminal rendering remains provisional
+implemented on that evidence; the §11 terminal gate executed 2026-08-24 to
+2026-08-28 (`docs/ref/2026-08-24-macos-terminal-smoke.md`), promoting Claude Code
+and Codex rendering in Kitty and Ghostty and leaving the OpenCode sprite renderer
+provisional on two recorded failures
 **Date:** 2026-08-22
 
 Familiar's portable core now runs in Linux and macOS CI without pretending
@@ -16,23 +19,44 @@ The target support claim is deliberately split:
   OpenCode hook and installer. Both gates this claim waited on have passed — CI is green, and
   the live-hook capture in §2 confirmed the resolver predicate — and the Darwin
   adapters are active on that evidence.
-- **Provisional until physical-Mac smoke testing:** Familiar-rendered graphics,
-  tint, and bell delivery in Kitty and Ghostty, including OpenCode's TUI sprite
-  renderer.
+- **Confirmed by physical-Mac smoke testing (2026-08-24):** Familiar-rendered
+  graphics, tint, and bell delivery for Claude Code and Codex in Kitty 0.46.2 and
+  Ghostty 1.3.1.
+- **Provisional:** OpenCode's TUI sprite renderer, which failed that gate.
 - **Expected, not claimed:** Intel Macs and macOS 13.
 
 Linux behavior and its Node 22/26 CI remain supported unchanged.
 
 **Remaining work**, in the order it unblocks things:
 
-1. **The physical terminal promotion gate (§11).** Claude Code, Codex, and
-   OpenCode rendering in current Kitty and Ghostty on a real Mac, including
-   loading the OpenCode sprite plugin. This is what holds every provisional
-   label. No runbook exists for it yet; the process-runtime plan's Task 7 is its
-   specification.
-2. **A background or daemon-hosted Claude Code session on Darwin.** The
-   `tty !== null` half of the resolver predicate rests on Linux evidence; that
-   case has never been observed on a Mac. It belongs to the §11 pass.
+1. **Verifying the two OpenCode fixes on hardware.** The §11 gate ran on 2026-08-24
+   and promoted Claude Code and Codex; `familiar setup codex` was exercised live for
+   the first time and fired all six configured events. The OpenCode renderer failed on
+   two findings, and **both have since been root-caused and fixed**: the frozen pose
+   was a watch callback filtered on a filename Darwin never reports
+   (`fix/opencode-sprite-watch`, confirmed by macOS CI), and the unreachable
+   `needs-approval` was an ask bound to nothing on the stable event stream
+   (`fix/opencode-permission-event`, diagnosed from the SDK types). Neither fix has been
+   exercised against a live OpenCode, so the renderer keeps its provisional label until
+   its two cells are re-run. That re-run is the only thing standing between OpenCode and
+   the same claim Claude Code and Codex now hold.
+2. **The `tty !== null` predicate in a live launchd context.** §11.4's probes ran
+   and carried most of the way. Probe 1 observed the case directly on a Mac for the
+   first time: seven background and daemon-hosted `claude` processes — pty hosts,
+   spares, the app bundle, a detached CLI — every one of them owning no controlling
+   terminal, against two foreground sessions that did. The predicate's premise holds
+   on Darwin. The fail-closed contract is closed too, by a replacement probe that ran
+   `familiar hook` under launchd with no controlling terminal: the diagnostic reached
+   stderr, the hook exited 0, and no bytes were written. What remains open is narrow:
+   that chain contained no `claude` process at all, so the resolver failed on the
+   `comm` half. Exercising the `tty !== null` half in situ needs a launchd-hosted
+   `claude` that fires a level-bearing hook, and `claude -p` does not — `SessionEnd`
+   carries `level === null` and skips the resolver entirely.
+
+   **Parked, not scheduled.** This needs a physical Mac and no further Mac-hosted
+   experiments are planned. The runbook, its corrections, the offline checker and the
+   tester's scripts are on `main` so that someone with the hardware can pick it up; §11.7
+   describes the shape of the run.
 
 ## 1. Scope
 
@@ -273,8 +297,14 @@ environment is therefore a sound capability source on Darwin for both supported
 terminals. tmux remains unmeasured and unclaimed.
 
 Codex uses native pets rather than Familiar-rendered sprites. OpenCode's sprite
-renderer executes inside OpenCode with its own environment, but remains
-provisional until the renderer is loaded and exercised on a physical Mac.
+renderer executes inside OpenCode with its own environment. The §11 gate loaded and
+exercised it on a physical Mac and it **failed**: the sprite transmits three images
+per session and then re-places them thousands of times without ever changing pose,
+on both terminals and both graphics capabilities. Root cause found and confirmed by
+macOS CI — the runtime filtered its watch callback on a filename Darwin never
+reports — and fixed on `fix/opencode-sprite-watch`. The renderer stays provisional
+until its cells are re-run, since a second failure, an unreachable `needs-approval`,
+is untouched by that fix.
 
 ## 5. Theme traversal
 
@@ -397,7 +427,8 @@ covers:
 4. `install opencode`, whose global directory remains `~/.config/opencode` on
    both platforms.
 5. An optional user LaunchAgent invoking `familiar reap` every minute.
-6. The provisional Kitty/Ghostty smoke checklist.
+6. The Kitty/Ghostty checklist, now scoped to the combinations the §11 gate did
+   not cover.
 
 The Linux section retains Niri, Noctalia, and systemd instructions. User-facing
 docs must not imply those integrations exist on macOS.
@@ -463,23 +494,321 @@ substitute for the two physical-Mac gates in §§2 and 11.
 ## 11. Manual promotion gates
 
 The live-hook ancestor capture in §2 was completed on 2026-08-23 and is the
-prerequisite for Darwin adapter activation. With implementation CI green, the
-remaining physical-Mac smoke pass runs Claude Code, Codex, and OpenCode in
-current Kitty and Ghostty releases. For each
-applicable pair it checks launch/idle, working, approval, done/error where
-exposed, session exit, and `familiar reap` after abnormal termination.
+prerequisite for Darwin adapter activation. The physical terminal gate — Claude
+Code, Codex, and OpenCode exercised in current Kitty and Ghostty releases on a
+real Mac — **was executed 2026-08-24 to 2026-08-28**. This section specifies that
+pass; `docs/ref/2026-08-24-macos-terminal-smoke.md` records what it found. The
+runbook implementing it lived on the disposable capture branch, as §2's did.
 
-The pass records agent and terminal versions, resolved ancestor basename, raw
-and canonical TTY, inherited graphics markers, and concise failures. One gap
-the §2 captures left open belongs to this pass: a background or daemon-hosted
-Claude Code session, the case the `tty !== null` predicate exists for. The
-Ghostty environment markers were closed by the 2026-08-23 Ghostty capture. It
-also
-loads the OpenCode sprite plugin, so the optional native renderer dependency is
-exercised rather than merely installed.
+Outcome: Claude Code and Codex passed every cell, the capability `none` control
+passed, all six reap sets proved removal by identity, and probe 1 confirmed on
+hardware that background and daemon-hosted `claude` processes own no controlling
+terminal — the premise the `tty !== null` predicate rests on. OpenCode failed both
+cells. Two Familiar installer defects surfaced that are outside this gate's scope;
+§11.8 records them.
 
-Failures keep the affected adapter or renderer provisional. The live-rendering
-label is removed only when the smoke evidence exists.
+### 11.1 Evidence standard
+
+§2's checks produced text a reviewer could verify without being present. §11's
+do not. A sprite drawn, a window tinted, a bell rung are things a person sees,
+and a gate resting on "the tester said it looked right" would promote a subtly
+wrong byte stream that still looked plausible. Every claim is therefore split
+into a machine-checked half and a half only the tester can answer, and a cell
+passes only if both hold.
+
+The machine-checked half comes from an opt-in tee at `writeAllSync`
+(`src/render/term/io.js`). That is the one choke point every terminal write
+already passes through: the hook's `emit()`, which opens `/dev/ttys<hex>` on
+Darwin and writes with an explicit fd, and the OpenCode sprite plugin, which
+calls the same function with the default `fd = 1` inside OpenCode's own
+process. One tee therefore covers both the hook path and the renderer that has
+never been loaded, without editing either call site. Because `writeAllSync`
+receives an fd and not a path, `emit()` records the resolved `terminal.path`
+and the probe correlates the two.
+
+Records are one JSON line per write: timestamp, pid, agent, event, target path,
+the `rdev` of the written fd, and each escape decomposed into introducer, control
+keys, payload length, and payload SHA-256. The device is identified by `rdev`
+rather than by name because Node exposes no `ttyname`; comparing
+`fstat(fd).rdev` against `stat(/dev/<tty>).rdev` is also the stronger check, being
+device identity rather than a string that matched.
+
+That internal comparison is necessary and not sufficient. It proves the emitter
+wrote to the device it opened, which a resolver that picked the *wrong* terminal
+also satisfies — it would open that terminal and write to it consistently. So the
+run captures its window's device independently, before any agent starts, and every
+write is checked against that value too. This is what moves "the bytes land in this
+window" from the tester's column into the machine-checked one; the tester's
+observation becomes corroboration rather than the only evidence. Tint, cursor, reset, and bell bytes
+are short and constant and are recorded verbatim. Graphics payloads are recorded
+as length and digest only, because they are bulk; the digest and the control keys
+are what verification needs, never the pixels.
+
+The escape vocabulary is closed and small. From the hook's emitter it is exactly
+what `osc.js` exports — `OSC 11`, `OSC 12`, `OSC 111`, `OSC 112`, and `BEL` —
+alongside the Kitty graphics `APC`. Anything else in a hook write fails the cell.
+In particular Familiar takes no ownership of the terminal title, which two
+emitter tests assert directly, so a title escape appearing in a capture is a
+defect rather than a tolerated extra.
+
+The OpenCode sprite renderer adds one further form, and only there. `placeAt` in
+`integrations/opencode/sprite.js` wraps its placement `APC` in `ESC 7`, one
+absolute `CSI <row>;<col> H`, and `ESC 8`, so the visible cursor returns to where
+OpenTUI left it between frames. That envelope is admitted for that writer alone,
+and its *order* is checked, not merely its balance: a save, exactly one move, the
+placement, then the restore. The same escapes appearing in a hook write are a
+defect — the hook emitter never moves the cursor — and a reversed or unclosed
+envelope leaves the cursor where the sprite put it, which is a visible bug that
+counting saves and restores would not catch.
+
+| Claim | Machine-checked from the byte log | Tester only |
+| --- | --- | --- |
+| Sprite transmitted | APC `_G` keys well formed; every chunk that names an image names `imageIdFor(sessionId)` and at least one does; the transmit chunk's `c=`/`r=` equal the `boxFor` placement box; the chunk count matches the encoder's own | a sprite is on screen, positioned correctly, covering no dialog |
+| Tint applied | `OSC 11` and `OSC 12` carry the active theme's backdrop and base colours | the window colour actually changes |
+| Bell rung | `BEL` present for exactly the ringing states that cell exposes, and absent otherwise | the bell is perceptible |
+| Correct terminal | `fstat(fd).rdev` equals `stat(target).rdev`, **and** every write's device equals the window device captured independently before the run | corroboration only: the sprite appears in this window |
+| Graphics correctly suppressed | at capability `none`, zero APC `_G` bytes, while the `OSC 11`/`OSC 12` and any bell bytes still reach the validated TTY | the window still tints and rings with no sprite |
+
+The tester's column is irreducible. The point of the first column is that a
+passing tester note over a malformed byte log is a failure.
+
+Two boundaries on that first column, stated here rather than discovered during a
+run. **Frame-by-frame sequence is not machine-checked.** The placement box comes
+from `boxFor` and the frame count from `planAnimation`, so both are recorded and
+the box is verified; but validating the frame *sequence* would mean
+reimplementing `encodeKittyProgram`'s chunking rules inside the checker, and a
+second copy of the encoder is not an independent check of the first. Instead the
+checker is proved against real encoder output by a golden test, and the
+independent properties — image identity across every chunk, key grammar, and the
+placement box — are what carry the claim. **OpenCode's graphics are checked more
+shallowly than the hook's**, because its renderer plans and encodes inside
+`sprite-runtime.js` and its records therefore carry no planned frame count or
+placement; image identity, key grammar, and envelope order are what apply there.
+The evidence note records both boundaries.
+
+### 11.2 The matrix is not uniform
+
+The three adapters expose different states and send different bytes, so a row
+of `pass` does not mean the same thing across the table:
+
+| Agent | States exposed | Bytes Familiar sends | Sprite drawn by |
+| --- | --- | --- | --- |
+| Claude Code | six: `idle`, `working`, `needs-input`, `needs-approval`, `done`, `error` | graphics, tint, bell | Familiar: the hook transmits, `familiar statusline` prints the placeholder cells |
+| Codex | four: `idle`, `working`, `needs-approval`, `done` | tint, bell | Codex natively, from `install pets` |
+| OpenCode | five: adds `error`, omits `needs-input` | tint, bell | `integrations/opencode/sprite-plugin.tsx`, inside OpenCode's process |
+
+Codex maps six events onto four states: it has neither a failure event nor an
+idle-prompt notification. OpenCode's `needs-input` would require question events
+that are not on the stable server stream. These exclusions are structural, so
+the evidence note records them inline beside the cell rather than leaving three
+full `pass` rows to be read as six states everywhere. The bell rule narrows with
+them: Claude Code can ring on all three ringing states, OpenCode on
+`needs-approval` and `error`, and Codex on `needs-approval` alone.
+
+Two behaviours the runbook states in advance so they are not recorded as
+failures. Codex's `SessionStart` fires at the first turn, not at window open, so
+an opened but unspoken-to Codex window showing nothing is correct. OpenCode's
+hook path observes no tool events at all — §7 of
+`docs/ref/2026-08-23-macos-agent-process-spike.md` — so `working` comes from
+`session.busy` and `done` only from the `reduceState` idle-after-active path.
+
+Claude Code is the only cell that exercises the hook and status-line
+rendezvous: two processes, with no channel between them, agreeing on
+`imageIdFor(sessionId)`. It is the mechanism most likely to break inside a real
+TUI, so it is checked explicitly rather than folded into "sprite: yes".
+
+Two per-cell checks are deliberately not states, and enumerating states alone
+would skip both.
+
+**Session exit.** `SessionEnd` and `dispose` map to `null`, not to a state, and
+`renderTransition` returns `oscReset()` on exactly that null transition. The
+colour restore therefore has one and only one trigger. Each cell ends with a
+normal session exit and requires `OSC 111` and `OSC 112` in the byte log; a
+matrix that promoted six correct states while leaving a terminal permanently
+tinted would be worse than no promotion.
+
+**Abnormal termination and `familiar reap`.** A force-terminated session emits
+no event at all, so nothing restores the colours and nothing removes the bus
+record. This check has no byte component, and observing an absent record after
+`reap` would not establish anything: `pruneDead` also runs inside the ordinary
+hook commit path (`src/bus/transaction.js`), so any hook fired by any agent
+anywhere on the machine removes dead records as a side effect. Absence is
+therefore consistent with `reap` having done nothing at all.
+
+The check is a four-step sequence, and each step exists to close that hole:
+
+1. `SIGKILL` the agent, never a graceful quit, which would emit `SessionEnd`
+   and take the normal cleanup path instead.
+2. Before anything else runs, read the bus and require the killed session's
+   record to still be **present**. This is the step that gives the later
+   absence meaning, and it is why no other agent session may be running on the
+   machine during the check.
+3. Run `familiar reap` and require its stdout to name that session:
+   `reaped <id>`. `reap` prints nothing when it removes nothing, so this line
+   is the positive evidence that `reap` itself did the removal.
+4. Read the bus again and require the record to be gone.
+
+That the terminal stays tinted throughout is expected and is recorded as such —
+the tinting is cleared by the next session's transitions, not by reaping — so
+the tester does not log it as a failure.
+
+### 11.3 The capability `none` negative control
+
+Every cell in the matrix runs in Kitty or Ghostty and therefore classifies as
+graphics-capable, so the suppression rule in §11.1 would be defined and never
+executed. One negative control run closes that, in a real terminal rather than
+a fixture.
+
+Launch the agent from a shell with every marker the classifier reads cleared —
+`GRAPHICS_MARKERS` in `src/render/term/capability.js` is exported so that
+scrubbing clears exactly the source of truth `graphicsCapability` consumes —
+and with `TERM` set to a non-graphics value such as `xterm-256color`. The TUI
+keeps working, the resolved TTY is still a genuine terminal device, and the
+inherited hook environment classifies as `none`. Darwin reads the graphics
+environment from the hook's inherited environment (§4), so scrubbing at agent
+launch is what reaches the classifier.
+
+The control covers Claude Code and OpenCode, because those are the only two
+transmitters and their suppression sites differ: the hook's `emit()` skips the
+graphics block, while `sprite-plugin.tsx` returns before registering anything
+with the renderer. Codex is excluded because it transmits no graphics for a
+`none` classification to suppress.
+
+Required in one run, in Kitty: zero APC `_G` bytes in the byte log; `OSC 11`
+and `OSC 12` still present; a bell still present on a ringing state; and the
+tester confirming the window tints and rings with no sprite drawn. A control
+that produces graphics bytes is a failure of the same severity as a missing
+sprite in a normal cell — it means Familiar transmits into terminals that
+cannot decode it.
+
+The pass is also the first live exercise of `familiar setup codex` (§7). The §2
+capture used a hand-written command string with a deliberate canary; the
+generated document has never configured a real agent. The runbook generates it,
+merges it into `~/.codex/hooks.json`, and all six mapped events firing is what
+verifies that the generator and the adapter agree.
+
+### 11.4 The background and daemon appendix
+
+The gap §2 carried forward is a background or daemon-hosted Claude Code
+session, the case the `tty !== null` half of the predicate exists for. Two
+probes close it, run once, under Kitty; the predicate is terminal-independent.
+
+**Probe 1 — induce the real case.** Inside an interactive session, drive
+Claude Code into a background subtree and capture the chain from a hook firing
+under it. Darwin raises the stakes relative to Linux: there, the pty host
+reports `comm` as the version string and never matches, whereas Darwin `comm`
+is an executable path whose basename may well be `claude`. A process whose
+purpose is hosting pseudo-terminals is a plausible owner of one. Three
+outcomes, all recorded: the intermediate process appears with a null TTY and is
+correctly skipped, closing the gap; it appears owning a TTY, which is a
+resolver defect that halts the gate and reopens this design; or the case cannot
+be induced on the installed version, in which case the predicate's second half
+remains Linux-evidenced. The third outcome does not block the rendering
+promotion — resolver discrimination and terminal rendering are independent
+claims.
+
+**Probe 2 — the fail-closed contract.** A headless `claude -p` under `launchd`
+with stdio fully detached, hooks configured, and no controlling terminal
+anywhere in the chain. Expected: the named `could not find the claude-code
+process` diagnostic, exit zero, and zero writes in the byte log. This is the
+only Darwin exercise of §10's rule that resolver failure reaches the cosmetic
+diagnostic rather than being swallowed.
+
+### 11.5 Configuration exercised
+
+The full matrix runs under Node 22, matching both `engines.node` and the
+version CI tests, so promoted claims and the supported configuration agree. One
+cell — Claude Code in Kitty — is then repeated under the Mac's installed Node
+to confirm nothing is version-specific.
+
+The macOS half of §2's configuration gap stays open. CI runs macOS 14 with no
+live agents; the physical Mac is macOS 26. No promotion may state or imply that
+macOS 14 has run a live agent, because it has not.
+
+### 11.6 Promotion rule
+
+A cell passes when three things hold: every state that adapter structurally
+exposes was exercised, with its byte log verified and its tester observation
+recorded; the normal session exit produced `OSC 111` and `OSC 112`; and an
+abnormally terminated session was proven removed by `familiar reap` through the
+four-step sequence in §11.2. All three are required, because the first alone can
+be satisfied while cleanup is entirely untested.
+
+The pass as a whole additionally requires the §11.3 capability `none` negative
+control. It is not a cell and does not belong to any terminal row, but no
+promotion may proceed without it: without it the graphics-suppression rule is
+asserted and never tested. A failing cell keeps **that adapter or
+renderer** provisional and does not hold back the ones that passed: promotion is
+per-adapter, and the evidence note records the failures alongside the promotions
+rather than being committed alone. What a failing cell never does is narrow into a
+caveat on a promoted claim — the adapter it belongs to stays provisional outright
+until its cells are re-run and pass.
+
+A complete pass promotes only what was exercised: physical Kitty and Ghostty
+rendering on the tested macOS and Node versions, named. It removes the
+corresponding provisional warnings from `docs/install.md` and nothing else.
+tmux, Intel, macOS 13, other terminals, and macOS 14 live-agent behaviour remain
+unclaimed.
+
+A probe 1 result showing an intermediate `claude` owning a TTY overrides all of
+the above: it is a wrong-target defect, and no rendering evidence promotes
+anything while it stands.
+
+### 11.7 Execution shape
+
+One runbook, parameterized by terminal, run twice — Kitty, then Ghostty — with
+the §11.4 appendix run once. Setup, configuration backup, and restore are
+written once, and the second run re-tests the script. That matters: the
+2026-08-23 Ghostty run caught a `ghostty --version` file-description seek that
+had silently overwritten five lines of already-written evidence, with exit
+status 0 throughout.
+
+The capture branch is disposable and never merged. It is pushed to `origin`
+only as transport to the test machine, exactly as `spike/macos-agent-handoff`
+was, and deleted from the remote once artifacts are received; a `git bundle`
+is the offline alternative. The tester pushes nothing back — no branch, no
+capture, no amended commit. Only the reviewed, redacted evidence note
+`docs/ref/2026-08-24-macos-terminal-smoke.md` reaches `main`, together with any
+promotion it earns.
+
+Four guards carry forward from that run's recorded deviations, as rules rather
+than notes:
+
+1. The suite-green stop condition names the known status-line
+   `BRANCH_TIMEOUT_MS` failure in advance, so a real regression is
+   distinguishable from the known one.
+2. No shell loop variable is named `path`; zsh ties it to `PATH`, and last time
+   the loop wiped `PATH` mid-script after printing a success line.
+3. Every version is captured through a command substitution, never inside a
+   redirected block.
+4. The hook command carries a run-scoped environment gate, so a second agent
+   session picking up the temporary hook from shared configuration cannot write
+   uncorrelated records.
+
+### 11.8 Findings outside the gate's scope
+
+The run surfaced two installer defects that are not terminal-rendering findings and
+do not bear on any promotion above. Both are recorded here because the gate is where
+they were found and reproduced, not because §11 owns their fix.
+
+`familiar install pets` compiles every pet into `~/.codex/pets` but selects none, and
+Codex draws nothing without a `[tui] pet` setting. For Codex the pet is the entire
+state signal, since Familiar sends only tint and bell — so on a fresh machine the
+documented install steps leave Codex rendering nothing at all. The documented remedy
+is also a dead end there: `--sync-projects` iterates catalog identities holding a
+`path` pin, and `identities.yaml` does not exist after a clean `theme add`, so it is a
+no-op on exactly the machines that need it. The gate worked around it by hand-writing
+the project-local config that sync would have produced. **Fixed** on
+`fix/codex-pet-sync-cwd`: the current repository is now a sync target alongside the
+pins, guarded so it can never reach the user-wide config.
+
+`familiar install opencode` refuses whenever an `opencode.jsonc` exists — the correct
+refusal, since rewriting a commented file as plain JSON would lose the comments — but
+it exits before writing `tui.json`, so the refusal takes the sprite renderer's
+registration down with it. Following §8's install steps literally on a machine with a
+`.jsonc` config leaves the renderer uninstalled, and the OpenCode cells would then run
+with no sprite and no indication why. The refusal should still write the half it can,
+or name both files it did not write.
 
 ## 12. Alternatives rejected
 
@@ -530,7 +859,7 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Decision | Choice |
 | --- | --- |
 | First support claim | portable core CI-backed; Darwin agent lifecycle and Codex setup authorized by the 2026-08-23 live-hook evidence |
-| Live terminal claim | provisional until physical-Mac smoke |
+| Live terminal claim | Claude Code and Codex promoted for Kitty 0.46.2 and Ghostty 1.3.1 on macOS 26.6.2, Node 22 and 25, by the 2026-08-24 gate; OpenCode renderer still provisional |
 | macOS floor | macOS 14+, Apple Silicon, Node 22 |
 | Installation | checkout + `npm install` + `npm link` |
 | Familiar paths | existing `~/.config` and `~/.local/state` paths |
@@ -542,6 +871,15 @@ OpenCode and preserve one configuration contract across Linux and macOS.
 | Darwin start time | `lstart`, one-second identity granularity |
 | Theme traversal | Linux handle-bound; Darwin verified pathname walker |
 | Test lease | existing file lock; default retry budget clears stale guards |
-| OpenCode renderer | provisional; CI backs hook and installer only |
+| OpenCode renderer | provisional; CI backs hook and installer only, and the 2026-08-24 gate recorded a frozen pose and an unreachable `needs-approval` |
+| Terminal gate evidence | byte-level tee at `writeAllSync` plus tester observation; a cell needs both |
+| Gate cleanup coverage | per cell: `oscReset` on normal exit; stored pid+starttime verified, SIGKILL, record present, `reaped <id>` on stdout, record absent |
+| Gate terminal identity | internal target/fd agreement plus every write checked against the run's independently captured window device |
+| Gate negative control | one marker-scrubbed physical-terminal run over Claude Code and OpenCode; required for any promotion |
+| Gate escape recording | tint, cursor, reset, and bell verbatim; graphics as length and digest; the OpenCode placement envelope order-checked for that writer alone; any other escape fails the cell |
+| Gate graphics depth | image identity, key grammar, and placement box are machine-checked; frame sequence is not, and OpenCode carries no planned frame count |
+| Background-session evidence | one induced-subtree probe and one headless fail-closed probe (§11.4) |
+| Gate configuration | full matrix on Node 22, one cell repeated on the installed Node; the macOS 14 live-agent gap stays open |
+| Gate execution | one runbook parameterized by terminal, run twice; disposable capture branch, redacted note only on `main` |
 | macOS CI | one `macos-14` / Node 22 full-suite and install-smoke job |
 | Deferred | native helpers, Homebrew, Intel/macOS 13 claims, other terminals, Niri/Noctalia ports |

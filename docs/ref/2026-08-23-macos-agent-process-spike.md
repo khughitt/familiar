@@ -2,7 +2,8 @@
 
 **Status:** capture complete 2026-08-23. Closes the live-hook ancestry and
 hook-executor gate in §2 of the macOS core support design. Live graphics, tint,
-and bell remain provisional under §11.
+and bell were provisional under §11 when this was written; the §11 gate ran on
+2026-08-24 and settled them — see `docs/ref/2026-08-24-macos-terminal-smoke.md`.
 
 **Provenance**
 
