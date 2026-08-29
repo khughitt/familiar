@@ -47,7 +47,14 @@ export function createWindow() {
         else throw new Error(`opencode: unknown session status: ${kind}`);
         return;
       }
-      case 'permission.asked':   permissions.add(properties.id); return;
+      // TWO NAMES, ONE ASK. `permission.asked` is what the dedicated `permission.ask` HOOK is
+      // folded into (binding.js synthesises it). `permission.updated` is what opencode's STABLE
+      // event stream calls the same thing -- its properties are the whole Permission, so `id` is
+      // in the same place. The v2 stream does have a `permission.asked` event, but this plugin
+      // binds the stable union, where that name does not exist. Both are accepted because both
+      // can arrive, and adding one id twice to a Set is free.
+      case 'permission.asked':
+      case 'permission.updated': permissions.add(properties.id); return;
       case 'permission.replied': permissions.delete(properties.permissionID); return;
       default:
         // session.error AND session.idle are both excluded deliberately, and binding.js filters both

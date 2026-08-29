@@ -41,15 +41,26 @@ export function logError(message) {
   } catch { /* the error channel itself is broken. There is nowhere left to complain to. */ }
 }
 
-// The events, out of opencode's whole firehose, that move the window's level. Three things are
+// The events, out of opencode's whole firehose, that move the window's level. Two things are
 // deliberately NOT here. `session.error` is an EDGE, not a level (handled separately below).
-// Permission ASKS arrive on a dedicated hook, not the event stream. And `session.idle` is a
-// REDUNDANT TWIN: opencode publishes it in the SAME `set()` call as the idle `session.status`
+// And `session.idle` is a REDUNDANT TWIN: opencode publishes it in the SAME `set()` call as the idle `session.status`
 // (session/status.ts:41-43), so binding to both would fold and enqueue the idle transition TWICE --
 // and the second reduction (done->idle) would erase the `done` pose on every clean turn. The idle
 // `session.status` alone drives it. Everything else (message deltas, plugin churn, diffs, todos) is
 // ignored.
-export const LEVEL_EVENTS = new Set(['session.status', 'permission.replied']);
+//
+// `permission.updated` IS here, and its absence was a bug. The comment that used to stand in this
+// spot said permission asks arrive only on the dedicated hook and not on the event stream. That is
+// not true of the stable union this plugin binds: `@opencode-ai/sdk` types it with
+// `permission.updated` (properties: the whole Permission) and `permission.replied`, while
+// `permission.asked` exists only in the v2 union. So the ask side was bound to nothing on the
+// stream and rested entirely on the `permission.ask` hook. When that hook does not fire, the ask
+// is invisible, the reply drains a set nothing ever filled, and the window runs
+// working -> done with the user staring at a permission dialog -- which is what the physical-Mac
+// terminal gate measured on the bus, and why the OpenCode adapter reached four of its five states.
+export const LEVEL_EVENTS = new Set([
+  'session.status', 'permission.updated', 'permission.replied',
+]);
 
 export function createBinding({ directory, pid = process.pid, spawn = spawnHook, report = logError } = {}) {
   // Authoritative and present at plugin init: the server plugin is handed the project directory
@@ -112,7 +123,9 @@ export function createBinding({ directory, pid = process.pid, spawn = spawnHook,
     });
   }
 
-  // opencode's DEDICATED permission hook -- a permission ask is not on the event stream. We only
+  // opencode's DEDICATED permission hook. It is no longer the ONLY way an ask reaches us -- the
+  // stable stream's `permission.updated` carries the same Permission and is bound above -- but it
+  // stays: whichever arrives first wins and the second is a free Set re-add. We only
   // OBSERVE: `output.status` is left untouched, so the user is still asked. The permission carries
   // the sessionID of whoever raised it -- a SUBAGENT's ask carries the CHILD's sessionID, and it
   // must raise the window too -- so we add it with NO filter. `session.status` leaves the raising

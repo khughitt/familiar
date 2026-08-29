@@ -19,10 +19,18 @@ const capture = () => {
 const status = (sessionID, kind) => ({ event: { type: 'session.status', properties: { sessionID, status: { type: kind } } } });
 const idle = (sessionID) => ({ event: { type: 'session.idle', properties: { sessionID } } });
 const replied = (permissionID) => ({ event: { type: 'permission.replied', properties: { permissionID } } });
+// The stable stream's ask. Its properties are the whole Permission, so the id sits at `id` --
+// unlike the reply, which names it `permissionID`.
+const askedOnStream = (id, sessionID = 's1') => ({
+  event: { type: 'permission.updated', properties: { id, sessionID, type: 'bash', title: 'run it' } },
+});
 const errored = (sessionID) => ({ event: { type: 'session.error', properties: sessionID ? { sessionID } : {} } });
 
-test('LEVEL_EVENTS is exactly the two stream events the window folds', () => {
-  assert.deepEqual([...LEVEL_EVENTS].sort(), ['permission.replied', 'session.status']);
+test('LEVEL_EVENTS is exactly the three stream events the window folds', () => {
+  assert.deepEqual(
+    [...LEVEL_EVENTS].sort(),
+    ['permission.replied', 'permission.updated', 'session.status'],
+  );
 });
 
 test('the payload keys the bus by the PROCESS, and takes cwd from opencode', async () => {
@@ -53,6 +61,41 @@ test('a busy session, a permission, and the fall back to busy', async () => {
   await b.dispose();
   assert.deepEqual(rec.events(), [
     'init', 'session.busy', 'permission.pending', 'session.busy', 'session.idle', 'dispose',
+  ]);
+});
+
+// REGRESSION, and the one the physical-Mac terminal gate found. The `permission.ask` HOOK did not
+// fire there, and the ask side was bound to nothing on the event stream, so the window ran
+// busy -> idle with a permission dialog on screen the whole time and never reached
+// `permission.pending`. The stable stream carries the ask as `permission.updated`; binding it makes
+// the ask visible whether or not the hook fires.
+test('an ask that arrives ONLY on the stream still raises the window', async () => {
+  const rec = recorder();
+  const b = createBinding({ directory: '/p', pid: 1, spawn: rec.spawn });
+  b.onEvent(status('s1', 'busy'));
+  b.onEvent(askedOnStream('r1'));      // no onPermissionAsk call: the hook stayed silent
+  b.onEvent(replied('r1'));
+  b.onEvent(status('s1', 'idle'));
+  await b.dispose();
+  assert.deepEqual(rec.events(), [
+    'init', 'session.busy', 'permission.pending', 'session.busy', 'session.idle', 'dispose',
+  ]);
+});
+
+// Both can arrive for one ask. The window holds ids in a Set, so the second is a no-op rather than
+// a second `permission.pending` -- and one reply still drains it, leaving nothing stuck.
+test('the hook and the stream describing the SAME ask raise the window once', async () => {
+  const rec = recorder();
+  const b = createBinding({ directory: '/p', pid: 1, spawn: rec.spawn });
+  b.onEvent(status('s1', 'busy'));
+  b.onPermissionAsk({ id: 'r1', sessionID: 's1' });
+  b.onEvent(askedOnStream('r1'));
+  b.onEvent(replied('r1'));
+  b.onEvent(status('s1', 'idle'));
+  await b.dispose();
+  assert.deepEqual(rec.events(), [
+    'init', 'session.busy', 'permission.pending', 'permission.pending',
+    'session.busy', 'session.idle', 'dispose',
   ]);
 });
 
