@@ -29,12 +29,17 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
 
 **Remaining work**, in the order it unblocks things:
 
-1. **The OpenCode sprite renderer.** The §11 gate ran on 2026-08-24 and promoted
-   Claude Code and Codex; `familiar setup codex` was exercised live for the first
-   time and fired all six configured events. The OpenCode renderer failed on two
-   findings — a pose that never changes and a `needs-approval` that never reaches
-   the bus — and holds the only remaining provisional label. Neither is
-   root-caused; see the evidence note.
+1. **Verifying the two OpenCode fixes on hardware.** The §11 gate ran on 2026-08-24
+   and promoted Claude Code and Codex; `familiar setup codex` was exercised live for
+   the first time and fired all six configured events. The OpenCode renderer failed on
+   two findings, and **both have since been root-caused and fixed**: the frozen pose
+   was a watch callback filtered on a filename Darwin never reports
+   (`fix/opencode-sprite-watch`, confirmed by macOS CI), and the unreachable
+   `needs-approval` was an ask bound to nothing on the stable event stream
+   (`fix/opencode-permission-event`, diagnosed from the SDK types). Neither fix has been
+   exercised against a live OpenCode, so the renderer keeps its provisional label until
+   its two cells are re-run. That re-run is the only thing standing between OpenCode and
+   the same claim Claude Code and Codex now hold.
 2. **The `tty !== null` predicate in a live launchd context.** §11.4's probes ran
    and carried most of the way. Probe 1 observed the case directly on a Mac for the
    first time: seven background and daemon-hosted `claude` processes — pty hosts,
@@ -47,6 +52,11 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
    `comm` half. Exercising the `tty !== null` half in situ needs a launchd-hosted
    `claude` that fires a level-bearing hook, and `claude -p` does not — `SessionEnd`
    carries `level === null` and skips the resolver entirely.
+
+   **Parked, not scheduled.** This needs a physical Mac and no further Mac-hosted
+   experiments are planned. The runbook, its corrections, the offline checker and the
+   tester's scripts are on `main` so that someone with the hardware can pick it up; §11.7
+   describes the shape of the run.
 
 ## 1. Scope
 

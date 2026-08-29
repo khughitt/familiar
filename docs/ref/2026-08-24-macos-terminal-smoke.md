@@ -3,7 +3,8 @@
 **Status:** executed 2026-08-24 to 2026-08-28 on a physical Apple Silicon Mac. Every
 artifact below was re-verified locally against the returned files; no result in this
 note rests on the tester's transcription. Claude Code and Codex pass in both terminals.
-**OpenCode fails and stays provisional**, on two independent findings.
+**OpenCode fails and stays provisional**, on two independent findings — both since
+root-caused and fixed, neither yet verified against a live OpenCode.
 
 **Provenance**
 
@@ -11,10 +12,15 @@ note rests on the tester's transcription. Claude Code and Codex pass in both ter
   Pushed to `origin` only as transport to the test machine and deleted from the remote
   afterwards; the tester pushed nothing back. Every returned trace records
   `familiar-commit=8e824ab7d0c3dad20b622dc50d907bd45d0be965`.
-- Runbook: `docs/ref/2026-08-24-macos-terminal-gate-handoff.md` on that branch.
+- Runbook: `docs/ref/2026-08-24-macos-terminal-gate-handoff.md`, with the corrections it
+  needs in `docs/ref/2026-08-24-gate-runbook-amendments.md` and the tester's scripts in
+  `tools/gate/`. The offline checker is `tools/gate-verify.mjs`. The byte-level tee those
+  depend on stayed on the capture branch — it adds an inert branch to a production write
+  path — so anyone re-running this restores or re-implements it first.
 - Evidence per cell: one `<terminal>-<agent>.jsonl` trace plus seven reap artifacts.
   Returned inventory: 57 evidence files plus `notes.md`, matching §8 exactly
-  (`probe2.jsonl` absent by design, `probe2-stderr.txt` empty — see §3).
+  (`probe2.jsonl` absent by design, `probe2-stderr.txt` empty — see §3). Raw artifacts are
+  not committed; this note is the record.
 - Host: Apple Silicon, arm64, macOS 26.6.2 (25G83).
 - Node: matrix v22.23.2; spot-check v25.8.2. The machine has no separately installed
   system Node, so the spot-check used nvm's default rather than `nvm deactivate`, which
@@ -85,11 +91,14 @@ from `familiar install pets`. Both Codex cells verify clean at the byte level wi
 graphics, as the design requires. The pet was visible and changed with state on Ghostty;
 it was absent on Kitty, and the cause is a Familiar installer gap rather than anything
 about the terminal: **`familiar install pets` compiles all twelve pets but selects none**,
-and its documented remedy `--sync-projects` is a no-op on a fresh machine because it
-iterates identity entries with a `path` pin and `identities.yaml` does not exist after a
-clean `theme add`. Following the runbook exactly, Codex renders nothing on a fresh Mac.
-The Ghostty pass hand-wrote the project config that sync would have produced. This is a
-product defect worth its own fix, not a terminal-rendering failure.
+and its documented remedy `--sync-projects` was a no-op on a fresh machine because it
+iterated identity entries with a `path` pin and `identities.yaml` does not exist after a
+clean `theme add`. Following the runbook exactly, Codex rendered nothing on a fresh Mac.
+The Ghostty pass hand-wrote the project config that sync would have produced. An installer
+defect, not a terminal-rendering failure — which is why the Codex row reads `pass` on the
+bytes: what Familiar sends for Codex is tint and bell, and both were correct on both
+terminals. Fixed on `fix/codex-pet-sync-cwd`: `--sync-projects` now also selects a pet in
+the repository it is run from.
 
 ### OpenCode: two findings, renderer stays provisional
 
@@ -103,6 +112,15 @@ that file hosts reached the bus in the same session. Both cells therefore top ou
 of the five states OpenCode structurally exposes. This is a recorded failure, not an
 undriven cell. It also means OpenCode can only ever ring on `error`, since `needs-approval`
 is one of its two ringing states.
+
+**Root-caused after the run.** The stable event union this plugin binds types
+`permission.updated` and `permission.replied`; `permission.asked` exists only in the v2
+union. `LEVEL_EVENTS` carried the reply but nothing for the ask, so the ask rested entirely
+on the `permission.ask` hook — and when that hook does not fire, nothing fills the
+permission set, the reply drains a set that was always empty, and the window runs
+busy → idle with the dialog on screen. Fixed on `fix/opencode-permission-event` by folding
+`permission.updated` into the same window action. Diagnosed from the SDK types, not from a
+live reproduction.
 
 **The sprite never changes pose.** Observed on both terminals and confirmed in the bytes:
 each cell transmits exactly three images (`a=t`, three distinct ids) and then re-places them
