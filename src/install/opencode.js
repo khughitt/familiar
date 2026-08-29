@@ -59,6 +59,15 @@ function readText(path, read) {
 //
 // Both present is ambiguous, so it is also refused. Familiar does not get to guess which file
 // opencode is reading.
+//
+// A refusal is returned, NOT thrown, and it is PER FILE. These two configs are independent: tui.json
+// registers the sprite renderer and opencode.json registers the server plugin, and neither is made
+// unwritable by the other's extension. Throwing here used to abort both, so a `.jsonc` on the server
+// side silently took the RENDERER's registration down with it -- the physical-Mac terminal gate hit
+// exactly that and ran its OpenCode cells with no sprite at all, with nothing on screen to say why.
+// A `.jsonc` is not a broken config; it is one this tool declines to rewrite, which is a hand-off
+// for that file alone. Malformed input is the different case, and it still aborts everything --
+// see installOpencode.
 function resolveTarget(configDir, base, pluginPath, read) {
   const jsonPath = join(configDir, `${base}.json`);
   const jsoncPath = join(configDir, `${base}.jsonc`);
@@ -66,25 +75,28 @@ function resolveTarget(configDir, base, pluginPath, read) {
   const jsoncText = readText(jsoncPath, read);
 
   if (jsonText !== null && jsoncText !== null) {
-    throw new Error(
+    return { manual:
       `${jsonPath} and ${jsoncPath} both exist; opencode reads one of them and familiar will not `
-      + 'guess which. Keep one and re-run.'
-    );
+      + 'guess which. Keep one and re-run.' };
   }
   if (jsoncText !== null) {
-    throw new Error(
+    return { manual:
       `${jsoncPath}: add ${JSON.stringify(pluginPath)} to its "plugin" array by hand. Merging it `
-      + 'here would rewrite the file as plain JSON and drop its comments.'
-    );
+      + 'here would rewrite the file as plain JSON and drop its comments.' };
   }
   return { path: jsonPath, text: jsonText };
 }
 
-// All-or-nothing: resolve BOTH targets and merge BOTH files in memory (either can throw) BEFORE
-// writing either, so a malformed or unmergeable config never leaves the pair half-updated.
+// ALL-OR-NOTHING FOR MALFORMED INPUT, still: every writable target is merged in memory BEFORE any
+// of them is written, so a config this tool cannot parse aborts the whole run rather than leaving
+// the pair half-updated. What is NOT all-or-nothing is a per-file hand-off -- a `.jsonc`, or a
+// `.json`/`.jsonc` pair -- which takes only its own file out of the run. Returns what it wrote and
+// what it is asking the user to do by hand; a partial install is incomplete, and the caller says so.
 export function installOpencode({ configDir, tuiPluginPath, serverPluginPath, read, writeAtomic }) {
-  const tui = resolveTarget(configDir, 'tui', tuiPluginPath, read);
-  const config = resolveTarget(configDir, 'opencode', serverPluginPath, read);
+  const targets = [
+    { resolved: resolveTarget(configDir, 'tui', tuiPluginPath, read), pluginPath: tuiPluginPath },
+    { resolved: resolveTarget(configDir, 'opencode', serverPluginPath, read), pluginPath: serverPluginPath },
+  ];
 
   // Attach the source path at the orchestration boundary. mergePlugin stays a pure text transform,
   // while every user-facing refusal identifies WHICH of the two configs is malformed and why.
@@ -92,10 +104,12 @@ export function installOpencode({ configDir, tuiPluginPath, serverPluginPath, re
     try { return mergePlugin(text === null ? '{}' : text, pluginPath); }
     catch (err) { throw new Error(`${path}: ${err.message}`); }
   };
-  const tuiText = mergeAt(tui, tuiPluginPath);
-  const configText = mergeAt(config, serverPluginPath);
 
-  writeAtomic(tui.path, tuiText);
-  writeAtomic(config.path, configText);
-  return { tuiPath: tui.path, configPath: config.path };
+  const manual = targets.filter((t) => t.resolved.manual).map((t) => t.resolved.manual);
+  const planned = targets
+    .filter((t) => !t.resolved.manual)
+    .map(({ resolved, pluginPath }) => ({ path: resolved.path, text: mergeAt(resolved, pluginPath) }));
+
+  for (const { path, text } of planned) writeAtomic(path, text);
+  return { written: planned.map((p) => p.path), manual };
 }

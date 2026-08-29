@@ -116,14 +116,17 @@ test('installOpencode: missing files (read -> null) are created fresh', () => {
 test('installOpencode: an existing .jsonc config is refused, not shadowed by a new .json', () => {
   const files = { '/cfg/opencode.jsonc': '{\n  // mine\n  "plugin": []\n}' };
   const writes = {};
-  assert.throws(() => installOpencode({
+  const result = installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
     serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
-  }), /\/cfg\/opencode\.jsonc: add "\/abs\/plugin\.js" to its "plugin" array by hand/);
-  assert.deepEqual(writes, {});
+  });
+  // The original guard still holds: no opencode.json is created beside the .jsonc.
+  assert.equal(writes['/cfg/opencode.json'], undefined);
+  assert.equal(result.manual.length, 1);
+  assert.match(result.manual[0], /\/cfg\/opencode\.jsonc: add "\/abs\/plugin\.js" to its "plugin" array by hand/);
 });
 
 test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
@@ -133,18 +136,40 @@ test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
     '/cfg/opencode.json': '{ "plugin": [] }',
   };
   const writes = {};
-  assert.throws(() => installOpencode({
+  const result = installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
     serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
-  }), /\/cfg\/tui\.json and \/cfg\/tui\.jsonc both exist/);
-  assert.deepEqual(writes, {});
+  });
+  assert.equal(writes['/cfg/tui.json'], undefined);   // familiar does not guess which one opencode reads
+  assert.match(result.manual[0], /\/cfg\/tui\.json and \/cfg\/tui\.jsonc both exist/);
 });
 
-test('installOpencode: a .jsonc refusal aborts the other file too', () => {
+// REGRESSION, from the physical-Mac terminal gate. A `.jsonc` on ONE config used to abort the other,
+// so a hand-maintained opencode.jsonc left tui.json unwritten and the sprite RENDERER unregistered.
+// The two files are independent; a hand-off takes only its own file out of the run.
+test('installOpencode: a .jsonc hand-off leaves the OTHER file written', () => {
   const files = { '/cfg/tui.jsonc': '{}', '/cfg/opencode.json': '{ "plugin": [] }' };
+  const writes = {};
+  const result = installOpencode({
+    configDir: '/cfg',
+    tuiPluginPath: '/abs/sprite.tsx',
+    serverPluginPath: '/abs/plugin.js',
+    read: (p) => files[p] ?? null,
+    writeAtomic: (p, text) => { writes[p] = text; },
+  });
+  assert.deepEqual(JSON.parse(writes['/cfg/opencode.json']).plugin, ['/abs/plugin.js']);
+  assert.deepEqual(result.written, ['/cfg/opencode.json']);
+  assert.equal(writes['/cfg/tui.json'], undefined);
+  assert.match(result.manual[0], /\/cfg\/tui\.jsonc/);
+});
+
+// The all-or-nothing rule that REMAINS: a config this tool cannot parse is not a hand-off, and it
+// must not leave the pair half-updated.
+test('installOpencode: a malformed config still aborts before anything is written', () => {
+  const files = { '/cfg/tui.json': '{ this is not json' };
   const writes = {};
   assert.throws(() => installOpencode({
     configDir: '/cfg',
@@ -152,6 +177,6 @@ test('installOpencode: a .jsonc refusal aborts the other file too', () => {
     serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
-  }), /\/cfg\/tui\.jsonc/);
+  }), /\/cfg\/tui\.json/);
   assert.deepEqual(writes, {});   // opencode.json is mergeable, but nothing is written
 });

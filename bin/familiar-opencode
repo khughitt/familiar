@@ -60,7 +60,7 @@ if (args[0] === '-h' || args[0] === '--help') {
       ? join(project, '.opencode')
       : join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'opencode');
 
-  const { tuiPath, configPath } = installOpencode({
+  const { written, manual } = installOpencode({
     configDir,
     tuiPluginPath: join(integrationDir, 'sprite-plugin.tsx'),
     serverPluginPath: join(integrationDir, 'plugin.js'),
@@ -73,7 +73,19 @@ if (args[0] === '-h' || args[0] === '--help') {
       writeAtomicSync(p, text);
     },
   });
-  process.stdout.write(`wrote ${tuiPath}\nwrote ${configPath}\n`);
+  for (const path of written) process.stdout.write(`wrote ${path}\n`);
+  // A hand-off is not a crash, so it goes to stdout beside the writes -- but the install IS
+  // incomplete, and a caller that chained on this command must not read success. Same shape as
+  // `install pets`'s tracked-config hand-off, with a nonzero status because unlike that one this
+  // leaves a plugin unregistered.
+  for (const message of manual) process.stdout.write(`left for you: ${message}\n`);
+  if (manual.length > 0) {
+    process.stderr.write(
+      `familiar: opencode install incomplete — ${manual.length} of ${manual.length + written.length} `
+      + 'config(s) need editing by hand, listed above\n',
+    );
+    process.exitCode = 1;
+  }
 } catch (err) {
   process.stderr.write(`familiar: opencode install failed: ${err.message}\n`);
   // exitCode, NOT process.exit(1): stderr is a pipe, and exiting immediately after a write can

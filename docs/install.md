@@ -103,9 +103,15 @@ It preserves existing plugin entries. Restart OpenCode after installation; if
 the integration fails, inspect `~/.local/state/familiar/opencode-plugin.log`.
 
 It writes `tui.json` and `opencode.json` only. If you keep a `tui.jsonc` or
-`opencode.jsonc` instead, the command refuses and prints the plugin path to add
-by hand, rather than rewriting a commented file as plain JSON or creating a
-`.json` sibling that shadows it.
+`opencode.jsonc` instead, that file is left for you: the command prints the plugin
+path to add by hand, rather than rewriting a commented file as plain JSON or
+creating a `.json` sibling that shadows it.
+
+The two configs are handled independently — `tui.json` registers the sprite
+renderer, `opencode.json` registers the server plugin — so a `.jsonc` on one still
+lets the other be written. The command exits nonzero whenever anything is left for
+you, because the install is incomplete until you add that entry. A config it cannot
+parse is the different case: nothing is written at all.
 
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
 provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
