@@ -34,9 +34,9 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
    the first time and fired all six configured events. The OpenCode renderer failed on
    two findings, and **both have since been root-caused and fixed**: the frozen pose
    was a watch callback filtered on a filename Darwin never reports
-   (`fix/opencode-sprite-watch`, confirmed by macOS CI), and the unreachable
+   (`f1d2be0`, confirmed by macOS CI), and the unreachable
    `needs-approval` was an ask bound to nothing on the stable event stream
-   (`fix/opencode-permission-event`, diagnosed from the SDK types). Neither fix has been
+   (`6605327`, diagnosed from the SDK types). Neither fix has been
    exercised against a live OpenCode, so the renderer keeps its provisional label until
    its two cells are re-run. That re-run is the only thing standing between OpenCode and
    the same claim Claude Code and Codex now hold.
@@ -302,7 +302,7 @@ exercised it on a physical Mac and it **failed**: the sprite transmits three ima
 per session and then re-places them thousands of times without ever changing pose,
 on both terminals and both graphics capabilities. Root cause found and confirmed by
 macOS CI — the runtime filtered its watch callback on a filename Darwin never
-reports — and fixed on `fix/opencode-sprite-watch`. The renderer stays provisional
+reports — and fixed on `f1d2be0`. The renderer stays provisional
 until its cells are re-run, since a second failure, an unreachable `needs-approval`,
 is untouched by that fix.
 
@@ -799,7 +799,7 @@ is also a dead end there: `--sync-projects` iterates catalog identities holding 
 `path` pin, and `identities.yaml` does not exist after a clean `theme add`, so it is a
 no-op on exactly the machines that need it. The gate worked around it by hand-writing
 the project-local config that sync would have produced. **Fixed** on
-`fix/codex-pet-sync-cwd`: the current repository is now a sync target alongside the
+`d53b59f`: the current repository is now a sync target alongside the
 pins, guarded so it can never reach the user-wide config.
 
 `familiar install opencode` refuses whenever an `opencode.jsonc` exists — the correct

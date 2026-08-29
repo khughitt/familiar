@@ -12,7 +12,8 @@ portable core, and its live-hook ancestry gate closed on 2026-08-23
 Darwin adapters were activated. Familiar-rendered terminal output on macOS is
 confirmed for Claude Code and Codex in Kitty and Ghostty by the physical terminal
 gate of 2026-08-24 (`docs/ref/2026-08-24-macos-terminal-smoke.md`); the OpenCode
-sprite renderer remains provisional, having failed that gate.
+sprite renderer remains provisional, having failed that gate on two defects that
+have since been fixed but not yet re-tested on hardware.
 
 | surface | state source | current contract |
 | --- | --- | --- |

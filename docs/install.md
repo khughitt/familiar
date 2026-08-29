@@ -121,11 +121,14 @@ parse is the different case: nothing is written at all.
 
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
 provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
-Ghostty and recorded two failures: the sprite transmits three images per session and
-then re-places them without ever changing pose, and `needs-approval` never reaches
-Familiar's bus, so the pet cannot signal an approval and OpenCode can only ring on
-`error`. Familiar's hook-side tint and bell for OpenCode verified clean in the same
-run. See `docs/ref/2026-08-24-macos-terminal-smoke.md`.
+Ghostty and recorded two failures: the sprite never changed pose, and
+`needs-approval` never reached Familiar's bus, so the pet could not signal an
+approval. Familiar's hook-side tint and bell for OpenCode verified clean in the same
+run. Both defects have since been found and fixed — a watch callback filtered on a
+filename macOS never reports, and a permission ask bound to nothing on the stable
+event stream — but neither fix has been exercised against a live OpenCode, so the
+label stands until those two cells are re-run. See
+`docs/ref/2026-08-24-macos-terminal-smoke.md`.
 
 ### Reap abandoned sessions
 

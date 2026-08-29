@@ -86,7 +86,7 @@ Codex has none selected — and for Codex the pet is the entire state signal.
 `--sync-projects` is a no-op on a fresh machine: it iterates `catalog.identities` for
 entries with a `path` pin, and `identities.yaml` does not exist after a clean `theme add`.
 
-**Since fixed** (`fix/codex-pet-sync-cwd`): `--sync-projects` now also selects a pet in the
+**Since fixed** (`d53b59f`): `--sync-projects` now also selects a pet in the
 repository you run it from, so it is no longer a no-op without `identities.yaml`. §4 still
 needs to pass the flag. The config it produces (note the mandatory `custom:` prefix):
 
@@ -101,7 +101,7 @@ exits before writing `tui.json`. Following §4 literally leaves `sprite-plugin.t
 uninstalled, so the OpenCode cells run with no sprite renderer at all and §5's "the trace
 will be enormous" expectation quietly does not materialise.
 
-**Since fixed** (`fix/opencode-install-partial`): a `.jsonc` is now a hand-off for its own
+**Since fixed** (`bf088b8`): a `.jsonc` is now a hand-off for its own
 file only, so `tui.json` is written and the renderer is registered even when
 `opencode.jsonc` must be edited by hand. §4 should still tell testers to expect the
 hand-off and the nonzero exit.

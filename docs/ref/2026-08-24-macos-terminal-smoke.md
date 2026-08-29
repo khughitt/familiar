@@ -97,7 +97,7 @@ clean `theme add`. Following the runbook exactly, Codex rendered nothing on a fr
 The Ghostty pass hand-wrote the project config that sync would have produced. An installer
 defect, not a terminal-rendering failure — which is why the Codex row reads `pass` on the
 bytes: what Familiar sends for Codex is tint and bell, and both were correct on both
-terminals. Fixed on `fix/codex-pet-sync-cwd`: `--sync-projects` now also selects a pet in
+terminals. Fixed on `d53b59f`: `--sync-projects` now also selects a pet in
 the repository it is run from.
 
 ### OpenCode: two findings, renderer stays provisional
@@ -118,7 +118,7 @@ is one of its two ringing states.
 union. `LEVEL_EVENTS` carried the reply but nothing for the ask, so the ask rested entirely
 on the `permission.ask` hook — and when that hook does not fire, nothing fills the
 permission set, the reply drains a set that was always empty, and the window runs
-busy → idle with the dialog on screen. Fixed on `fix/opencode-permission-event` by folding
+busy → idle with the dialog on screen. Fixed on `6605327` by folding
 `permission.updated` into the same window action. Diagnosed from the SDK types, not from a
 live reproduction.
 
@@ -138,7 +138,7 @@ events and names the destination in the last, so the filter matched. Darwin FSEv
 delivers one event and names the *watched directory*, never the entry inside it — so the
 filter could not match under any timing. `refresh()` fired once at `start()` and never
 again, which is precisely a pet that renders its opening pose and holds it. Fixed on
-`fix/opencode-sprite-watch` by refreshing on any event in that directory; a
+`f1d2be0` by refreshing on any event in that directory; a
 real-filesystem test now prints the observed filenames on both platforms, and the macOS
 job asserts the Darwin line is present.
 
