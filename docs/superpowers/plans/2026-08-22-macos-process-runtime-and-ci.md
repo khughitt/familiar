@@ -10,11 +10,11 @@
 
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§2–4, 6, 9–11, 14.
 
-**Implementation status (2026-08-23):** Tasks 2–6 are complete for the portable
-core and permanent CI. Task 1's physical ancestry evidence and the Task 2 Darwin
-adapter activation it gates remain pending; no macOS agent lifecycle or
-terminal-rendering support is claimed. Task 7 is superseded by
-`docs/superpowers/plans/2026-08-24-macos-terminal-gate.md`.
+**Implementation status (2026-08-30):** Tasks 1–6 are complete: the physical ancestry
+evidence closed on 2026-08-23, the Darwin adapters were activated, and the portable core
+and permanent CI are implemented. Task 7 is superseded by
+`docs/superpowers/plans/2026-08-24-macos-terminal-gate.md`, whose physical gate later
+promoted Claude Code and Codex while leaving OpenCode provisional.
 
 ## Global Constraints
 

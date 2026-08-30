@@ -22,6 +22,11 @@ Ghostty, Claude Code / Codex / OpenCode.
 
 **Spec:** `docs/specs/2026-08-22-macos-support-design.md` §§4, 10, 11.1–11.7, 14.
 
+**Implementation status (2026-08-30):** Complete as an execution plan. The gate ran
+2026-08-24 to 2026-08-28; its reviewed outcome is
+`docs/ref/2026-08-24-macos-terminal-smoke.md`. The unchecked boxes below retain the
+authored plan state and do not represent current work.
+
 ## Global Constraints
 
 - Two branches, and they never mix. Tasks 1–4 land on `spike/macos-terminal-gate`

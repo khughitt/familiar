@@ -172,8 +172,8 @@ slot, renderer, and post-process APIs; the public plugin documentation primarily
 server/event plugin surface. Treat the TUI integration as version-coupled and keep the existing
 real-OpenCode acceptance test.
 
-Sources: [OpenCode plugin documentation][opencode-plugins] and the local
-[OpenCode sprite design](../specs/2026-07-16-opencode-sprite-design.md).
+Sources: [OpenCode plugin documentation][opencode-plugins] and the
+[archived OpenCode sprite design][opencode-sprite-design].
 
 ## Mouse interaction
 
@@ -239,3 +239,4 @@ Do not make frame count a global theme invariant before the surface budgets are 
 [claude-statusline]: https://code.claude.com/docs/en/statusline
 [codex-pets]: https://learn.chatgpt.com/docs/pets?surface=cli
 [opencode-plugins]: https://opencode.ai/docs/plugins/
+[opencode-sprite-design]: https://github.com/khughitt/familiar-archive/blob/main/docs/specs/2026-07-16-opencode-sprite-design.md

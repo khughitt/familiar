@@ -808,7 +808,8 @@ it exits before writing `tui.json`, so the refusal takes the sprite renderer's
 registration down with it. Following §8's install steps literally on a machine with a
 `.jsonc` config leaves the renderer uninstalled, and the OpenCode cells would then run
 with no sprite and no indication why. The refusal should still write the half it can,
-or name both files it did not write.
+or name both files it did not write. **Fixed** on `bf088b8`: each config is now handled
+independently, so a `.jsonc` hand-off for one no longer blocks the other.
 
 ## 12. Alternatives rejected
 

@@ -210,11 +210,11 @@ First live exercise of `familiar setup codex`, and it works. **All six configure
 fired**: `SessionStart`, `UserPromptSubmit`, `PreToolUse` (four times), `PermissionRequest`,
 `Stop`, and `SessionEnd`, across nine records.
 
-Two configuration findings surfaced. `familiar install opencode` refuses whenever an
-`opencode.jsonc` exists — even once the plugin is registered — and exits before writing
-`tui.json`, so following the install steps literally leaves the OpenCode sprite renderer
-uninstalled and its cells would run with no sprite at all. And `install pets` selects no
-pet, as recorded above.
+Two configuration findings surfaced during the run. `familiar install opencode` refused
+whenever an `opencode.jsonc` existed — even once the plugin was registered — and exited
+before writing `tui.json`, while `install pets` selected no pet, as recorded above. Both
+are since fixed: independent OpenCode config handling landed in `bf088b8`, and current
+repository pet selection landed in `d53b59f`.
 
 ## 5. What this evidence does not cover
 

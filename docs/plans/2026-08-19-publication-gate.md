@@ -6,6 +6,11 @@
 > flip repository visibility — outward-facing, hard to walk back. Do not
 > reorder across the sequencing constraints in Global Constraints.
 
+**Implementation status:** Complete. All three repositories are public and the gate
+closed; the unchecked boxes below are retained historical plan text, not remaining work.
+See `docs/specs/2026-08-19-publication-gate-design.md` and
+`docs/ref/2026-08-19-publication-gate-notes.md`.
+
 **Goal:** Take `familiar-cats`, `familiar-theme`, and `familiar` (engine) to
 public with evidenced asset rights, license files, a machine-path sweep, tooled
 secret/audit scans, and minimal CI.
