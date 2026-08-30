@@ -1,13 +1,14 @@
 # Familiar Tasks migration ledger
 
-**Status:** Migration complete through the two reviewed commits; integration and stable
-registration remain deliberately pending.
+**Status:** Migration complete. The two reviewed migration commits were integrated on
+2026-08-30, the stable checkout was registered as `fam`, no dependency reconciliation is
+pending, and this ledger is historical/superseded.
 
 ## Scope and evidence
 
 | Field | Value |
 | --- | --- |
-| Stable checkout HEAD | `3e9eaf18629c69b9386eb1e3b869d97e34d8bad2` on `main` |
+| Stable checkout HEAD | `9a5f664178cefcd3733507af28846245a2b1fc03` on `main` |
 | Tasks source commit | `e04d6a0347a95f22324e81b79d07821cf34a83c5` |
 | Audit date | 2026-08-30 |
 | Prefix | `fam` |
@@ -21,14 +22,16 @@ guidance. The baseline suite passed after the repository-documented fresh-worktr
 
 | Branch or worktree | Commit | Read-only disposition | Dirty paths |
 | --- | --- | --- | --- |
-| Stable `~/d/familiar` worktree, `main` | `3e9eaf18629c69b9386eb1e3b869d97e34d8bad2` | Stable authority checkout; matches `origin/main` | None |
-| Migration `~/d/familiar/.worktrees/tasks-migration-fam`, `chore/tasks-migration-fam` | `3e9eaf18629c69b9386eb1e3b869d97e34d8bad2` before audit | Dedicated migration writes only | None before audit; ignored `node_modules` installed by `npm ci` |
+| Stable `~/d/familiar` worktree, `main` | `9a5f664178cefcd3733507af28846245a2b1fc03` | Stable authority checkout containing both reviewed migration commits; canonical normal-registry target | None |
+| Finalization `~/d/familiar/.worktrees/tasks-migration-fam-finalize`, `docs/tasks-migration-fam-finalize` | `9a5f664178cefcd3733507af28846245a2b1fc03` before finalization | Dedicated post-integration ledger correction | None before finalization; ignored `node_modules` installed by `npm ci` |
+| Original migration `~/d/familiar/.worktrees/tasks-migration-fam`, `chore/tasks-migration-fam` | `9a5f664178cefcd3733507af28846245a2b1fc03` after the first fast-forward | Reviewed migration source; removed during integrated-pilot cleanup, with current stable tests and Tasks gates reconfirming the result | None before removal; ignored `node_modules` was worktree-local setup |
 | `elements-machinery` | `f2dadf9832e5282be8911750e095773ecd61fbdd` | Ancestor of `main`; completed history, no linked worktree | None inspectable |
 | `spike/macos-agent-handoff` | `6fe3eaf16709ba791c77535e280b40f7ae8c3504` | Diverged disposable capture history; no linked worktree and no ownership evidence | None inspectable |
 | `spike/macos-terminal-gate` | `8e824ab7d0c3dad20b622dc50d907bd45d0be965` | Diverged disposable capture branch; the plan forbids merging its tee, and reviewed apparatus landed separately on `main` in `ecf90de` | None inspectable |
 
-No branch name was treated as proof of active work or ownership. The only linked
-worktrees were the clean stable checkout and this migration worktree.
+No branch name was treated as proof of active work or ownership. The current linked
+worktrees are the clean stable checkout and the dedicated finalization worktree; the
+original migration worktree and branch were removed after integration.
 
 ## Document classification
 
@@ -39,7 +42,7 @@ worktrees were the clean stable checkout and this migration worktree.
 | `docs/install.md` | authority/current | Current setup and platform guidance; commands and support boundaries checked against CLI tests, implementation, and gate evidence. |
 | `docs/plans/2026-08-18-theme-add.md` | historical/superseded | Executed implementation plan; unchecked authored boxes are not remaining work. |
 | `docs/plans/2026-08-19-publication-gate.md` | historical/superseded | Executed publication plan; outcome is proven by its implemented spec and execution notes. |
-| `docs/plans/2026-08-30-familiar-tasks-migration.md` | active delivery | Durable audit, candidate, task-ID, and verification record for this migration. |
+| `docs/plans/2026-08-30-familiar-tasks-migration.md` | historical/superseded | Completed audit, candidate, task-ID, integration, registration, and verification record; no deferred dependency remains. |
 | `docs/ref/2026-08-19-publication-gate-notes.md` | historical/superseded | Closed publication evidence and scan dispositions. |
 | `docs/ref/2026-08-23-macos-agent-process-spike.md` | historical/superseded | Closed physical ancestry/executor evidence; later support evidence supersedes its provisional rendering boundary. |
 | `docs/ref/2026-08-24-gate-runbook-amendments.md` | active delivery | Required corrections for any hardware rerun; current fix annotations checked against `main`. |
@@ -66,6 +69,7 @@ worktrees were the clean stable checkout and this migration worktree.
 | `docs/specs/2026-08-22-macos-support-design.md` §11.8 described the OpenCode `.jsonc` installer defect as current. | `bf088b8` is an ancestor of `main`; implementation and tests handle the two configs independently. | Marked the finding fixed by `bf088b8`. | `docs/install.md` and the runbook amendments already describe independent handling; no competing current claim remains. |
 | `docs/ref/2026-08-24-macos-terminal-smoke.md` §4 described both run-time configuration findings in the present tense. | `bf088b8` and `d53b59f` are ancestors of `main`, with focused tests in the green suite. | Kept the historical findings and explicitly recorded both later fixes. | Current install guidance, macOS design, and amendments agree; the provisional label now refers only to unverified live behavior. |
 | `docs/ref/kitty-graphics-protocol.md` linked a split-era OpenCode design through an absent local path. | The path is absent from every local branch; root guidance names `familiar-archive` as the pre-split design authority. | Replaced the broken relative link with the archive URL. | The only occurrence was this reference; the repository-wide relative-link check now reports no real missing target. |
+| This ledger said integration and stable registration remained pending and classified itself as active delivery. | `09a2d5a` and `9a5f664` are ancestors of stable `main`; the normal registry maps `fam` to the stable checkout; stable Tasks and repository gates pass; the original migration worktree and branch are absent. | Recorded the integrated commits and post-registration verification in the past tense, marked the migration complete, and classified the ledger historical/superseded. | Root guidance and current user-facing documents contain no competing pending-migration claim. |
 
 The required outward search covered status headers, TODO/unchecked/supersession language,
 root summaries, `docs/surfaces.md`, and active spec/plan references. No unresolved
@@ -144,12 +148,20 @@ None.
 | Required status/outward `rg`, document coverage `comm -3`, and `git diff --check` | Outward matches reviewed; coverage comparison and whitespace check produced no output. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
 | Repository-relative Markdown link check over root guidance and `docs/` | No real missing target after repairing the archived OpenCode design link. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
 | `npm test` after documentation reconciliation | 857 tests: 852 passed, zero failed, five skipped. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
-| Normal-registry `tasks prime` before initialization | Exit 1 with explicit `no_project`; no normal registry entry or local store existed. | Tasks initialization commit (this commit). |
-| Temporary-registry `tasks init --prefix fam` then `tasks prime` | Initialization succeeded; prime reported prefix `fam` with no warnings. | Tasks initialization commit (this commit). |
-| `tasks add` then `tasks show fam-f088b1` in the temporary registry | `todo`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | Tasks initialization commit (this commit). |
-| `tasks add` then `tasks show fam-36619e` in the temporary registry | `idea`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | Tasks initialization commit (this commit). |
-| Temporary-registry `tasks check` plus `jq -e '.errors == [] and .warnings == []'` | Passed with empty errors and warnings. | Tasks initialization commit (this commit). |
-| Temporary-registry `tasks prime \| jq -e '.prefix == "fam"'` | Passed; counts are one `idea`, one `todo`, and zero in every other state, with no warnings. | Tasks initialization commit (this commit). |
-| Temporary-registry `tasks ready` | Passed; only `fam-f088b1` is ready, with no warnings. | Tasks initialization commit (this commit). |
-| Final `npm test` | 857 tests: 852 passed, zero failed, five skipped. | Tasks initialization commit (this commit). |
-| Final `git diff --check` | No output. | Tasks initialization commit (this commit). |
+| Normal-registry `tasks prime` before initialization | Exit 1 with explicit `no_project`; no normal registry entry or local store existed. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Temporary-registry `tasks init --prefix fam` then `tasks prime` | Initialization succeeded; prime reported prefix `fam` with no warnings. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| `tasks add` then `tasks show fam-f088b1` in the temporary registry | `todo`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| `tasks add` then `tasks show fam-36619e` in the temporary registry | `idea`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Temporary-registry `tasks check` plus `jq -e '.errors == [] and .warnings == []'` | Passed with empty errors and warnings. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Temporary-registry `tasks prime \| jq -e '.prefix == "fam"'` | Passed; counts are one `idea`, one `todo`, and zero in every other state, with no warnings. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Temporary-registry `tasks ready` | Passed; only `fam-f088b1` is ready, with no warnings. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Final pre-integration `npm test` | 857 tests: 852 passed, zero failed, five skipped. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| Final pre-integration `git diff --check` | No output. | `9a5f664178cefcd3733507af28846245a2b1fc03` |
+| `git merge-base --is-ancestor` for `09a2d5a` and `9a5f664` against stable `main` | Both reviewed migration commits are ancestors; stable `main` was exactly `9a5f664` before ledger finalization. | Post-registration ledger finalization (this commit). |
+| Normal-registry mapping inspection and stable `tasks prime` | `fam` maps to the canonical stable checkout; prime reports prefix `fam`, one `idea`, one `todo`, and no warnings. | Post-registration ledger finalization (this commit). |
+| Stable `tasks check` plus `jq -e '.errors == [] and .warnings == []'` | Passed with empty errors and warnings. | Post-registration ledger finalization (this commit). |
+| Stable `tasks ready` plus exact ID comparison | Passed; only `fam-f088b1` is ready, with no warnings. | Post-registration ledger finalization (this commit). |
+| Finalization-worktree `npm ci` then `git status --porcelain=v1` | Added 105 ignored packages with two known low-severity audit findings; setup changed no tracked or untracked path. | Post-registration ledger finalization (this commit). |
+| Finalization-worktree `npm test` | 857 tests: 852 passed, zero failed, five skipped. | Post-registration ledger finalization (this commit). |
+| `git worktree list --porcelain` and `git show-ref --verify refs/heads/chore/tasks-migration-fam` | The original migration worktree and branch are absent; only the stable and finalization worktrees are linked. | Post-registration ledger finalization (this commit). |
+| Exact document coverage `comm -3`, seven-section count, and `git diff --check` | Coverage comparison and whitespace check produced no output; all 20 denominator files are classified and all seven required sections remain. | Post-registration ledger finalization (this commit). |
