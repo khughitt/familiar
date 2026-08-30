@@ -1,6 +1,7 @@
 # Familiar Tasks migration ledger
 
-**Status:** Documentation audit reconciled; Tasks initialization and task IDs pending.
+**Status:** Migration complete through the two reviewed commits; integration and stable
+registration remain deliberately pending.
 
 ## Scope and evidence
 
@@ -79,8 +80,8 @@ contradiction was found.
 | Deliver the portable macOS core, setup, theme traversal, and CI | Current implementation/tests and all runtime/setup/theme plan tasks complete | macOS design and three 2026-08-22 plans | Completed on `main`; no active worktree | `xl` | — | None | no task — completed history | no task |
 | Promote Claude Code and Codex rendering in the tested Kitty/Ghostty matrix | Physical evidence records both agents passing, and promotion commits are on `main` | macOS design, terminal gate plan, smoke note | Completed on `main` | `l` | — | None | no task — completed history | no task |
 | Close gate-discovered Codex pet and OpenCode config installer defects | Fix commits `d53b59f` and `bf088b8` plus focused tests are on `main` | macOS design §11.8, smoke note §4, amendments | Completed on `main` | `m` | — | None | no task — completed history | no task |
-| Verify OpenCode renderer fixes on macOS hardware | Both root-cause fixes are merged and CI-backed, but the live Kitty and Ghostty cells have not been rerun | macOS design Remaining work/§11; smoke note; handoff; amendments | No active branch, worktree, or verified owner; old spike branches are disposable history | `m` | `todo` | None | create | pending CLI creation |
-| Exercise launchd-hosted Claude TTY discrimination | Design and smoke evidence leave the `tty !== null` half unmeasured in situ; `claude -p` 2.1.241 emits no level-bearing hook | macOS design Remaining work/§11.4; smoke note §3; amendments §7 | Parked with no active branch, worktree, owner, or known reproducible trigger | `m` | `idea` | None | create | pending CLI creation |
+| Verify OpenCode renderer fixes on macOS hardware | Both root-cause fixes are merged and CI-backed, but the live Kitty and Ghostty cells have not been rerun | macOS design Remaining work/§11; smoke note; handoff; amendments | No active branch, worktree, or verified owner; old spike branches are disposable history | `m` | `todo` | None | create | `fam-f088b1` |
+| Exercise launchd-hosted Claude TTY discrimination | Design and smoke evidence leave the `tty !== null` half unmeasured in situ; `claude -p` 2.1.241 emits no level-bearing hook | macOS design Remaining work/§11.4; smoke note §3; amendments §7 | Parked with no active branch, worktree, owner, or known reproducible trigger | `m` | `idea` | None | create | `fam-36619e` |
 | Merge the disposable macOS capture branches | Both governing documents explicitly forbid merging capture instrumentation; reviewed evidence/apparatus landed separately | Process spike, terminal handoff, terminal gate plan | Branch tips remain without linked worktrees and provide no ownership evidence | `s` | — | None | no task — abandoned by design | no task |
 
 ### Reviewed task body: Verify OpenCode renderer fixes on macOS hardware
@@ -139,8 +140,16 @@ None.
 | `npm ci` | Added 105 ignored packages; completed with two known low-severity audit findings. | Setup only at stable base `3e9eaf1`; no tracked change. |
 | `git status --porcelain=v1` after `npm ci` | Empty; fresh-worktree setup changed no tracked or untracked path. | Stable base `3e9eaf1`. |
 | `npm test` before audit | 857 tests: 852 passed, zero failed, five skipped. | Stable base `3e9eaf1`. |
-| `git worktree list --porcelain`, `git branch --format=...`, ancestry checks, and branch diffs | Two linked worktrees, five local branches including migration; no dirty pre-audit path; dispositions recorded above. | Documentation reconciliation commit pending. |
-| Required status/outward `rg`, document coverage `comm -3`, and `git diff --check` | Outward matches reviewed; coverage comparison and whitespace check produced no output. | Documentation reconciliation commit pending. |
-| Repository-relative Markdown link check over root guidance and `docs/` | No real missing target after repairing the archived OpenCode design link. | Documentation reconciliation commit pending. |
-| `npm test` after documentation reconciliation | 857 tests: 852 passed, zero failed, five skipped. | Documentation reconciliation commit pending. |
-| Temporary-registry `tasks check`, `prime`, `ready`; final `npm test`; `git diff --check` | Pending Tasks initialization. | Tasks initialization commit pending. |
+| `git worktree list --porcelain`, `git branch --format=...`, ancestry checks, and branch diffs | Two linked worktrees, five local branches including migration; no dirty pre-audit path; dispositions recorded above. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
+| Required status/outward `rg`, document coverage `comm -3`, and `git diff --check` | Outward matches reviewed; coverage comparison and whitespace check produced no output. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
+| Repository-relative Markdown link check over root guidance and `docs/` | No real missing target after repairing the archived OpenCode design link. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
+| `npm test` after documentation reconciliation | 857 tests: 852 passed, zero failed, five skipped. | `09a2d5a26663fb44da37ac09ce1e4a58d757ee35` |
+| Normal-registry `tasks prime` before initialization | Exit 1 with explicit `no_project`; no normal registry entry or local store existed. | Tasks initialization commit (this commit). |
+| Temporary-registry `tasks init --prefix fam` then `tasks prime` | Initialization succeeded; prime reported prefix `fam` with no warnings. | Tasks initialization commit (this commit). |
+| `tasks add` then `tasks show fam-f088b1` in the temporary registry | `todo`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | Tasks initialization commit (this commit). |
+| `tasks add` then `tasks show fam-36619e` in the temporary registry | `idea`, size `m`, tags `migration`/`macos`, spec and reviewed body all match; no owner or dependency inferred. | Tasks initialization commit (this commit). |
+| Temporary-registry `tasks check` plus `jq -e '.errors == [] and .warnings == []'` | Passed with empty errors and warnings. | Tasks initialization commit (this commit). |
+| Temporary-registry `tasks prime \| jq -e '.prefix == "fam"'` | Passed; counts are one `idea`, one `todo`, and zero in every other state, with no warnings. | Tasks initialization commit (this commit). |
+| Temporary-registry `tasks ready` | Passed; only `fam-f088b1` is ready, with no warnings. | Tasks initialization commit (this commit). |
+| Final `npm test` | 857 tests: 852 passed, zero failed, five skipped. | Tasks initialization commit (this commit). |
+| Final `git diff --check` | No output. | Tasks initialization commit (this commit). |
