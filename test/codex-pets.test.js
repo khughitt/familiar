@@ -236,6 +236,30 @@ test('center lifts the same master clear of the floor; floor stays the default',
     inkRows(floor).last - inkRows(center).last, 'a pure translation, not a rescale');
 });
 
+// Native-RGBA masters carry continuous alpha, and a box filter mixes opaque and
+// partial samples in the same block. Averaging straight colour over an
+// alpha-weighted denominator overshoots; the widest channel wraps first in the
+// Uint8Array, so pure orange came out green. The reduction is alpha-weighted.
+test('a partial-alpha block keeps its hue instead of inventing one', () => {
+  const w = 2, h = 2;
+  const buf = new Uint8Array(w * h * 4);
+  const alphas = [255, 255, 128, 128];
+  for (const [index, alpha] of alphas.entries()) buf.set([255, 140, 0, alpha], index * 4);
+
+  const cell = fitFrame({ w, h, buf }, { width: 1, height: 1 });
+  assert.deepEqual([...cell], [255, 140, 0, 255]);
+});
+
+test('an alpha-weighted mix leans toward the more opaque colour', () => {
+  const w = 2, h = 1;
+  const buf = new Uint8Array(w * h * 4);
+  buf.set([200, 0, 0, 255], 0);
+  buf.set([0, 0, 200, 51], 4);            // one fifth as much coverage
+
+  const cell = fitFrame({ w, h, buf }, { width: 1, height: 1 });
+  assert.deepEqual([...cell], [167, 0, 33, 255]);
+});
+
 test('a missing required root is refused, not rendered as a hole', () => {
   const roots = posesOf('pip');
   delete roots.working;

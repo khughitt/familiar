@@ -66,8 +66,11 @@ export function sampleTimeline(frames, count, { includeEndpoints } = { includeEn
 
 // Box-filter fit, aspect preserved, centred horizontally, anchored to the member's declared
 // anchor edge -- `floor` (the default) puts the last ink row on the cell's floor, `center`
-// floats it. Alpha remains binary so the resample cannot add a halo against Codex's unknown
-// terminal background.
+// floats it. Colour is averaged ALPHA-WEIGHTED, so a block mixing opaque and partial samples
+// reduces to the colour actually present; dividing straight colour by an alpha-weighted
+// denominator overshoots, and the widest channel wraps first, turning orange green. Output
+// alpha stays binary so the resample cannot add a halo against Codex's unknown terminal
+// background.
 export function fitFrame({ w, h, buf }, { width, height }, { anchor = 'floor' } = {}) {
   const scale = Math.max(w / width, h / height);
   const dw = Math.max(1, Math.round(w / scale));
@@ -88,8 +91,9 @@ export function fitFrame({ w, h, buf }, { width, height }, { anchor = 'floor' } 
         for (let sx = x0; sx < x1; sx++) {
           const i = (sy * w + sx) * 4;
           n++;
-          if (buf[i + 3] === 0) continue;
-          r += buf[i]; g += buf[i + 1]; b += buf[i + 2]; alpha += buf[i + 3];
+          const a = buf[i + 3];
+          if (a === 0) continue;
+          r += buf[i] * a; g += buf[i + 1] * a; b += buf[i + 2] * a; alpha += a;
         }
       }
       if (!n) continue;
@@ -97,9 +101,9 @@ export function fitFrame({ w, h, buf }, { width, height }, { anchor = 'floor' } 
       if (covered < n * 0.5) continue;
 
       const d = ((y + oy) * width + (x + ox)) * 4;
-      out[d] = Math.round(r / covered);
-      out[d + 1] = Math.round(g / covered);
-      out[d + 2] = Math.round(b / covered);
+      out[d] = Math.round(r / alpha);
+      out[d + 1] = Math.round(g / alpha);
+      out[d + 2] = Math.round(b / alpha);
       out[d + 3] = 255;
     }
   }
