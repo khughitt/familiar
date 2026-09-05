@@ -11,3 +11,7 @@ node_modules/
 # `familiar-theme` import. Removed in a finally; this pattern covers the
 # hard-crash case.
 /slots-guard-*
+
+# Fallback test-timing log, written by tools/tt when the shared log is unwritable and
+# emptied by ops `tt-report`; never committed.
+.tt/
