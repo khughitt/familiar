@@ -1,7 +1,7 @@
 # Codex identity parity
 
-**Status:** proposed; no implementation. Revised 2026-09-05 after review — see
-§8 for what changed and why. Field repairs applied 2026-09-05 (§7).
+**Status:** proposed; no implementation. Revised twice on 2026-09-05 after
+review — see §8 for what changed and why. Field repairs applied 2026-09-05 (§7).
 **Date:** 2026-09-05
 **Task:** fam-c5c263
 
@@ -174,14 +174,30 @@ file.
 
 The property this buys is **convergence**, not correctness-on-first-launch:
 
+**The trigger is a turn, not a launch**, and the promise has to be written in
+those terms or it overstates itself. A repair happens on `SessionStart`, which
+per §2.3 lands *after* the pet configuration for that session has been read. So
+the sequence for any identity change is: launch N reads the old selection and
+repairs the file; launch N+1 is the first to benefit.
+
 | | today | converged |
 |---|---|---|
-| new repository, first Codex launch | wrong forever | wrong once |
-| every launch after | wrong forever | correct |
-| pin / theme / remote changed | wrong forever | correct next launch |
+| new repository, launch 1 | wrong | wrong (repairs the file) |
+| launch 2 onward, no further change | wrong forever | correct |
+| pin / theme / remote changed | wrong forever | wrong for one more launch, then correct |
+| launches that never take a turn | wrong forever | **wrong forever** |
 
-One launch of lag, self-healing thereafter, versus permanent silent drift. The
-lag must be **documented, not hidden** — the same standard `src/adapters/codex.js`
+The last row is not a rounding error. The trigger is the first turn, so a
+repository the user opens, looks at, and quits without prompting is never
+repaired, however many times they do it.
+
+Stated precisely, the promise is: **on a launch following a successful repair,
+the managed file names the resolved member** — conditional on the pet's assets
+being valid (§4.4) and on this layer of the precedence chain applying at all
+(§4.2). That is materially weaker than "self-healing", and it is what the
+ordering actually supports.
+
+The lag must be **documented, not hidden** — the same standard `src/adapters/codex.js`
 already holds itself to when it declares `needs-input` and `error` unreachable
 rather than inferring them from an unstable format.
 
@@ -259,20 +275,78 @@ Compiling on the hook path is not the answer: it decodes every pose PNG and
 builds a 1536×1872 sheet per member, which is exactly the unbounded work
 `src/bus/identity.js` argues must never enter a hook.
 
-So **asset installation is a prerequisite, not a step**. The hook verifies the
-target pet directory exists and was compiled from the active theme — which
-requires a checkable stamp, since a directory's presence proves nothing about
-which roster produced it; the existing theme receipt
-(`~/.config/familiar/theme-receipts/<id>.json`, carrying source and commit) is
-the natural thing to record alongside the compiled pets. When the check fails,
-the hook **refuses to rewrite the selection and emits one diagnostic naming the
-remedy** (`familiar install pets`). It must not select a member it cannot draw:
-a selection pointing at absent or foreign art is a worse outcome than the stale
-selection it replaced.
+So **asset installation is a prerequisite, not a step**.
 
-`install pets` should additionally **prune** pet directories that no longer
-correspond to a member of the active theme, so the orphan set above stops
-growing.
+#### 4.4.1 The stamp identifies compiler inputs, not provenance
+
+An earlier draft proposed recording the theme receipt alongside the compiled
+pets. **That cannot work**, and the reasons are in `src/theme/receipt.js`:
+
+- A `local` receipt validates as `{ kind: 'local', path }` — **there is no
+  commit field at all**. `invalidReason` requires a 40-hex `source.commit` only
+  on the `https` branch.
+- `readReceipt` returns `{ verdict: 'absent' }` when no receipt file exists, so a
+  theme installed by any other route has no provenance to copy.
+- Even a valid `https` receipt is **unchanged when the installed artwork is
+  edited in place** under `~/.config/familiar/themes/<id>/`. It records where the
+  theme came from, not what it currently contains.
+
+Provenance answers "where did this theme come from". The question here is "was
+this pet compiled from the bytes that are on disk now", and only content can
+answer it. So the stamp is written by `install pets` beside each compiled pet
+and records what actually determined the output:
+
+- theme id and member id;
+- a content hash over the exact compiler inputs — the member's pose PNGs and the
+  animation frames sampled — via `fnv1a32Bytes` (`src/protocol/hash.js`), which
+  exists precisely to hash raw PNG bytes without a lossy text round-trip;
+- the compiler contract that shaped the sheet: `FRAME` geometry, `motionPolicy`,
+  and the member's `anchor`, since a change to any of these invalidates the
+  output as surely as new art does;
+- a stamp format version, so a future change to any of the above is detectable
+  rather than silently mis-compared.
+
+This reintroduces a per-member content hash, which `src/bus/lock.js` records as
+deliberately deleted along with the sprite baker. The distinction is where it
+runs: that hash was on the **hot path**, inside the transaction lock, on every
+tool call. This one runs in an **offline, user-invoked compiler**, and the hook
+never computes it.
+
+#### 4.4.2 What the hook checks, and what it does not
+
+The hook must not hash anything. Splitting the question keeps it honest:
+
+- **"Is this pet from the active theme's roster?"** — the hook's job. Read the
+  stamp, compare theme id and member id, confirm the sheet exists. Cheap, and it
+  catches the *absent* hazard and the theme-swap half of *stale*.
+- **"Is this pet's art current with the theme's files?"** — content hashing, so
+  it belongs to `install pets` and to any diagnostic verb, never to a hook.
+
+When the hook's check fails it **refuses to rewrite the selection and emits one
+diagnostic naming the remedy** (`familiar install pets`). It must not select a
+member it cannot draw: a selection pointing at absent or foreign art is worse
+than the stale selection it replaced.
+
+#### 4.4.3 Pruning, bounded by proven ownership
+
+`CODEX_HOME/pets` is a **shared directory** — Codex custom pets from any source
+live there — and `--out DIR` may name anything at all. So "prune what is not a
+member of the active theme" is far too broad: it would delete a user's unrelated
+custom pets, and under `--out` it could delete unrelated directories outright.
+
+Deletion is therefore restricted to **proven Familiar-owned output**:
+
+- A directory qualifies only if it carries a valid Familiar stamp (§4.4.1). The
+  `familiar-` name prefix is a convention, not proof of ownership, and `pet.json`
+  is a file Codex expects any pet to have.
+- **Unstamped historical orphans do not qualify** — the 13 currently in
+  `~/.codex/pets` predate the stamp and cannot be distinguished from a
+  hand-written pet that happens to share the prefix. They are **reported, not
+  removed**, with an explicit opt-in flag to clear them once the user has looked
+  at the list. Guessing here trades a cosmetic wart for deleting someone's work.
+- **Prune only after every member has compiled successfully**, into that same
+  output directory. Deleting first and failing halfway leaves the user with
+  neither the old pets nor the new ones.
 
 ### 4.5 Demote `--sync-projects`
 
@@ -284,8 +358,30 @@ repositories and to abort loudly on an unmanaged file.
 
 It should additionally **report drift**: for every known project config, whether
 the baked member still equals the resolved one, subject to the narrowness of
-§4.2. That is what would have surfaced the `beliefs` case without an
-investigation.
+§4.2.
+
+**"Known" is the load-bearing word, and the current enumeration cannot supply
+it.** `planCodexProjectSync` walks current path pins plus `cwd`. The moment
+`beliefs` lost its pin it left that set, so a drift report run from anywhere else
+could not have found its stale config — the report would have been clean while
+the bug was live. The claim that this alone would have surfaced the original
+incident is **withdrawn**; a project drops out of discovery by exactly the event
+that makes it drift.
+
+Discovery needs a source that does not depend on the project still being pinned.
+A filesystem scan is not it: the sweep that found these files during the
+investigation ran for over two minutes across the whole disk.
+
+So Familiar records the configs it writes — a ledger under
+`~/.local/state/familiar/`, beside `agents.json` — and the report covers the
+union of the ledger, the current pins, and `cwd`.
+
+The ledger is itself an eager artifact, which is the failure class this entire
+spec is about, so it is scoped as a **discovery hint and never a source of
+truth**: every entry is verified by reading the file at report time, entries
+whose file is gone or is no longer Familiar-managed are dropped, and nothing is
+ever reported from the ledger alone. It answers "where should I look", not "what
+is there".
 
 ## 5. Alternative: stop carrying identity in Codex's pet
 
@@ -306,10 +402,30 @@ Applied to identity, it makes the harnesses differ in **fidelity** rather than i
 **answer**, which is arguably the real requirement.
 
 It is not the recommendation because it gives up the per-project familiar on one
-of the two primary harnesses, and that is the feature. But it is cheap, it has
-no ordering problem, no asset prerequisite and no precedence caveat — and if
-§6.1's verification comes back negative, it should be reconsidered on the merits
-rather than treated as the consolation prize.
+of the two primary harnesses, and that is the feature.
+
+**It is also not as cheap as the previous draft claimed.** Setting a neutral pet
+user-wide writes to precedence layer 4; every managed `<repo>/.codex/config.toml`
+already on disk sits at layer 2 and **outranks it**. On this machine that is 17
+project selections that would keep drawing per-project cats — including the stale
+ones — while the user-wide setting sat inert underneath. "Never shows the wrong
+cat" would be false on exactly the repositories the user works in most.
+
+So this alternative is a migration, not a setting, and it carries two of the same
+requirements as the recommendation:
+
+1. **Remove the Familiar-managed project selections first**, using the ledger of
+   §4.5 to find them and the managed-header check to prove each is Familiar's to
+   remove. Unmanaged and tracked configs stay untouched, as everywhere else.
+2. **Install the neutral pet's assets.** A `custom:` pet is still a compiled pet
+   directory, so §4.4's prerequisite applies unchanged — and a neutral pet
+   selected user-wide is the *most* load-bearing asset on the machine, since
+   every unresolved project lands on it.
+
+What the alternative genuinely escapes is the **ordering** problem of §2.3: no
+launch lag, because nothing needs to change per project. That is its real
+advantage, and it is enough to keep it live if §6.1 resolves negatively — but it
+should be argued on that basis rather than on being free.
 
 ## 6. Open questions
 
@@ -384,8 +500,11 @@ Independent of the design; done to stop the bleeding.
 
 Left alone, deliberately: `~/.codex-work`'s stale `familiar-ginger-tabby` (a
 separate `CODEX_HOME`, not this investigation's to change), and the 13 orphaned
-pet directories in `~/.codex/pets` (§4.4 proposes pruning them as part of
-`install pets`, which is the right place for it).
+pet directories in `~/.codex/pets`. Those orphans predate any stamp, so under
+§4.4.3 they are exactly the set Familiar may **report but not remove** — it
+cannot prove it wrote them. Clearing them stays a deliberate, user-confirmed act;
+`familiar-ginger-tabby` is the reason why, since `~/.codex-work` still selects it
+and deleting it would break a pet that is in use.
 
 ## 8. Revision history
 
@@ -399,3 +518,14 @@ and the machine; two were worse than reported.
 | 3 | "does a hook fire at launch" was the wrong question | §6.1 rewritten as a behavioural test; §2.3 now records that Codex 0.153.4 documents no pre-config hook and no reload, making the lag a ceiling |
 | 4 | root-file agreement is not the effective selection | new §4.2 with the documented precedence; the guarantee is now stated narrowly |
 | 5 | worktrees do not inherit a parent's pin — the first draft claimed they did | §6.2 rewritten around the live `niri-material` counter-example; scoped out as an identity-core defect needing its own task |
+
+**2026-09-05, second review.** Five gaps, all confirmed. Two of the fixes from
+the first round were themselves unsound.
+
+| | finding | change |
+|---|---|---|
+| 1 | "prune what is not a member" would delete unrelated custom pets from the shared `CODEX_HOME/pets`, and arbitrary directories under `--out` | §4.4.3: deletion restricted to directories carrying a valid stamp; unstamped orphans reported with opt-in removal; prune only after a fully successful compile |
+| 2 | the theme receipt cannot establish asset freshness — `local` receipts carry no commit, absent receipts are normal, and an `https` receipt is unchanged by in-place art edits | §4.4.1: the stamp hashes compiler *inputs* via `fnv1a32Bytes`, not provenance; §4.4.2 splits the roster check (hook) from the content check (`install pets`) |
+| 3 | drift reporting enumerates current pins plus `cwd`, so a project drops out of discovery by exactly the event that makes it drift | §4.5: claim that it would have caught `beliefs` **withdrawn**; a verified-on-read ledger added as a discovery hint, explicitly not a source of truth |
+| 4 | the convergence table promised repair a launch earlier than the trigger permits, and ignored launches that never take a turn | §4.1: table restated around turns; promise narrowed to "on a launch following a successful repair", conditional on §4.4 and §4.2 |
+| 5 | a neutral user-wide pet is outranked by the 17 managed project configs already on disk, and needs its own assets | §5: rewritten as a migration with two prerequisites; its genuine advantage narrowed to escaping the §2.3 ordering problem |
