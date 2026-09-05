@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { stampFor, readStamp, STAMP_FILE, STAMP_VERSION } from '../src/install/pet-stamp.js';
+import { stampFor, readStamp, petUsable, STAMP_FILE, STAMP_VERSION } from '../src/install/pet-stamp.js';
+import { SPRITESHEET_PATH } from '../src/render/codex/pets.js';
 
 const base = {
   themeId: 'cats', memberId: 'ginger',
@@ -72,4 +73,62 @@ test('readStamp rejects anything it cannot fully trust', (t) => {
 
   write(good);
   assert.equal(readStamp(dir).memberId, 'ginger');
+});
+
+function pet(dir, id, { stamp = null, manifest = true, sheetFile = true } = {}) {
+  const petDir = join(dir, id);
+  mkdirSync(join(petDir, 'assets'), { recursive: true });
+  if (sheetFile) writeFileSync(join(petDir, SPRITESHEET_PATH), 'png');
+  if (manifest) writeFileSync(join(petDir, 'pet.json'), '{}');
+  if (stamp) writeFileSync(join(petDir, STAMP_FILE), JSON.stringify(stamp));
+  return petDir;
+}
+
+const pets = (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-pets-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+};
+
+test('the gate accepts a complete pet stamped for this theme and member', (t) => {
+  const dir = pets(t);
+  pet(dir, 'familiar-ginger', { stamp: stampFor(sheet(1)) });
+  assert.deepEqual(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }), { ok: true });
+});
+
+test('the gate refuses every incomplete installation, and says which', (t) => {
+  const dir = pets(t);
+  const verdict = (memberId) => petUsable({ petsDir: dir, themeId: 'cats', memberId });
+
+  assert.match(verdict('ginger').reason, /not installed/);
+
+  pet(dir, 'familiar-tuxedo', { stamp: null });
+  assert.match(verdict('tuxedo').reason, /no valid stamp/);
+
+  // The manifest is what Codex reads to learn the pet's tracks. A sheet without
+  // it is a pet Codex cannot use.
+  pet(dir, 'familiar-persian', {
+    stamp: stampFor({ ...sheet(1), memberId: 'persian' }), manifest: false });
+  assert.match(verdict('persian').reason, /pet\.json/);
+
+  pet(dir, 'familiar-tabby', {
+    stamp: stampFor({ ...sheet(1), memberId: 'tabby' }), sheetFile: false });
+  assert.match(verdict('tabby').reason, /spritesheet/);
+
+  pet(dir, 'familiar-siamese', {
+    stamp: stampFor({ ...sheet(1), themeId: 'dogs', memberId: 'siamese' }) });
+  assert.match(verdict('siamese').reason, /theme "dogs"/);
+
+  pet(dir, 'familiar-manx', { stamp: stampFor({ ...sheet(1), memberId: 'somebody-else' }) });
+  assert.match(verdict('manx').reason, /member "somebody-else"/);
+
+  for (const id of ['ginger', 'tuxedo', 'persian', 'tabby', 'siamese', 'manx']) {
+    assert.equal(verdict(id).ok, false);
+  }
+});
+
+test('a torn install — new sheet, stamp not yet published — is refused', (t) => {
+  const dir = pets(t);
+  pet(dir, 'familiar-ginger', { stamp: null });
+  assert.equal(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }).ok, false);
 });

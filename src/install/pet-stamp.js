@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fnv1a32Bytes } from '../protocol/hash.js';
+import { SPRITESHEET_PATH } from '../render/codex/pets.js';
 
 // PROVENANCE CANNOT ANSWER THIS QUESTION, which is why this file exists rather
 // than a copy of the theme receipt. A `local` receipt carries no commit at all
@@ -65,4 +66,42 @@ export function readStamp(dir) {
   if (!STAMP_POLICIES.has(data.motionPolicy)) return null;
   if (!STAMP_ANCHORS.has(data.anchor)) return null;
   return data;
+}
+
+// WHAT A HOOK CAN AFFORD, AND NOTHING MORE. This answers "is this pet complete
+// and from the active theme's roster" -- four cheap probes, no subprocess. It
+// deliberately does NOT answer "is its art current with the theme's files":
+// that needs the source bytes hashed, and hashing on the hook path is the
+// unbounded work the timeout argument in ../bus/identity.js exists to keep out.
+// `install pets` owns that question; it already has the bytes open.
+//
+// ALL THREE FILES ARE CHECKED, not just the sheet. Codex reads `pet.json` to
+// learn the pet's tracks, so a sheet without a manifest is a pet it cannot draw
+// -- and `install pets` publishes the stamp last precisely so a stamp being
+// present implies the other two landed. Checking them anyway costs two
+// existsSync calls and closes the window where someone removes one by hand.
+export function petUsable({ petsDir, themeId, memberId }) {
+  const name = `familiar-${memberId}`;
+  const dir = join(petsDir, name);
+  if (!existsSync(dir)) return { ok: false, reason: `pet "${name}" is not installed` };
+  if (!existsSync(join(dir, SPRITESHEET_PATH))) {
+    return { ok: false, reason: `pet "${name}" has no spritesheet` };
+  }
+  if (!existsSync(join(dir, 'pet.json'))) {
+    return { ok: false, reason: `pet "${name}" has no pet.json manifest` };
+  }
+  const stamp = readStamp(dir);
+  if (!stamp) {
+    return { ok: false, reason: `pet "${name}" has no valid stamp from this version of Familiar` };
+  }
+  if (stamp.themeId !== themeId) {
+    return {
+      ok: false,
+      reason: `pet "${name}" was compiled for theme "${stamp.themeId}", not "${themeId}"`,
+    };
+  }
+  if (stamp.memberId !== memberId) {
+    return { ok: false, reason: `pet "${name}" carries a stamp for member "${stamp.memberId}"` };
+  }
+  return { ok: true };
 }
