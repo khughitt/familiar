@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { adapterFor, AGENTS } from '../src/adapters/index.js';
-import { spritesheet, petFile, SPRITESHEET_PATH } from '../src/render/codex/pets.js';
+import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
+import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
+import { convergeCodexProject, shouldConverge } from '../src/install/codex-converge.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
@@ -723,6 +725,42 @@ async function main({ command, args: rest }) {
       transmitSprite: adapter.printsPlaceholderCells,
       processOps: defaultProcessOps,
     });
+
+    // CODEX ONLY, SessionStart ONLY. Codex draws its own pet from a file rather
+    // than from the bus, so the file has to be kept true. Everything needed is
+    // already in hand: `next` is the record the transaction just wrote, and the
+    // member came out of the same resolve that fed the bus -- so nothing here
+    // re-runs git or re-matches a pin.
+    //
+    // `next` is null on SessionEnd, which removes a record rather than writing one.
+    if (shouldConverge({ agent: name, event: positionals[0] }) && next) {
+      try {
+        const result = await convergeCodexProject({
+          repoRoot: next.repoRoot,
+          member: intent[next.sessionId].current.identity.member,
+          catalog: ctx.catalog,
+          pack: ctx.pack,
+          themeId: ctx.themeId,
+          petsDir: join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
+        });
+        // ORDINARY NO-OPS ARE SILENT; ANYTHING A USER COULD ACT ON IS NOT.
+        // `quiet` and `unchanged` are the common cases and say nothing. But an
+        // unmanaged config, a tracked one, missing pets, a symlink refusal or a
+        // wedged git all mean the pet on screen is NOT the one Familiar
+        // resolved -- and saying nothing there is the same silent drift this
+        // whole mechanism exists to end.
+        if (result.outcome === 'actionable' || result.outcome === 'error') {
+          process.stderr.write(`familiar: ${result.reason}\n`);
+        }
+      } catch (error) {
+        // The cosmetic layer never degrades the tool it decorates. The
+        // top-level boundary in this file already turns a throw into exit 0
+        // plus one stderr line; this narrower catch keeps a convergence failure
+        // from skipping anything after it.
+        process.stderr.write(
+          `familiar: could not converge the Codex pet config: ${error.message}\n`);
+      }
+    }
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, {
       options: { with: { type: 'string' } }, help: 'statusline',
@@ -851,13 +889,21 @@ async function main({ command, args: rest }) {
       const id = `familiar-${memberId}`;
       const dir = join(out, id);
       mkdirSync(join(dir, 'assets'), { recursive: true });
-      writeFileSync(join(dir, SPRITESHEET_PATH), encodeRgba(spritesheet({
+
+      // INVALIDATE FIRST. Between here and the stamp write this pet is
+      // half-replaced; without this unlink an interruption would leave the OLD
+      // stamp vouching for a NEW, incomplete sheet — the one state the asset
+      // gate cannot detect, because a stamp is exactly what it trusts.
+      rmSync(join(dir, STAMP_FILE), { force: true });
+
+      const sheet = encodeRgba(spritesheet({
         animationSet,
         roots: poses,
         anchor: member.anchor,
         motionPolicy: ctx.motionPolicy,
         readFrame: (path) => decodeRgba(readFileSync(path)),
-      })));
+      }));
+      writeFileSync(join(dir, SPRITESHEET_PATH), sheet);
       writeFileSync(
         join(dir, 'pet.json'),
         JSON.stringify(petFile({
@@ -866,6 +912,17 @@ async function main({ command, args: rest }) {
           description: member.persona ?? `familiar — ${member.label ?? memberId}`,
         }), null, 2) + '\n',
       );
+
+      // PUBLISH LAST. The stamp is the only thing that says "this pet is
+      // complete and belongs to this theme", so it is the last byte written.
+      writeFileSync(join(dir, STAMP_FILE), JSON.stringify(stampFor({
+        themeId: ctx.themeId,
+        memberId,
+        frame: FRAME,
+        motionPolicy: ctx.motionPolicy,
+        anchor: member.anchor ?? 'floor',
+        sheet,
+      }), null, 2) + '\n');
       written++;
     }
 

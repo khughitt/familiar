@@ -80,6 +80,12 @@ Run it from inside the project you want a pet in. Codex draws nothing until a
 what a fresh `familiar theme add` leaves — the current repository is the only
 thing to select, and this is what selects it.
 
+Compiling the pets is a prerequisite, not a convenience: after the first
+`install pets`, a Codex session maintains its own project's selection from its
+first turn onward, but it will refuse to select a member whose pet has not been
+compiled for the active theme, and say so. Re-run `familiar install pets` after
+switching themes.
+
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. It never overwrites an existing tracked config; review
 its printed setting instead. It refuses an existing unmanaged untracked config,

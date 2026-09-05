@@ -13,7 +13,7 @@ const MANAGED_CONFIG = new RegExp(
   `^${MANAGED_HEADER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n` +
   '\\[tui\\]\\npet = "custom:familiar-[a-z0-9-]+"\\n$',
 );
-const EXCLUDE = '.codex/config.toml';
+export const EXCLUDE = '.codex/config.toml';
 
 const codexHome = () => resolve(process.env.CODEX_HOME ?? join(homedir(), '.codex'));
 
@@ -46,7 +46,7 @@ function excludePath(root) {
 
 const readIfPresent = (path) => existsSync(path) ? readFileSync(path, 'utf8') : null;
 
-const lstatIfPresent = (path) => {
+export const lstatIfPresent = (path) => {
   try { return lstatSync(path); }
   catch (error) {
     if (error.code === 'ENOENT') return null;
@@ -78,7 +78,87 @@ function assertExcludeTarget(path) {
 }
 
 const selectionText = (member) => `[tui]\npet = "custom:familiar-${member}"\n`;
-const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member)}`;
+export const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member)}`;
+
+// ONE TARGET, ONE BLAST RADIUS. The hook calls this directly, so a refusal here
+// must describe THIS repository and nothing else. `planCodexProjectSync` keeps
+// its machine-wide behaviour by calling this in a loop -- an explicit,
+// user-invoked, foreground command is the right place for that; a hook is not.
+//
+// THE CATALOG IS NOT NARROWED. `resolveIdentity` matches pins by remote, then
+// path, then project name, over the WHOLE catalog. Passing only the pin that
+// matched this path would silently change which pin wins.
+//
+// A CONFLICT IS RETURNED, NOT THROWN, and `target` comes back on every outcome
+// that got as far as a repository root. Both exist for the caller's benefit: the
+// machine-wide command aggregates conflicts and must deduplicate targets across
+// ALL outcomes -- a repository that is both pinned and `cwd` was reported once
+// before this split, and must stay reported once.
+export async function planCodexProjectForPath({
+  path, pinned, catalog, pack, member: givenMember = null,
+}) {
+  if (!existsSync(path)) return { missing: path };
+  if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
+
+  const { remote, repoRoot } = await gitContext(path);
+  // A repository is what makes the current directory a PROJECT. Without this, running the
+  // command from a home directory would aim at `~/.codex/config.toml` -- the user-wide Codex
+  // config -- and rewrite it as a Familiar-managed file. A pinned path stays exempt: pinning
+  // is an explicit choice about a specific directory.
+  if (!pinned && !repoRoot) return { skip: { path, reason: 'not a Git repository' } };
+
+  const root = repoRoot ?? path;
+  if (!pinned && join(root, EXCLUDE) === join(codexHome(), 'config.toml')) {
+    return { skip: { path: root, reason: 'its Codex config is the user-wide one' } };
+  }
+
+  const target = join(root, EXCLUDE);
+  const isTracked = repoRoot ? tracked(root) : false;
+  const replaceEmptyMarker = !isTracked && assertConfigTarget(
+    root, target, !repoRoot || !tracked(root, '.codex'),
+  );
+
+  // A SUPPLIED MEMBER IS THE ANSWER, NOT A HINT. The hook has already resolved
+  // identity for this session and has already checked THAT member's assets. If
+  // this function resolved its own, the gate and the write could name different
+  // members -- verifying one pet's art and selecting another, which is the exact
+  // broken selection the gate exists to prevent.
+  const member = givenMember ?? resolveIdentity({
+    projectKey: projectKeyFor({ remote, repoRoot, cwd: path }),
+    project: displayProject({ repoRoot, cwd: path }),
+    remote, repoRoot, catalog, pack,
+  }).member;
+
+  if (isTracked) {
+    return { target, member, manual: { path: target, setting: selectionText(member) } };
+  }
+
+  const current = readIfPresent(target);
+  if (current !== null && !MANAGED_CONFIG.test(current)) {
+    return { target, member, conflict: target };
+  }
+
+  let exclude = null;
+  if (repoRoot) {
+    const excludeTarget = excludePath(root);
+    assertExcludeTarget(excludeTarget);
+    exclude = { path: excludeTarget };
+  }
+
+  return {
+    target,
+    member,
+    config: {
+      root,
+      path: target,
+      before: current,
+      text: configText(member),
+      replaceEmptyMarker,
+      gitBacked: Boolean(repoRoot),
+    },
+    exclude,
+  };
+}
 
 // The identity pins are the CONFIGURED targets; `cwd` is the one the user is standing in.
 // Syncing pins alone makes `--sync-projects` a no-op on a fresh machine -- `identities.yaml`
@@ -102,65 +182,24 @@ export async function planCodexProjectSync({ catalog, pack, cwd = null }) {
   let unpinnedSkip = null;
 
   for (const { path, pinned } of targets) {
-    if (!existsSync(path)) {
-      missing.push(path);
-      continue;
-    }
-    if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
+    const planned = await planCodexProjectForPath({ path, pinned, catalog, pack });
 
-    const { remote, repoRoot } = await gitContext(path);
-    // A repository is what makes the current directory a PROJECT. Without this, running the
-    // command from a home directory would aim at `~/.codex/config.toml` -- the user-wide Codex
-    // config -- and rewrite it as a Familiar-managed file. A pinned path stays exempt: pinning
-    // is an explicit choice about a specific directory.
-    if (!pinned && !repoRoot) {
-      unpinnedSkip = { path, reason: 'not a Git repository' };
-      continue;
-    }
-    const root = repoRoot ?? path;
-    if (!pinned && join(root, EXCLUDE) === join(codexHome(), 'config.toml')) {
-      unpinnedSkip = { path: root, reason: 'its Codex config is the user-wide one' };
-      continue;
-    }
-    const target = join(root, EXCLUDE);
-    if (seen.has(target)) continue;
-    seen.add(target);
-    const isTracked = repoRoot ? tracked(root) : false;
-    const replaceEmptyMarker = !isTracked && assertConfigTarget(
-      root, target, !repoRoot || !tracked(root, '.codex'),
-    );
+    if (planned.missing) { missing.push(planned.missing); continue; }
+    if (planned.skip) { if (!pinned) unpinnedSkip = planned.skip; continue; }
 
-    const projectKey = projectKeyFor({ remote, repoRoot, cwd: path });
-    const project = displayProject({ repoRoot, cwd: path });
-    const identity = resolveIdentity({
-      projectKey, project, remote, repoRoot, catalog, pack,
-    });
-    const wanted = selectionText(identity.member);
+    // DEDUPE BEFORE DISPATCH, not after. A repository that is both pinned and
+    // the current directory arrives twice, and every outcome -- managed,
+    // tracked, conflicting -- must be reported exactly once.
+    if (seen.has(planned.target)) continue;
+    seen.add(planned.target);
 
-    if (isTracked) {
-      manual.push({ path: target, setting: wanted });
-      continue;
-    }
+    if (planned.conflict) { conflicts.push(planned.conflict); continue; }
+    if (planned.manual) { manual.push(planned.manual); continue; }
 
-    const current = readIfPresent(target);
-    if (current !== null && !MANAGED_CONFIG.test(current)) {
-      conflicts.push(target);
-      continue;
-    }
-    configs.push({
-      root,
-      path: target,
-      before: current,
-      text: configText(identity.member),
-      replaceEmptyMarker,
-      gitBacked: Boolean(repoRoot),
-    });
-
-    if (repoRoot) {
-      const path = excludePath(root);
-      assertExcludeTarget(path);
-      if (!seenExcludes.has(path)) excludes.push({ path });
-      seenExcludes.add(path);
+    configs.push(planned.config);
+    if (planned.exclude && !seenExcludes.has(planned.exclude.path)) {
+      seenExcludes.add(planned.exclude.path);
+      excludes.push(planned.exclude);
     }
   }
 
