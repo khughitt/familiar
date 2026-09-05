@@ -1,11 +1,11 @@
 ---
 id: fam-c5c263
 title: Give Codex the same per-project familiar as every other surface
-status: todo
+status: done
 priority: 2
 size: l
 created: 2026-09-05T10:19:59Z
-updated: 2026-09-05T12:35:45Z
+updated: 2026-09-05T12:59:08Z
 depends: []
 tags: [integration, codex]
 spec: docs/specs/2026-09-05-codex-identity-parity-design.md
@@ -21,3 +21,4 @@ Codex is the only surface Familiar does not render: it draws its own pet from a 
 - 2026-09-05T11:05:24Z (codex-identity-parity): Behavioral probe on codex-cli 0.153.4: SessionStart rewrote Ginger to Spectral Cat on disk; completed turn still rendered Ginger (336 captured Kitty PNG frames matched source art). Relaunch rendered Spectral Cat (151 frames). No hook before first turn. Confirms subsequent-launch benefit for this mechanism; does not prove a universal reload ceiling.
 - 2026-09-05T11:48:49Z (codex-pet-convergence): plan reviewed 2026-09-05; seven findings, all confirmed. Stamp now hashes the compiled sheet, not collected inputs (sampledFrames reads only on cache miss and never for root frames, so timing/repeats/order were invisible). Gate checks pet.json and a fully-validated stamp; install pets unlinks the old stamp first and publishes the new one last. Convergence takes repoRoot+member from the transaction and compares before preflighting (the planner cost 5 git spawns on an already-correct config). Hook now reports actionable and error outcomes, not just missing assets. Added test/fixtures/theme-slots because the only fixture member holds all 12 slots. Dropped the unimplementable end-to-end hook test for an exported shouldConverge predicate plus a wiring guard; resolveAgentPid needs a codex ancestor with a tty. Dedupe restored across manual and conflict outcomes.
 - 2026-09-05T12:35:45Z (codex-pet-convergence): second plan review 2026-09-05; four findings, all confirmed. planCodexProjectForPath now takes member as an input so the asset gate and the written selection cannot name different members (it re-resolved its own, and the member-change test could not have passed). Convergence lstats before reading (readFileSync on a FIFO blocks forever, no timeout on that path) and routes the zero-byte .codex marker to the write path instead of failing ENOTDIR. petUsable now runs first and unconditionally: a matching config is not evidence the pet is installed, and a theme swap reusing a member id matched the text with the wrong art. readStamp validates values, not just types: frame fields positive integers, policy full|reduced, anchor floor|center.
+- 2026-09-05T12:59:08Z (codex-pet-convergence): all five plan tasks landed. Codex SessionStart now converges <repo>/.codex/config.toml from the identity the transaction already resolved, gated on a stamped, complete pet for the active theme; verified against the real cats theme (12 pets compiled, distinct per-member stamps, gate accepts/refuses correctly). Deferred as planned: neutral fallback member (needs a familiar-theme spec change), pruning, ledger + drift report. Worktree pin inheritance remains fam-a940d1.
