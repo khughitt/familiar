@@ -4,7 +4,7 @@
 
 **Goal:** Make `<repo>/.codex/config.toml` a self-maintaining artifact, so a Codex session in any repository converges on the same familiar every other surface already resolves.
 
-**Architecture:** The Codex `SessionStart` hook resolves identity anyway (to put the session on the bus). After that resolve, it compares the resolved member against this one repository's managed config and rewrites it when they disagree — gated on the target pet's assets actually being installed for the active theme. Planning is scoped to a single repository; asset compilation stays offline in `install pets`, which gains a per-pet stamp recording what it compiled from.
+**Architecture:** The Codex `SessionStart` hook resolves identity anyway (to put the session on the bus). After that resolve, it compares the resolved member against this one repository's managed config and rewrites it when they disagree — gated on the target pet's assets actually being installed for the active theme. Planning is scoped to a single repository; asset compilation stays offline in `install pets`, which gains a per-pet stamp identifying the sheet it compiled.
 
 **Tech Stack:** Node 26, ESM, `node:test` + `node:assert/strict`, `familiar-theme` (vendored via node_modules), no new dependencies.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **The hook path must stay bounded.** No content hashing, no PNG decode, no new `git` subprocesses on the no-op path. The only new per-`SessionStart` work when nothing has changed is **one small file read**; the write preflight (which spawns `git`) runs only after a mismatch is proven. Rationale: the timeout argument at the top of `src/bus/identity.js`.
+- **The hook path must stay bounded.** No content hashing, no PNG decode, and **no `git` subprocess at all** unless a write is actually needed. The no-op path is a fixed handful of `lstat`/`existsSync` probes plus two small file reads (the project config and the pet's stamp) — bounded, and none of it spawns a process. The write preflight, which does spawn `git`, runs only after a mismatch is proven. Rationale: the timeout argument at the top of `src/bus/identity.js`.
 - **Reuse what the transaction already resolved.** `applyHookEvent` returns `next`, the record it just wrote, carrying `remote`, `repoRoot` and `cwd`; the resolved member is at `intent[next.sessionId].current.identity.member`. Re-deriving either in the hook means a second `gitContext` (two subprocesses) and a second pin sweep, for an answer already in hand.
 - **Never rewrite a config Familiar does not own.** Managed means the file matches `MANAGED_CONFIG` in `src/install/codex.js` (the header plus a single `[tui] pet` line). Tracked configs, symlinks, non-regular files, and the user-wide config are all refused, exactly as today.
 - **One repository, one blast radius.** Nothing invoked from a hook may plan, refuse, or write on behalf of any other project.
@@ -31,7 +31,7 @@
 - Test: `test/install-codex-single.test.js` (create)
 
 **Interfaces:**
-- Produces: `planCodexProjectForPath({ path, pinned, catalog, pack })` → an object with `target` (the `.codex/config.toml` path, present on every outcome that reached a repository root, so the caller can deduplicate before dispatching) plus exactly one of: `config` + `exclude`, `manual`, `skip`, `missing`, or `conflict`. It **returns** a conflict rather than throwing, so the caller can decide whether to aggregate or report.
+- Produces: `planCodexProjectForPath({ path, pinned, catalog, pack, member })` → an object with `target` and `member` (the `.codex/config.toml` path, present on every outcome that reached a repository root, so the caller can deduplicate before dispatching) plus exactly one of: `config` + `exclude`, `manual`, `skip`, `missing`, or `conflict`. It **returns** a conflict rather than throwing, so the caller can decide whether to aggregate or report. `member` is an **optional input**: when the caller has already resolved one (the hook has), it is used verbatim and no second resolution happens — which is both a saved pin sweep and the only way the asset gate and the written selection can be guaranteed to name the same member.
 - Consumes: existing `gitContext`, `resolveIdentity`, `tracked`, `assertConfigTarget`, `excludePath`, `assertExcludeTarget`, `readIfPresent`, `selectionText`, `configText`, `EXCLUDE`, `codexHome`, `MANAGED_CONFIG`.
 
 - [ ] **Step 0: Build a fixture with distinguishable members**
@@ -141,7 +141,7 @@ test('an unmanaged config in another project does not affect this one', async (t
   });
 
   assert.ok(planned.config, 'this project plans normally');
-  assert.equal(planned.identity.member, 'alpha', 'slot 2 is in the alpha band');
+  assert.equal(planned.member, 'alpha', 'slot 2 is in the alpha band');
   assert.match(planned.config.text, /^# Managed by Familiar\./);
   assert.match(planned.config.text, /pet = "custom:familiar-alpha"\n$/);
 });
@@ -167,8 +167,17 @@ test('a pin for THIS path still wins, so narrowing the target did not narrow the
   const pinned = await planCodexProjectForPath({
     path: mine, pinned: true, catalog: { identities: [{ path: mine, slot: 7 }] }, pack: THEME,
   });
-  assert.equal(unpinned.identity.member, 'alpha', 'hashed slot 2');
-  assert.equal(pinned.identity.member, 'beta', 'pinned slot 7');
+  assert.equal(unpinned.member, 'alpha', 'hashed slot 2');
+  assert.equal(pinned.member, 'beta', 'pinned slot 7');
+});
+
+test('a supplied member is used verbatim, and nothing is re-resolved', async (t) => {
+  const mine = repo(t, 'mine');
+  const planned = await planCodexProjectForPath({
+    path: mine, pinned: false, catalog: { identities: [] }, pack: THEME, member: 'gamma',
+  });
+  assert.equal(planned.member, 'gamma', 'the caller\'s member wins over the hashed slot');
+  assert.match(planned.config.text, /pet = "custom:familiar-gamma"\n$/);
 });
 
 test('a target reached by two routes is planned once — dedupe covers every outcome', async (t) => {
@@ -214,7 +223,9 @@ In `src/install/codex.js`, lift the body of the `for (const { path, pinned } of 
 // machine-wide command aggregates conflicts and must deduplicate targets across
 // ALL outcomes -- a repository that is both pinned and `cwd` was reported once
 // before this refactor and must stay reported once.
-export async function planCodexProjectForPath({ path, pinned, catalog, pack }) {
+export async function planCodexProjectForPath({
+  path, pinned, catalog, pack, member: givenMember = null,
+}) {
   if (!existsSync(path)) return { missing: path };
   if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
 
@@ -232,19 +243,24 @@ export async function planCodexProjectForPath({ path, pinned, catalog, pack }) {
     root, target, !repoRoot || !tracked(root, '.codex'),
   );
 
-  const identity = resolveIdentity({
+  // A SUPPLIED MEMBER IS THE ANSWER, NOT A HINT. The hook has already resolved
+  // identity for this session and has already checked THAT member's assets. If
+  // this function resolved its own, the gate and the write could name different
+  // members -- checking one pet's art and selecting another, which is the exact
+  // broken-selection outcome the gate exists to prevent.
+  const member = givenMember ?? resolveIdentity({
     projectKey: projectKeyFor({ remote, repoRoot, cwd: path }),
     project: displayProject({ repoRoot, cwd: path }),
     remote, repoRoot, catalog, pack,
-  });
+  }).member;
 
   if (isTracked) {
-    return { target, identity, manual: { path: target, setting: selectionText(identity.member) } };
+    return { target, member, manual: { path: target, setting: selectionText(member) } };
   }
 
   const current = readIfPresent(target);
   if (current !== null && !MANAGED_CONFIG.test(current)) {
-    return { target, identity, conflict: target };
+    return { target, member, conflict: target };
   }
 
   let exclude = null;
@@ -256,12 +272,12 @@ export async function planCodexProjectForPath({ path, pinned, catalog, pack }) {
 
   return {
     target,
-    identity,
+    member,
     config: {
       root,
       path: target,
       before: current,
-      text: configText(identity.member),
+      text: configText(member),
       replaceEmptyMarker,
       gitBacked: Boolean(repoRoot),
     },
@@ -401,8 +417,23 @@ test('readStamp rejects anything it cannot fully trust', (t) => {
     assert.equal(readStamp(dir), null, `a stamp missing ${field} must be rejected`);
   }
 
-  write({ ...good, content: 42 });
-  assert.equal(readStamp(dir), null, 'content must be a hex string');
+  // TYPE-CHECKING IS NOT VALIDATION. Each of these is the right type and still
+  // describes a pet that could not have been compiled.
+  const invalid = [
+    ['content', 42], ['content', 'nothex!!'], ['content', 'abc'],
+    ['themeId', ''], ['memberId', ''], ['anchor', ''], ['anchor', 'middle'],
+    ['motionPolicy', 'bogus'],
+    ['motionPolicy', 'off'],          // a real policy, but nothing compiles under it
+    ['frame', {}],
+    ['frame', { ...good.frame, rows: 0 }],
+    ['frame', { ...good.frame, width: -1 }],
+    ['frame', { ...good.frame, columns: 1.5 }],
+  ];
+  for (const [field, value] of invalid) {
+    write({ ...good, [field]: value });
+    assert.equal(readStamp(dir), null,
+      `a stamp with ${field} = ${JSON.stringify(value)} must be rejected`);
+  }
 
   write(good);
   assert.equal(readStamp(dir).memberId, 'ginger');
@@ -454,6 +485,15 @@ export const STAMP_FILE = 'familiar-stamp.json';
 
 const HEX8 = /^[0-9a-f]{8}$/;
 
+// The two policies that actually COMPILE a sheet. `off` is a real motion policy
+// (see MOTION_POLICIES) but `install pets` refuses to run under it, so a stamp
+// claiming it describes a pet that cannot exist.
+const STAMP_POLICIES = new Set(['full', 'reduced']);
+const STAMP_ANCHORS = new Set(['floor', 'center']);   // parseAnchor's domain, in familiar-theme
+const FRAME_FIELDS = ['width', 'height', 'columns', 'rows'];
+
+const positiveInt = (value) => Number.isInteger(value) && value > 0;
+
 export function stampFor({ themeId, memberId, frame, motionPolicy, anchor, sheet }) {
   const contract = new TextEncoder().encode(JSON.stringify({
     version: STAMP_VERSION, themeId, memberId, frame, motionPolicy, anchor,
@@ -481,8 +521,9 @@ export function readStamp(dir) {
   if (typeof data.memberId !== 'string' || data.memberId === '') return null;
   if (typeof data.content !== 'string' || !HEX8.test(data.content)) return null;
   if (typeof data.frame !== 'object' || data.frame === null) return null;
-  if (typeof data.motionPolicy !== 'string') return null;
-  if (typeof data.anchor !== 'string') return null;
+  if (!FRAME_FIELDS.every((field) => positiveInt(data.frame[field]))) return null;
+  if (!STAMP_POLICIES.has(data.motionPolicy)) return null;
+  if (!STAMP_ANCHORS.has(data.anchor)) return null;
   return data;
 }
 ```
@@ -701,7 +742,15 @@ git commit -m "feat(codex): gate a pet selection on a complete, correctly-stampe
   - `convergeCodexProject({ repoRoot, member, catalog, pack, themeId, petsDir })` → `{ changed, member, outcome, reason? }` where `outcome` is `'converged' | 'unchanged' | 'quiet' | 'actionable' | 'error'`. Never throws for an ordinary refusal.
 - Consumes: `repoRoot` and `member` come from the transaction — `next.repoRoot` and `intent[next.sessionId].current.identity.member` — never re-derived.
 
-**Why the signature takes `repoRoot` and `member`:** calling the planner first would spawn `gitContext` (2 subprocesses), `tracked` (1), `tracked(root, '.codex')` (1) and `excludePath` (1) on **every** `SessionStart`, including the overwhelmingly common case where the config is already correct — five `git` subprocesses and a second pin sweep to discover that nothing needs doing. The hook already holds both answers. So the cheap comparison happens first, and the write preflight runs only after a mismatch is proven.
+**Why the signature takes `repoRoot` and `member`:** calling the planner first would spawn `gitContext` (2 subprocesses), `tracked` (1), `tracked(root, '.codex')` (1) and `excludePath` (1) on **every** `SessionStart`, including the overwhelmingly common case where the config is already correct — five `git` subprocesses and a second pin sweep to discover that nothing needs doing. The hook already holds both answers. So the cheap checks happen first, and the write preflight runs only after a mismatch is proven.
+
+**And the member is passed *through* to the write.** The gate checks `member`'s assets; if the planner then resolved its own identity, the two could name different members — checking one pet's art and selecting another, which is exactly the broken selection the gate exists to prevent. `planCodexProjectForPath` therefore takes `member` as an input (Task 1).
+
+**Order within the cheap path.** Three things happen before any `git`, in this order, each for its own reason:
+
+1. **Check the assets even when the text matches.** A config naming member X is not evidence X is installed — after a theme swap that reuses a member id, the text matches and the art is from the old theme. Gating only on mismatch means the case that most needs the diagnostic never prints it.
+2. **Type-check the path, do not open it.** `readFileSync` on a FIFO blocks forever and this code has no timeout of its own. `lstat` first.
+3. **Preserve the empty-`.codex` marker.** The planner deliberately migrates a zero-byte `.codex` *file* into a directory (`assertConfigTarget`'s `allowEmptyMarker`). Reading through it returns `ENOTDIR`, so a naive read turns a supported migration into a reported error. Route it to the write path, which has the `git` needed to decide whether the marker is tracked.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -753,6 +802,8 @@ function repo(t) {
 const run = (root, petsDir, member, catalog = { identities: [] }) =>
   convergeCodexProject({ repoRoot: root, member, catalog, pack: THEME, themeId: THEME.id, petsDir });
 
+const readConfig = (root) => readFileSync(join(root, '.codex', 'config.toml'), 'utf8');
+
 test('the routing predicate fires for Codex SessionStart and nothing else', () => {
   assert.equal(shouldConverge({ agent: 'codex', event: 'SessionStart' }), true);
   assert.equal(shouldConverge({ agent: 'codex', event: 'PreToolUse' }), false);
@@ -774,7 +825,7 @@ test('an already-correct config is unchanged, and spawns no git', async (t) => {
   const root = repo(t);
   const petsDir = petsFor(t);
   await run(root, petsDir, 'gamma');
-  const before = readFileSync(join(root, '.codex', 'config.toml'), 'utf8');
+  const before = readConfig(root);
 
   // The no-op path must not reach the planner. Break `git` on PATH for the
   // duration: if convergence spawns one, this fails loudly.
@@ -787,17 +838,50 @@ test('an already-correct config is unchanged, and spawns no git', async (t) => {
   const again = await run(root, petsDir, 'gamma');
   assert.equal(again.outcome, 'unchanged');
   assert.equal(again.changed, false);
-  assert.equal(readFileSync(join(root, '.codex', 'config.toml'), 'utf8'), before);
+  assert.equal(readConfig(root), before);
 });
 
-test('a member change converges the file on the next call', async (t) => {
-  const root = repo(t);
+test('the member the caller supplied is the member written — not a re-resolved one', async (t) => {
+  const root = repo(t);            // unpinned, hashes to slot 8 -> gamma
   const petsDir = petsFor(t);
   await run(root, petsDir, 'gamma');
   const second = await run(root, petsDir, 'alpha');
   assert.equal(second.outcome, 'converged');
-  assert.match(readFileSync(join(root, '.codex', 'config.toml'), 'utf8'),
-    /pet = "custom:familiar-alpha"/);
+  assert.equal(second.member, 'alpha');
+  assert.match(readConfig(root), /pet = "custom:familiar-alpha"/);
+});
+
+test('a matching config whose pet is missing reports, rather than saying unchanged', async (t) => {
+  const root = repo(t);
+  await run(root, petsFor(t), 'gamma');
+  const before = readConfig(root);
+
+  const empty = mkdtempSync(join(tmpdir(), 'familiar-pets-empty-'));
+  t.after(() => rmSync(empty, { recursive: true, force: true }));
+  const result = await run(root, empty, 'gamma');
+
+  assert.equal(result.outcome, 'actionable');
+  assert.match(result.reason, /not installed/);
+  assert.equal(readConfig(root), before, 'a correct file is still not rewritten');
+});
+
+test('a FIFO at the config path is refused without opening it', async (t) => {
+  const root = repo(t);
+  mkdirSync(join(root, '.codex'), { recursive: true });
+  if (spawnSync('mkfifo', [join(root, '.codex', 'config.toml')]).status !== 0) return;
+
+  // If this returns at all, the implementation did not read the FIFO.
+  const result = await run(root, petsFor(t), 'gamma');
+  assert.equal(result.outcome, 'error');
+  assert.match(result.reason, /not a regular file/);
+});
+
+test('the empty .codex marker is migrated, not reported as an error', async (t) => {
+  const root = repo(t);
+  writeFileSync(join(root, '.codex'), '');     // the zero-byte marker the planner migrates
+  const result = await run(root, petsFor(t), 'gamma');
+  assert.equal(result.outcome, 'converged');
+  assert.match(readConfig(root), /pet = "custom:familiar-gamma"/);
 });
 
 test('an unmanaged config is left alone and reported as actionable', async (t) => {
@@ -839,7 +923,9 @@ Expected: FAIL — cannot find module `../src/install/codex-converge.js`.
 // src/install/codex-converge.js
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { planCodexProjectForPath, applyCodexProjectSync, configText, EXCLUDE } from './codex.js';
+import {
+  planCodexProjectForPath, applyCodexProjectSync, configText, EXCLUDE, lstatIfPresent,
+} from './codex.js';
 import { petUsable } from './pet-stamp.js';
 
 // SessionStart ONLY, AND CODEX ONLY. claude-code and opencode need none of this:
@@ -873,22 +959,12 @@ export async function convergeCodexProject({
   if (!repoRoot) return { changed: false, member, outcome: 'quiet' };
 
   const target = join(repoRoot, EXCLUDE);
-  const wanted = configText(member);
 
-  // THE CHEAP PATH, and the only one most sessions take: one small read.
-  let current = null;
-  try {
-    current = readFileSync(target, 'utf8');
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      return { changed: false, member, outcome: 'error', reason: `${target}: ${error.message}` };
-    }
-  }
-  if (current === wanted) return { changed: false, member, outcome: 'unchanged' };
-
-  // THE GATE COMES BEFORE THE WRITE. Selecting a pet whose assets are absent,
-  // incomplete, or from another theme replaces a stale-but-drawable selection
-  // with one that draws nothing, which is strictly worse.
+  // THE GATE RUNS FIRST, AND UNCONDITIONALLY. A config that already names this
+  // member is NOT evidence the member is installed: swap to a theme that reuses
+  // the id and the text matches while the art belongs to the old theme. Gating
+  // only on mismatch would skip the diagnostic in the one case that most needs
+  // it. Cost is two existsSync probes and one small read -- no subprocess.
   const usable = petUsable({ petsDir, themeId, memberId: member });
   if (!usable.ok) {
     return {
@@ -897,10 +973,52 @@ export async function convergeCodexProject({
     };
   }
 
+  // TYPE-CHECK BEFORE OPENING. readFileSync on a FIFO blocks forever and this
+  // code has no timeout of its own, so the path is lstat'd before it is read.
+  // None of this spawns a process.
+  const configDir = join(repoRoot, '.codex');
+  const dirStat = lstatIfPresent(configDir);
+  if (dirStat?.isSymbolicLink()) {
+    return { changed: false, member, outcome: 'error',
+      reason: `refusing symlinked Codex config directory ${configDir}` };
+  }
+
+  // The zero-byte `.codex` FILE is a marker the full planner migrates into a
+  // directory (assertConfigTarget's allowEmptyMarker). Reading through it would
+  // yield ENOTDIR and turn a supported migration into a reported error, so hand
+  // it straight to the write path -- which knows how, and has the git it needs
+  // to decide whether that marker is tracked.
+  const emptyMarker = Boolean(dirStat?.isFile() && dirStat.size === 0);
+  if (dirStat && !dirStat.isDirectory() && !emptyMarker) {
+    return { changed: false, member, outcome: 'error',
+      reason: `Codex config path is not a directory: ${configDir}` };
+  }
+
+  if (!emptyMarker) {
+    const fileStat = lstatIfPresent(target);
+    if (fileStat?.isSymbolicLink()) {
+      return { changed: false, member, outcome: 'error',
+        reason: `refusing symlinked project config ${target}` };
+    }
+    if (fileStat && !fileStat.isFile()) {
+      return { changed: false, member, outcome: 'error',
+        reason: `Codex project config is not a regular file: ${target}` };
+    }
+    let current = null;
+    if (fileStat) {
+      try {
+        current = readFileSync(target, 'utf8');
+      } catch (error) {
+        return { changed: false, member, outcome: 'error', reason: `${target}: ${error.message}` };
+      }
+    }
+    if (current === configText(member)) return { changed: false, member, outcome: 'unchanged' };
+  }
+
   let planned;
   try {
     planned = await planCodexProjectForPath({
-      path: repoRoot, pinned: false, catalog, pack,
+      path: repoRoot, pinned: false, catalog, pack, member,
     });
   } catch (error) {
     // Only the genuinely exceptional reaches here: a symlinked .codex, a
@@ -931,11 +1049,11 @@ export async function convergeCodexProject({
   } catch (error) {
     return { changed: false, member, outcome: 'error', reason: error.message };
   }
-  return { changed: true, member: planned.identity.member, outcome: 'converged' };
+  return { changed: true, member: planned.member, outcome: 'converged' };
 }
 ```
 
-Export `configText` and `EXCLUDE` from `src/install/codex.js` (both are currently module-private).
+Export `configText`, `EXCLUDE` and `lstatIfPresent` from `src/install/codex.js` (all three are currently module-private). `lstatIfPresent` is reused rather than reimplemented so the fast path and the planner cannot drift on what counts as absent.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1058,4 +1176,13 @@ git commit -m "docs(codex): record automatic pet convergence and its one-launch 
 | 5 | `test/fixtures/theme` does not exist, and the real fixture's only member holds all twelve slots, so no test could observe a slot change | Task 1 Step 0 adds `test/fixtures/theme-slots` with three members over slot bands; every assertion now names its expected member |
 | 6 | the end-to-end hook test was unimplementable: `resolveAgentPid` needs a `codex` ancestor owning a terminal, which a test runner is not | Task 4 Step 6 replaces it with an exported `shouldConverge` predicate, unit tests, and a source-level wiring guard |
 | 7 | moving the dedupe check let `manual` and conflict outcomes bypass it, double-reporting a repository that is both pinned and `cwd` | Task 1 returns `target` on every outcome and dedupes **before** dispatch |
+
+**2026-09-05, second plan review.** Four findings, all confirmed.
+
+| | finding | change |
+|---|---|---|
+| 1 | the gate checked the caller's `member` while the planner resolved and wrote its own — checking one pet's art and selecting another; the member-change test could not have passed | `planCodexProjectForPath` takes `member` as an input and returns it; convergence passes the gated member through to the write |
+| 2 | the fast read opened the path before type-checking it (a FIFO blocks forever) and turned the planner's supported empty-`.codex` marker into an `ENOTDIR` error | `lstat` before open, symlink and non-regular refusals inline, and the marker routed to the write path — all git-free |
+| 3 | a matching config short-circuited before `petUsable`, so a missing pet or a theme swap reusing a member id reported `unchanged` with no diagnostic | the gate runs first and unconditionally; the zero-git no-op path is preserved |
+| 4 | `readStamp` type-checked but did not validate: `frame: {}`, `motionPolicy: "bogus"` and `anchor: ""` all passed | frame fields must be positive integers, policy ∈ {full, reduced}, anchor ∈ {floor, center}; invalid-value cases added beside the missing-field ones |
 
