@@ -1,6 +1,7 @@
 # Codex identity parity
 
-**Status:** proposed; no implementation. Field repairs applied 2026-09-05 (§7).
+**Status:** proposed; no implementation. Revised 2026-09-05 after review — see
+§8 for what changed and why. Field repairs applied 2026-09-05 (§7).
 **Date:** 2026-09-05
 **Task:** fam-c5c263
 
@@ -10,7 +11,10 @@ disagreement is silent, permanent, and — outside a hand-maintained list of
 projects — the normal case rather than the exception.
 
 This spec explains why the two disagree, argues that the cause is structural
-rather than a missing sync, and proposes the shape of a fix.
+rather than a missing sync, and proposes the shape of a fix. Review established
+that the ceiling on that fix is lower than first drafted (§2.3, §6.1), and that
+Familiar's own identity resolution is already inconsistent for worktrees of
+pinned projects, independent of Codex (§6.2).
 
 ## 1. The report
 
@@ -84,9 +88,9 @@ machine was wrong, and wrong in a way that reads as a confident answer rather
 than a missing one.
 
 A second Codex home on the same machine (`~/.codex-work`) carries
-`pet = "familiar-ginger-tabby"` — a member id that no longer exists in the
-theme, and missing the `custom:` prefix besides. Hand-maintained pet settings
-rot; that is the third instance of the same failure in one investigation.
+`pet = "familiar-ginger-tabby"` — a member id retired from the theme, and
+missing the `custom:` prefix besides. Hand-maintained pet settings rot; that is
+the third instance of the same failure in one investigation.
 
 ### 2.3 The ordering constraint
 
@@ -97,15 +101,22 @@ not begin until the **first turn** — measured against Codex 0.146 and recorded
 in `src/adapters/codex.js`: a clean Codex prompt sat for over a minute with no
 hook of any kind having run.
 
+Against the installed **Codex 0.153.4**, the published hook reference lists
+`SessionStart` as the earliest event and describes it as running *during the
+agentic loop*, documents **no** pre-configuration hook, and documents **no**
+mechanism for reloading configuration mid-session.
+
 Therefore **nothing Familiar writes at hook time can affect the session it runs
-in.** A self-healing hook is not a complete fix; it is always exactly one launch
-late. Any design that claims otherwise is wrong about the ordering.
+in**, and this is a ceiling rather than a lag to be optimised away. Any design
+that claims otherwise is wrong about the ordering. §6.1 states what evidence
+would overturn this.
 
 ## 3. Scope
 
 **In:** the mechanism that keeps `<repo>/.codex/config.toml` in agreement with
-the resolver; the no-project fallback; the demotion of `--sync-projects` from
-primary mechanism to bootstrap and repair; drift reporting.
+the resolver; the no-project fallback; the asset prerequisite that makes a
+selection meaningful; the demotion of `--sync-projects` from primary mechanism
+to bootstrap and repair; drift reporting.
 
 **Out (deferred, with reason):**
 
@@ -117,22 +128,49 @@ primary mechanism to bootstrap and repair; drift reporting.
   `exec`s the real binary). It is the *only* ordering-correct fix, and it is
   rejected on contract grounds: a cosmetic layer that is correct through one
   entry point and silently degrades when the user types the real binary is a
-  worse promise than one that is honestly one launch behind. Revisit only if
-  §6.1 resolves against us.
-- **Untrusted projects.** Codex honors project config only in trusted projects,
-  so no write-based mechanism can reach an untrusted one. Out of Familiar's
+  worse promise than one that is honestly one launch behind.
+- **Overriding a user's own overrides.** Familiar writes exactly one file per
+  repository, the one carrying its managed header. Nested project configs, a
+  `--profile`, and `-c`/`--config` flags are the user's, and outrank it (§4.2).
+  Familiar's guarantee is over the file it owns, never over the pixels.
+- **Untrusted projects.** Codex honors project config in trusted projects only,
+  so no write-based mechanism reaches an untrusted one. Out of Familiar's
   control; document, do not paper over.
+- **Worktree pin inheritance** (§6.2). A real defect, but in Familiar's own
+  resolver rather than in the Codex surface. It needs its own task.
 
 ## 4. Design
 
-### 4.1 Converge the project config from the hook
+### 4.1 Converge the project config from the hook — one repository only
 
 On the Codex `SessionStart` event, after identity resolution (which the hook
 performs anyway, to put the session on the bus), compare the resolved member
-against the `pet` already on disk for this repository. When they disagree, write
-the config through the existing `planCodexProjectSync` / `applyCodexProjectSync`
-path, inheriting its refusals unchanged: never a tracked config, never an
-unmanaged one, never a symlink, never the user-wide file.
+against the `pet` in this repository's managed config. When they disagree, write
+that one file.
+
+**The planner must be scoped to the current repository, and this is not what
+`planCodexProjectSync` does today.** It walks every `catalog.identities` path
+pin before reaching `cwd`, accumulates `conflicts` across all of them, and
+throws if *any* is unmanaged; `applyCodexProjectSync` then rewrites *every*
+planned config. Called from a hook that is decorating one session in one
+repository, that means an unmanaged `.codex/config.toml` in an unrelated project
+aborts the repair here, and a successful repair here rewrites files in fifteen
+repositories the user is not looking at. Both are unacceptable on the hook path.
+
+So the hook needs a single-root planning entry point. Two constraints on it:
+
+- **One target, one blast radius.** Plan and apply exactly one repository's
+  config. A refusal in another project is that project's business; a conflict in
+  *this* project aborts *this* repair only, and says so.
+- **The whole catalog, still.** Scoping the *target* must not scope the
+  *inputs*. `resolveIdentity` calls `matchPin(catalog, …)`, which searches every
+  pin by remote, then path, then project name. A single-root planner that
+  narrowed the catalog to the matching pin would silently change which pin wins.
+  Pass the full catalog; narrow only the write set.
+
+Refusals otherwise carry over unchanged from `planCodexProjectSync`: never a
+tracked config, never an unmanaged one, never a symlink, never the user-wide
+file.
 
 The property this buys is **convergence**, not correctness-on-first-launch:
 
@@ -152,11 +190,42 @@ writes only on mismatch. The `git ls-files` and `git rev-parse --git-path`
 spawns stay on the write path, so the bounded-hook discipline argued for at
 length in `src/bus/identity.js` survives intact.
 
-### 4.2 An honest fallback for "no project"
+### 4.2 What convergence does and does not guarantee
+
+Agreement between the resolver and the file Familiar owns is **not** the same as
+the pet the user sees. Codex documents this precedence:
+
+> 1. CLI flags and `--config` overrides
+> 2. Project config files: `.codex/config.toml`, ordered from the project root
+>    down to your current working directory (closest wins; trusted projects only)
+> 3. Profile files selected with `--profile profile-name`
+> 4. User config: `~/.codex/config.toml`
+> 5. System config (if present): `/etc/codex/config.toml` on Unix
+> 6. Built-in defaults
+
+Three consequences the design must state rather than gloss:
+
+- **Nested configs win.** Familiar writes at the repository root. A
+  `.codex/config.toml` in a subdirectory the user launches from is *closer* and
+  supersedes it. That is the user's choice and must be preserved.
+- **CLI flags win over everything**, including a correctly converged file.
+- **Trust gates the whole layer.** In an untrusted project, layer 2 does not
+  apply at all and the repaired file has no effect.
+
+So the guarantee is stated narrowly: *the managed file at the repository root
+agrees with the resolver*. Any drift report (§4.5) must report **file
+agreement**, and must not claim to report the effective selection unless it
+actually resolves the full precedence chain. Reporting the second while
+measuring the first is the same class of confident-wrong-answer this whole spec
+exists to remove.
+
+### 4.3 An honest fallback for "no project"
 
 The user-wide `[tui] pet` must not name a real member. Slot 0's member is a
 specific project's identity, and pointing every unresolved project at it is the
-precise failure §2.2 describes.
+precise failure §2.2 describes — and per §4.2 this layer is what every
+unenumerated, untrusted, or not-yet-converged project actually lands on, which
+makes it the highest-traffic decision in this spec rather than an afterthought.
 
 The right answer is a theme member that means *no project identity* — visibly a
 familiar, visibly not any particular one. That is a `familiar-theme` spec
@@ -169,18 +238,60 @@ Until that lands, the honest state is **no user-wide `pet` setting at all**:
 Codex falls back to its own built-in pet, which is obviously not a familiar and
 therefore tells no lie about identity. Applied in §7.
 
-### 4.3 Demote `--sync-projects`
+### 4.4 A selection is meaningless without its assets
+
+Selecting `custom:familiar-<member>` presumes `CODEX_HOME/pets/familiar-<member>/`
+exists and holds the *current* theme's art. Only `install pets` compiles that,
+over `ctx.pack.members`, and **it never prunes**.
+
+The evidence is on the machine now: `~/.codex/pets` holds 25 pet directories for
+a 12-member theme. `familiar-cheshire`, `familiar-ginger-tabby`,
+`familiar-space-cat` and friends are orphans of a retired roster, still holding
+that roster's artwork. So the hook faces two distinct hazards:
+
+- **Absent** — after a theme change, the resolver names a member whose pet
+  directory was never compiled. The selection points at nothing.
+- **Stale** — a member id reused across themes keeps the *old* theme's art until
+  `install pets` runs again. The selection points at the wrong picture, which is
+  worse, because it looks like it worked.
+
+Compiling on the hook path is not the answer: it decodes every pose PNG and
+builds a 1536×1872 sheet per member, which is exactly the unbounded work
+`src/bus/identity.js` argues must never enter a hook.
+
+So **asset installation is a prerequisite, not a step**. The hook verifies the
+target pet directory exists and was compiled from the active theme — which
+requires a checkable stamp, since a directory's presence proves nothing about
+which roster produced it; the existing theme receipt
+(`~/.config/familiar/theme-receipts/<id>.json`, carrying source and commit) is
+the natural thing to record alongside the compiled pets. When the check fails,
+the hook **refuses to rewrite the selection and emits one diagnostic naming the
+remedy** (`familiar install pets`). It must not select a member it cannot draw:
+a selection pointing at absent or foreign art is a worse outcome than the stale
+selection it replaced.
+
+`install pets` should additionally **prune** pet directories that no longer
+correspond to a member of the active theme, so the orphan set above stops
+growing.
+
+### 4.5 Demote `--sync-projects`
 
 With §4.1 in place, `install pets --sync-projects` stops being the mechanism and
 becomes bootstrap (seed a machine) and repair (force agreement now, without
-waiting for a launch). It should additionally **report drift** — for every known
-project config, whether the baked member still equals the resolved one — so the
-`beliefs` class of failure is visible without an investigation.
+waiting for a launch). Its machine-wide behaviour is correct *there* — an
+explicit, user-invoked, foreground command is the right place to touch fifteen
+repositories and to abort loudly on an unmanaged file.
+
+It should additionally **report drift**: for every known project config, whether
+the baked member still equals the resolved one, subject to the narrowness of
+§4.2. That is what would have surfaced the `beliefs` case without an
+investigation.
 
 ## 5. Alternative: stop carrying identity in Codex's pet
 
 Worth recording because it is the philosophically consistent option, not a straw
-man.
+man — and §2.3's confirmation that convergence-with-lag is a *ceiling* rather
+than a temporary limitation strengthens it.
 
 Familiar could set one neutral familiar user-wide and carry per-project identity
 on the channels that are already live and correct under Codex: the OSC
@@ -195,30 +306,68 @@ Applied to identity, it makes the harnesses differ in **fidelity** rather than i
 **answer**, which is arguably the real requirement.
 
 It is not the recommendation because it gives up the per-project familiar on one
-of the two primary harnesses, and that is the feature. Hold it as the fallback
-if §6.1 resolves badly or the launch lag proves annoying in practice.
+of the two primary harnesses, and that is the feature. But it is cheap, it has
+no ordering problem, no asset prerequisite and no precedence caveat — and if
+§6.1's verification comes back negative, it should be reconsidered on the merits
+rather than treated as the consolation prize.
 
 ## 6. Open questions
 
-### 6.1 Does current Codex fire a launch-time hook?
+### 6.1 Can a hook affect the pet in its own session? (Verification, not a hope)
 
-Load-bearing for the whole design. The "no hook until the first turn" finding is
-measured against **Codex 0.146**. If a newer Codex added a launch-time event,
-§4.1 upgrades from *converging* to *complete* — correct on the very first
-launch — and §5 loses most of its appeal. **Verify against the installed version
-before implementing.**
+The whole design rests on this, and the answer currently looks like **no**:
+Codex 0.153.4's hook reference documents no pre-configuration event, describes
+`SessionStart` as running during the agentic loop, and documents no
+configuration reload.
 
-### 6.2 Does Codex re-read config or pets mid-session?
+The verification must therefore be **behavioural, not existential**. Observing
+that some hook fires at launch proves nothing: the hook must either complete
+*before* the pet configuration is read, or trigger a supported reload. So the
+test is:
 
-Assumed no. If it re-reads, the lag window shrinks further and a mid-session
-repair becomes visible immediately.
+1. Start Codex in a repository whose managed config names member A.
+2. Have a `SessionStart` hook rewrite that config to member B.
+3. Observe **the pet actually displayed in that same session.**
 
-### 6.3 Worktrees
+A shows convergence-with-lag is the ceiling (§2.3 stands, §5 gains weight). B
+shows hook-time repair is *complete*, first launch included, and the design
+simplifies considerably. Anything short of step 3 does not answer the question.
 
-`repoRoot` for a worktree is the worktree path, so each worktree gets its own
-`.codex/config.toml` while sharing the `projectKey` (and therefore the member)
-of its parent repository. Correct, but multiplies the number of files §4.1 must
-keep converged. Confirm this is wanted before implementing.
+### 6.2 Worktrees do not inherit a parent's pin — and this is not a Codex bug
+
+The first draft asserted that a worktree shares its parent's `projectKey` "and
+therefore the member". **That is wrong**, and the counter-example is live on this
+machine right now:
+
+```
+niri-material                      pin ~/d/niri-material slot 7  -> chartreux
+  .worktrees/glass-noise-saturation  no pin match    autoSlot 11 -> odd-eyed-white
+  .worktrees/ring-light-design       no pin match    autoSlot 11 -> odd-eyed-white
+```
+
+`matchPin` (`src/bus/pins.js`) compares a `path:` pin to `repoRoot` by exact
+canonical equality, with no ancestry. A worktree's `repoRoot` is the worktree
+directory, so the parent's path pin cannot match it; `project` is the worktree's
+basename, so the project-name pin cannot match either; and with no `remote:` pin
+the worktree falls through to `autoSlot`. Two further exceptions follow from the
+same code: a **project-name pin** matches `basename(repoRoot)`, which differs per
+worktree, and a **repository with no remote** has `projectKey = repoRoot`, so
+parent and worktree do not even share a key.
+
+Consequences to decide, in order:
+
+1. **Is inheritance wanted at all?** A worktree is a distinct working context and
+   a distinct familiar is defensible. What is *not* defensible is the current
+   silent inconsistency: a pinned project's root obeys the pin while its
+   worktrees obey a hash, so "one project, one familiar" is already false on
+   Familiar's own surfaces, with no Codex involved.
+2. **If yes**, `matchPin` would resolve `path:` pins by ancestry rather than
+   equality — a change to the identity core, affecting every surface, and needing
+   its own design and its own task. It is out of scope here (§3).
+3. **Either way**, §4.1 must state which files it converges. Per-worktree configs
+   multiply the write targets, and today they would converge worktrees to a
+   *different* member than their parent — correctly, per the resolver, but
+   surprisingly.
 
 ## 7. Field repairs applied 2026-09-05
 
@@ -229,9 +378,24 @@ Independent of the design; done to stop the bleeding.
   project config — and were therefore falling through to the user-wide default —
   received correct ones. Every other project config was already correct and was
   rewritten identically.
-- The user-wide `[tui] pet = "custom:familiar-ginger"` was removed per §4.2.
+- The user-wide `[tui] pet = "custom:familiar-ginger"` was removed per §4.3.
   Restore by re-adding that line under `[tui]` if the interim proves worse than
   the lie.
 
-`~/.codex-work`'s stale `familiar-ginger-tabby` was left alone: it is a separate
-`CODEX_HOME` and not this investigation's to change.
+Left alone, deliberately: `~/.codex-work`'s stale `familiar-ginger-tabby` (a
+separate `CODEX_HOME`, not this investigation's to change), and the 13 orphaned
+pet directories in `~/.codex/pets` (§4.4 proposes pruning them as part of
+`install pets`, which is the right place for it).
+
+## 8. Revision history
+
+**2026-09-05, after review.** Five defects found, all confirmed against the code
+and the machine; two were worse than reported.
+
+| | finding | change |
+|---|---|---|
+| 1 | §4.1 delegated to a machine-wide planner: an unrelated project's unmanaged config aborts the repair, and a successful repair rewrites every planned config | §4.1 rewritten around a single-root planner that keeps the full catalog for resolution |
+| 2 | selecting a member does not install its art; `install pets` never prunes | new §4.4; confirmed by 25 pet directories for a 12-member theme |
+| 3 | "does a hook fire at launch" was the wrong question | §6.1 rewritten as a behavioural test; §2.3 now records that Codex 0.153.4 documents no pre-config hook and no reload, making the lag a ceiling |
+| 4 | root-file agreement is not the effective selection | new §4.2 with the documented precedence; the guarantee is now stated narrowly |
+| 5 | worktrees do not inherit a parent's pin — the first draft claimed they did | §6.2 rewritten around the live `niri-material` counter-example; scoped out as an identity-core defect needing its own task |
