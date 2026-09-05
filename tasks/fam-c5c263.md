@@ -5,7 +5,7 @@ status: todo
 priority: 2
 size: l
 created: 2026-09-05T10:19:59Z
-updated: 2026-09-05T10:54:58Z
+updated: 2026-09-05T11:05:24Z
 depends: []
 tags: [integration, codex]
 spec: docs/specs/2026-09-05-codex-identity-parity-design.md
@@ -17,3 +17,4 @@ Codex is the only surface Familiar does not render: it draws its own pet from a 
 
 - 2026-09-05T10:35:34Z (codex-identity-parity): design reviewed 2026-09-05; all five findings confirmed against code and machine. Reworked: single-root planner (planCodexProjectSync is machine-wide and aborts on an unrelated repo's unmanaged config), asset prerequisite + prune (install pets never prunes; 25 pet dirs for a 12-member theme), precedence caveat (nested .codex/config.toml and -c outrank the root file; guarantee narrowed to file agreement), behavioural verification for the hook-ordering question (Codex 0.153.4 documents no pre-config hook and no reload, so convergence-with-lag looks like the ceiling). Worktree pin inheritance was wrong in the first draft and is scoped out to fam-a940d1.
 - 2026-09-05T10:54:58Z (codex-identity-parity): second review 2026-09-05; five more gaps, all confirmed, two of them defects in the first round's fixes. Pruning now bounded to stamped Familiar-owned dirs (CODEX_HOME/pets is shared; unstamped orphans reported not removed). Stamp reworked: theme receipts cannot establish freshness (local receipts carry no commit, absent receipts are normal, https receipts survive in-place art edits), so the stamp hashes compiler inputs via fnv1a32Bytes and the hook checks roster only, never content. Drift-report claim about catching beliefs withdrawn: current-pins-plus-cwd cannot discover a project that lost its pin; added a verified-on-read ledger as a discovery hint. Convergence table restated around turns, not launches, incl. launches that never take a turn. Neutral-pet alternative is a migration: 17 managed project configs outrank a user-wide setting, and it needs its own assets.
+- 2026-09-05T11:05:24Z (codex-identity-parity): Behavioral probe on codex-cli 0.153.4: SessionStart rewrote Ginger to Spectral Cat on disk; completed turn still rendered Ginger (336 captured Kitty PNG frames matched source art). Relaunch rendered Spectral Cat (151 frames). No hook before first turn. Confirms subsequent-launch benefit for this mechanism; does not prove a universal reload ceiling.

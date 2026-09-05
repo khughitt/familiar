@@ -1,7 +1,8 @@
 # Codex identity parity
 
-**Status:** proposed; no implementation. Revised twice on 2026-09-05 after
-review — see §8 for what changed and why. Field repairs applied 2026-09-05 (§7).
+**Status:** proposed; no implementation. Revised three times on 2026-09-05 after
+review — see §8. The ordering question of §6.1 is **answered by measurement**,
+not inference. Field repairs applied 2026-09-05 (§7).
 **Date:** 2026-09-05
 **Task:** fam-c5c263
 
@@ -101,15 +102,21 @@ not begin until the **first turn** — measured against Codex 0.146 and recorded
 in `src/adapters/codex.js`: a clean Codex prompt sat for over a minute with no
 hook of any kind having run.
 
-Against the installed **Codex 0.153.4**, the published hook reference lists
-`SessionStart` as the earliest event and describes it as running *during the
-agentic loop*, documents **no** pre-configuration hook, and documents **no**
-mechanism for reloading configuration mid-session.
+Against the installed **Codex 0.153.4**, the published hook reference agrees:
+`SessionStart` is the earliest event, described as running *during the agentic
+loop*, with no pre-configuration hook and no documented mechanism for reloading
+configuration mid-session.
 
-Therefore **nothing Familiar writes at hook time can affect the session it runs
-in**, and this is a ceiling rather than a lag to be optimised away. Any design
-that claims otherwise is wrong about the ordering. §6.1 states what evidence
-would overturn this.
+**This is now measured rather than inferred.** The probe in §6.1 rewrote a
+project's selection from a `SessionStart` hook and captured what the TUI actually
+drew: the session that ran the hook kept rendering the old member through a
+completed turn, and the next launch rendered the new one. It also reconfirmed on
+0.153.4 the 0.146 finding above — no `SessionStart` ran before the first turn.
+
+So **nothing Familiar writes at hook time affects the session it runs in**, and
+for the mechanism this spec proposes that is a ceiling rather than a lag to be
+optimised away. §6.1 records the method, the numbers, and the limits of what the
+measurement covers.
 
 ## 3. Scope
 
@@ -376,6 +383,11 @@ So Familiar records the configs it writes — a ledger under
 `~/.local/state/familiar/`, beside `agents.json` — and the report covers the
 union of the ledger, the current pins, and `cwd`.
 
+**Scoping (see §5.1):** once §4.1 converges automatically, drift self-heals, and
+this report degrades from a safety net into a diagnostic for the case where
+convergence itself fails. The ledger exists only to serve the report, so both are
+**deferred to a follow-up** rather than blocking the first implementation.
+
 The ledger is itself an eager artifact, which is the failure class this entire
 spec is about, so it is scoped as a **discovery hint and never a source of
 truth**: every entry is verified by reading the file at report time, entries
@@ -423,31 +435,87 @@ requirements as the recommendation:
    every unresolved project lands on it.
 
 What the alternative genuinely escapes is the **ordering** problem of §2.3: no
-launch lag, because nothing needs to change per project. That is its real
-advantage, and it is enough to keep it live if §6.1 resolves negatively — but it
-should be argued on that basis rather than on being free.
+launch lag, because nothing needs to change per project.
 
-## 6. Open questions
+### 5.1 Reconsidered, now that §6.1 has resolved
 
-### 6.1 Can a hook affect the pet in its own session? (Verification, not a hope)
+The previous draft promised to reconsider this "on the merits" if the
+verification came back negative. It did. Discharging that promise rather than
+leaving it as a pointer:
 
-The whole design rests on this, and the answer currently looks like **no**:
-Codex 0.153.4's hook reference documents no pre-configuration event, describes
-`SessionStart` as running during the agentic loop, and documents no
-configuration reload.
+The lag is now a measured property, not a risk. Weighing the two:
 
-The verification must therefore be **behavioural, not existential**. Observing
-that some hook fires at launch proves nothing: the hook must either complete
-*before* the pet configuration is read, or trigger a supported reload. So the
-test is:
+| | §4 converge | §5 neutral pet |
+|---|---|---|
+| per-project cat in Codex | yes, from launch 2 | no |
+| identity signal in Codex | cat + OSC tint | OSC tint only, correct from the first turn |
+| wrong on a new repo's first launch | yes | no |
+| wrong when a session never takes a turn | yes | no |
+| defeated by nested config / CLI flag | yes (§4.2) | same |
+| new machinery | single-root planner, compile stamp, asset gate, ownership-bounded prune, ledger | migration + one neutral member |
 
-1. Start Codex in a repository whose managed config names member A.
-2. Have a `SessionStart` hook rewrite that config to member B.
-3. Observe **the pet actually displayed in that same session.**
+The honest summary is that §4 buys the cat and pays for it with a cache — and
+most of its machinery (stamp, ledger, ownership rules) exists to make that cache
+safe rather than to draw anything. §5 deletes the cache and the cat together.
 
-A shows convergence-with-lag is the ceiling (§2.3 stands, §5 gains weight). B
-shows hook-time repair is *complete*, first launch included, and the design
-simplifies considerably. Anything short of step 3 does not answer the question.
+**The recommendation still stands, narrowly.** The per-project familiar is the
+feature, §5 does not merely reduce fidelity but removes the thing the project
+exists to do on one of two primary harnesses, and the residual wrongness of §4 is
+concentrated in first contact with a repository rather than in daily use. Note
+too that §5 is not "no identity in Codex": the OSC tint carries it from the first
+turn, so the gap between them is narrower than the cat-versus-no-cat framing
+suggests, in *both* directions.
+
+**But the bill should be trimmed before implementing.** With convergence
+automatic, drift self-heals, so §4.5's drift report degrades from a safety net to
+a diagnostic for when convergence itself fails — and the ledger exists only to
+serve it. Ledger and report should be **deferred to a follow-up**, leaving the
+first implementation as: single-root planner, compile stamp, asset gate, and the
+hook write. If that lands and the first-launch wrongness proves more annoying in
+practice than it looks on paper, §5 remains available and its migration
+(§5, 1-2) gets cheaper the fewer managed configs exist.
+
+## 6. Findings and open questions
+
+### 6.1 Answered: a hook cannot affect the pet in its own session
+
+Measured on **codex-cli 0.153.4**, 2026-09-05. This was the load-bearing
+assumption of the whole design and it is no longer an assumption.
+
+**Method.** An isolated `CODEX_HOME`, a temporary trusted Git repository, and
+copies of two installed pet directories. A 140x45 PTY advertising Kitty graphics
+support, answering terminal capability queries, capturing the TUI's actual
+graphics output. The repository selected `familiar-ginger`; one `SessionStart`
+command hook rewrote that same file to `familiar-spectral-cat`. Every complete
+Kitty PNG transmission was decoded to RGBA and compared by SHA-256 against every
+192x208 frame of both source spritesheets.
+
+| capture | complete frames | matched member | unmatched |
+|---|---:|---|---:|
+| launch N, before turn | 120 | ginger | 0 |
+| launch N, through completed turn | 336 | ginger | 0 |
+| launch N+1, before turn | 151 | spectral-cat | 0 |
+
+**Result.** The hook fired (event `SessionStart`, source `startup`) and the file
+on disk did change, but launch N rendered Ginger throughout — including its
+review pose *after* the rewrite and a completed response. Launch N+1 rendered
+Spectral Cat immediately, with no new hook invocation. Both pets were installed
+before either launch, so absent assets cannot explain the result.
+
+**What this does and does not settle.** It settles the mechanism this spec
+proposes — a project-config rewrite from `SessionStart` — on this version: the
+repair benefits a subsequent launch and never the current one. It does **not**
+establish a universal reload ceiling. Some other mechanism (an IPC or command
+surface that reloads configuration) or a future Codex version could behave
+differently, and neither was tested. Overstating this into "Codex can never
+reload" would repeat the error §4.5 was corrected for.
+
+**Two consequences.** §4.1's convergence promise is now grounded in measurement
+rather than documentation. And §5's trigger condition has fired — see there.
+
+Incidentally, the captures matched the compiled spritesheet frames exactly, which
+is independent evidence that `src/render/codex/pets.js` produces what Codex
+actually draws.
 
 ### 6.2 Worktrees do not inherit a parent's pin — and this is not a Codex bug
 
@@ -529,3 +597,12 @@ the first round were themselves unsound.
 | 3 | drift reporting enumerates current pins plus `cwd`, so a project drops out of discovery by exactly the event that makes it drift | §4.5: claim that it would have caught `beliefs` **withdrawn**; a verified-on-read ledger added as a discovery hint, explicitly not a source of truth |
 | 4 | the convergence table promised repair a launch earlier than the trigger permits, and ignored launches that never take a turn | §4.1: table restated around turns; promise narrowed to "on a launch following a successful repair", conditional on §4.4 and §4.2 |
 | 5 | a neutral user-wide pet is outranked by the 17 managed project configs already on disk, and needs its own assets | §5: rewritten as a migration with two prerequisites; its genuine advantage narrowed to escaping the §2.3 ordering problem |
+
+**2026-09-05, third revision — §6.1 measured.** A behavioural probe on
+codex-cli 0.153.4 answered the design's load-bearing question.
+
+| | finding | change |
+|---|---|---|
+| 1 | a `SessionStart` config rewrite does not affect its own session; the next launch picks it up (336 captured frames matched the old member through a completed turn, 151 matched the new one on relaunch) | §6.1 rewritten from a verification plan into a result with method, numbers and scope limits; §2.3 now cites measurement rather than documentation |
+| 2 | §5's stated trigger condition fired and was owed an actual reconsideration | new §5.1 weighs the two against the measured lag; recommendation stands, narrowly, with the reasoning written down |
+| 3 | most of §4's machinery protects a cache rather than drawing anything | §4.5 and §5.1: ledger and drift report deferred to a follow-up, trimming the first implementation to planner, stamp, asset gate and hook write |
