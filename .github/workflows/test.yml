@@ -12,7 +12,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci
-      - run: npm test
+      - run: python3 tools/tt ci-test -- npm test
   smoke:
     runs-on: ubuntu-latest
     steps:
@@ -38,7 +38,7 @@ jobs:
       - name: fast suite with Darwin tests enforced
         run: |
           set -o pipefail
-          npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
+          python3 tools/tt ci-test -- npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
           ! grep -F 'requires Darwin' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin real snapshot keeps this process identity stable' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'Darwin ps keeps comm last and canonicalizes tty' "$RUNNER_TEMP/familiar-tests.log"
