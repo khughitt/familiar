@@ -54,13 +54,32 @@ measured on Codex 0.146 and reproduced on 0.149 on 2026-08-22 with an app-server
 reported origin was the project `.codex` directory.
 
 Familiar writes one stable `custom:familiar-<member>` pet id per theme member.
-`familiar install pets --sync-projects` installs that roster and materializes every
-`path:` identity pin into a Familiar-managed project config, excluded locally from
-Git. Tracked project configs remain project-owned and receive a printed manual
-setting instead. `familiar whoami <project>` reports the assigned member for manual
-configuration. Selection is read at session startup rather than changed
-dynamically, and the project must be trusted. A separate Claude-style renderer is
-therefore unnecessary.
+`familiar install pets` compiles that roster, stamping each pet with a hash of the
+sheet it compiled so a later session can tell whether the art belongs to the
+active theme.
+
+The project's selection is then **maintained automatically**. The Codex
+`SessionStart` hook compares the member it resolved against the repository's
+managed `.codex/config.toml` and rewrites that one file when they disagree.
+
+**A change takes effect on the next launch, not the current one.** Codex reads
+`[tui] pet` when its TUI starts, and no Familiar hook runs before the first turn
+— measured on Codex 0.153.4, see
+`docs/specs/2026-09-05-codex-identity-parity-design.md` §6.1. So the first Codex
+session in a new repository still shows the previous selection, and a session
+that never takes a turn is never repaired at all. `familiar install pets
+--sync-projects` forces the same write immediately, for the current repository
+and every `path:` entry in `identities.yaml`, when waiting for a launch is not
+what you want.
+
+Convergence refuses rather than guesses: it will not select a member whose pet is
+missing, incomplete, or compiled for another theme, and it never rewrites a
+tracked or unmanaged config. Each of those prints one line naming the remedy.
+Tracked project configs remain project-owned; `familiar whoami <project>` reports
+the assigned member for manual configuration. The project must be trusted for
+Codex to read its config at all, and a `.codex/config.toml` nearer the directory
+you launch from, or a `-c` flag, still outranks the managed one. A separate
+Claude-style renderer is therefore unnecessary.
 
 Official OpenAI documentation now covers [terminal pets][codex-pets] and confirms
 that trusted projects can supply [project-scoped configuration][codex-config], but

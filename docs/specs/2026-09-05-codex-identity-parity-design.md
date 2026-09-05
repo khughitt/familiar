@@ -1,8 +1,18 @@
 # Codex identity parity
 
-**Status:** proposed; no implementation. Revised three times on 2026-09-05 after
-review — see §8. The ordering question of §6.1 is **answered by measurement**,
-not inference. Field repairs applied 2026-09-05 (§7).
+**Status:** partly implemented on 2026-09-05.
+
+- **Landed:** §4.1 single-root planning and hook-time convergence, §4.2's narrow
+  guarantee, §4.4 the compile stamp and the asset gate (§4.4.1, §4.4.2).
+- **Deferred, not built:** §4.3 the neutral fallback member (needs a
+  `familiar-theme` spec change), §4.4.3 pruning, §4.5 the ledger and drift report
+  (see §5.1 for why those two were cut from the first implementation).
+- **Not a Codex problem:** §6.2 worktree pin inheritance, filed as `fam-a940d1`.
+
+Revised three times on 2026-09-05 under review — see §8. The ordering question of
+§6.1 is **answered by measurement**, not inference. Field repairs applied
+2026-09-05 (§7). Implementation plan:
+`docs/plans/2026-09-05-codex-pet-convergence.md`.
 **Date:** 2026-09-05
 **Task:** fam-c5c263
 
