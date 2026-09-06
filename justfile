@@ -21,7 +21,7 @@ tt := "python3 tools/tt"
 fast_cmd := "npm test"
 test_cmd := "npm test"
 # No formatter, linter, or typechecker in this project yet; `tasks check` is the gate.
-check_cmd := "tasks check"
+check_cmd := "python3 tools/ops-check && tasks check"
 
 # Affected-only: the inner loop.
 test-fast:
