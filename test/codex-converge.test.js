@@ -154,7 +154,7 @@ test('a session with no repository root is a quiet no-op', async (t) => {
 
 test('the hook branch actually calls the predicate — wiring guard', () => {
   const source = readFileSync(
-    fileURLToPath(new URL('../bin/familiar', import.meta.url)), 'utf8');
+    fileURLToPath(new URL('../bin/familiar.js', import.meta.url)), 'utf8');
   assert.match(source, /shouldConverge\(\{\s*agent: name, event: positionals\[0\]\s*\}\)/,
     'bin/familiar must route convergence through shouldConverge');
   assert.match(source, /convergeCodexProject\(/);

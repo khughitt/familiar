@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cliColor, cliSwatch } from '../bin/familiar';
+import { cliColor, cliSwatch } from '../bin/familiar.js';
 import { SLOT_COUNT, ROW_MIN, ROW_MAX, STATES, encodeRgba } from 'familiar-theme';
 
 // Injected roots. Nothing here touches disk: catalog.js takes `readdir` and
@@ -430,7 +430,7 @@ test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
 // real constants) — asserted the same way test/seam.test.js asserts its own
 // no-drift rules.
 test('--rows bounds are read from familiar-theme, not copied as literal numbers', () => {
-  const text = readFileSync(fileURLToPath(new URL('../bin/familiar', import.meta.url)), 'utf8');
+  const text = readFileSync(fileURLToPath(new URL('../bin/familiar.js', import.meta.url)), 'utf8');
   assert.match(
     text,
     /import\s*\{[^}]*\bROW_MIN\b[^}]*\bROW_MAX\b[^}]*\}\s*from\s*['"]familiar-theme['"]/,

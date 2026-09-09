@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIdentities } from '../src/bus/pins.js';
-import { makePrepareSprites } from '../bin/familiar';
+import { makePrepareSprites } from '../bin/familiar.js';
 import { assetsFor, parseThemePack, STATES } from 'familiar-theme';
 
 // NOT 12, and that is deliberate. assetsFor's job is to carry the PACK's number onto the

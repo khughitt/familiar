@@ -8,7 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderHelp } from '../bin/familiar';
+import { renderHelp } from '../bin/familiar.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));

@@ -24,7 +24,7 @@ import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
   appendHookTrace, emitHookTransition, makePrepareSprites, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
-} from '../bin/familiar';
+} from '../bin/familiar.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -119,6 +119,7 @@ test('setup resolves an npm-style link to a checkout path containing spaces', (t
   mkdirSync(join(checkout, 'bin'), { recursive: true });
   mkdirSync(prefix, { recursive: true });
   cpSync(bin, join(checkout, 'bin', 'familiar'));
+  cpSync(join(repoRoot, 'bin', 'familiar.js'), join(checkout, 'bin', 'familiar.js'));
   for (const name of ['src', 'integrations', 'node_modules']) {
     symlinkSync(join(repoRoot, name), join(checkout, name), 'dir');
   }
