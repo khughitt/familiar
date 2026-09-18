@@ -32,7 +32,8 @@ Node 22 and Node 25, by a byte-level physical-Mac gate run 2026-08-24 to 2026-08
 terminal and agent versions. **The OpenCode sprite renderer remains provisional**:
 the same gate exercised it and found the sprite never changes pose. tmux is supported
 inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes on tmux
-≤ 3.7c; status-line colour depth). Intel Macs, macOS 13, and other terminals stay unclaimed.
+≤ 3.7c; status-line colour depth; multiple attached clients with different outer
+terminals are not addressed). Intel Macs, macOS 13, and other terminals stay unclaimed.
 
 ### Claude Code
 
@@ -192,8 +193,11 @@ after abnormal termination. Record the agent and terminal versions and any
 failure; passing a checklist is not a live-terminal support claim.
 
 Inside tmux: `tmux set -g allow-passthrough all`, use a full-width pane, check the status
-line renders 24-bit colour (`FORCE_COLOR=3` in the tmux environment if not), and expect
-the cat at the first state change after attaching a client.
+line renders 24-bit colour, and expect the cat at the first state change after attaching a
+client. `FORCE_COLOR=3` in the tmux environment is an untested workaround for the status-line
+colour downgrade. When multiple clients with different outer terminals are attached, tmux
+may select one for the probe and the transmission ledger tracks that client; this case is
+not addressed.
 
 ## Linux-only integrations
 

@@ -41,7 +41,10 @@ the attached client must be Kitty or Ghostty. Every graphics command is then wra
 DCS passthrough. Known limits: tmux 3.7c redraws placeholders correctly only in
 full-width panes (an upstream combining-character bug), Claude Code's status line arrives
 at 256 colours under tmux (`FORCE_COLOR=3` is an untested workaround), and attaching a
-client shows the cat at the next state change, not on attach.
+client shows the cat at the next state change, not on attach. With multiple attached
+clients using different outer terminals, tmux may select one client for the probe; the
+transmission ledger tracks that client's identity, and this multi-client case is not
+addressed.
 
 ## Codex
 
