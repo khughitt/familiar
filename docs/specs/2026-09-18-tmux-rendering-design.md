@@ -78,7 +78,7 @@ The probe runs `tmux -S <socket> display-message -p -t <pane> '<format>'` with
 the socket from the first comma-separated field of `$TMUX`, the pane from
 `$TMUX_PANE`, and a format joining `#{allow-passthrough}`, `#{client_termname}`,
 `#{client_termtype}` and `#{client_tty}` with tabs. `clientTty` identifies *which*
-outer terminal is attached; §3.6 keys the transmission ledger on it, because
+outer terminal is attached; §3.5 keys the transmission ledger on it, because
 the same `xterm-kitty` name from a different Kitty window is a terminal that
 holds no image. A missing
 `$TMUX_PANE` is `no-pane`; empty `termname` is `no-client` (a detached server has
@@ -171,7 +171,7 @@ to count wrapped bytes.
   branch on `tmux?.ok` (`env.TMUX` alone is no longer sufficient evidence); the
   comment claiming the refusal is a one-line change goes.
 
-### 3.6 The transmission ledger
+### 3.5 The transmission ledger
 
 Lifecycle evidence changes source. Today `emit()` decides `create` versus
 `update` from `priorIntent`, the bus's previous intent for the session, which
@@ -211,7 +211,7 @@ no hook fires. The cat appears at the next transition. This is a documented
 limit (§7.3); a tmux `client-attached` hook driving a repaint is a follow-up,
 fam-8d0b82, not part of this change.
 
-### 3.7 The slow partition gets entry points
+### 3.6 The slow partition gets entry points
 
 `tools/test-runner.mjs` already partitions on `*.slow.test.js`, but nothing runs
 the slow half: `npm test`, `just test`, the push gate and CI all run `fast`.
@@ -224,7 +224,7 @@ partition after the fast one. The pty test skips with a printed reason when
 failure: a skipped transport test on the one machine that exists to run it
 would be the silent fallback this spec is deleting.
 
-### 3.8 Documentation
+### 3.7 Documentation
 
 - `docs/surfaces.md`: replace "passthrough is a user setting the hook cannot
   verify" with the requirement (`set -g allow-passthrough all`, the pane's outer
@@ -342,8 +342,8 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
 
 ## 8. Revision history
 
-- 2026-09-18, review 1: added the transmission ledger (§3.6) after the reviewer
+- 2026-09-18, review 1: added the transmission ledger (§3.5) after the reviewer
   reproduced `update` without `create` across a detach/attach; added wrapping in
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
-  partition's entry points (§3.7); corrected the wrapping overhead from "<1.01×"
+  partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
