@@ -7,6 +7,7 @@ const ENCODED_BYTES_MAX = 8 * 1024 * 1024;
 const DECODED_BYTES_MAX = 32 * 1024 * 1024;
 const UINT32_MAX = 4_294_967_295;
 const TRANSPARENT_RGBA = Buffer.alloc(4);
+const identity = (command) => command;
 // This fixed seed gives all twenty idle holds five decimal digits. Hold values
 // change no frame or payload bytes, so their maximum wire width is the only
 // seed-dependent property preflight must exercise.
@@ -156,12 +157,15 @@ function decodedStatic(bytes) {
   return BigInt(size.w) * BigInt(size.h) * 4n;
 }
 
-export function encodeKittyProgram(program, { id, placement, lifecycle, readFrame } = {}) {
+export function encodeKittyProgram(program, { id, placement, lifecycle, readFrame, frame = identity } = {}) {
   assertLifecycle(lifecycle);
   assertUint32(id, 'image id');
   assertPlacement(placement);
   if (typeof readFrame !== 'function') {
     throw new Error('kitty animation: readFrame must be a function');
+  }
+  if (typeof frame !== 'function') {
+    throw new Error('kitty animation: frame must be a function');
   }
   const shape = validatedProgram(program);
   const cache = new Map();
@@ -252,14 +256,16 @@ export function encodeKittyProgram(program, { id, placement, lifecycle, readFram
       DECODED_BYTES_MAX,
     );
   }
-  const bytes = Buffer.concat(commands);
-  if (bytes.length > ENCODED_BYTES_MAX) {
-    throw new KittyProgramLimitError('encodedBytes', bytes.length, ENCODED_BYTES_MAX);
+  const encodedBytes = commands.reduce((total, command) => total + command.length, 0);
+  if (encodedBytes > ENCODED_BYTES_MAX) {
+    throw new KittyProgramLimitError('encodedBytes', encodedBytes, ENCODED_BYTES_MAX);
   }
+  // Preflight limits describe the pack independently of its transport framing.
+  const bytes = frame === identity ? Buffer.concat(commands) : Buffer.concat(commands.map(frame));
   return {
     bytes,
     metrics: {
-      encodedBytes: bytes.length,
+      encodedBytes,
       decodedBytes: toNumber(decodedBytes, 'decodedBytes'),
       commands: commands.length,
       frames: shape.frames,

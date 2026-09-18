@@ -11,7 +11,7 @@
 
 const CHUNK = 4096;   // the protocol's maximum payload per escape
 
-export function transmit(png, { rows }) {
+export function transmit(png, { rows, frame = (command) => command }) {
   // FAIL EARLY. The chunk loop below never runs on an empty buffer, so without this
   // an empty PNG transmits as bare newlines -- a silent gap where the cat should be.
   // assetsFor() proves a sprite EXISTS; nothing proves it has BYTES.
@@ -65,5 +65,6 @@ export function transmit(png, { rows }) {
     out.push(`\x1b_G${control};${slice}\x1b\\`);
   }
 
-  return out.join('') + '\n'.repeat(rows);
+  // The newlines are layout for the multiplexer grid, so keep them outside framing.
+  return out.map(frame).join('') + '\n'.repeat(rows);
 }

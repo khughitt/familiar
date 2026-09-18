@@ -7,6 +7,7 @@ import {
   graphicsCapability,
 } from '../src/render/term/capability.js';
 import { transmit } from '../src/render/term/kitty.js';
+import { wrapForTmux } from '../src/render/term/tmux.js';
 
 test('classifies terminal graphics capability explicitly', () => {
   for (const [env, expected] of [
@@ -130,6 +131,21 @@ const wireIsExactly = (out, png) =>
 // compounded. These bytes encode to `+/+/+/...`: every 3 bytes yield two `+` and two
 // `/`, which are exactly the two characters base64url renames.
 const filler = (n) => Buffer.from(Array.from({ length: n }, (_, i) => [0xfb, 0xff, 0xbf][i % 3]));
+
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
+
+test('transmit frames every APC command and leaves the layout newlines outside the framing', () => {
+  const png = filler(5000);
+  const plain = transmit(png, { rows: 3 });
+  const wrapped = transmit(png, { rows: 3, frame: wrapForTmux });
+  assert.ok(plain.endsWith('\n\n\n'));
+  assert.ok(wrapped.endsWith('\x1b\\\n\n\n'), 'the DCS closes before the newlines, which are tmux layout, not payload');
+  assert.equal(bareApcs(wrapped), 0, 'no bare APC');
+  const commands = plain.split('\x1b\\').length - 1;
+  assert.equal(wrapped.split('\x1bPtmux;').length - 1, commands, 'one DCS per command');
+  assert.equal(wrapped.length, plain.length + 11 * commands);
+});
 
 test('the transmit fixtures can actually tell the two base64 alphabets apart', () => {
   // The guard on the guard. If a future edit swaps `filler` back for flat bytes, the two

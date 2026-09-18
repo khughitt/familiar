@@ -8,6 +8,7 @@ import {
   encodeKittyProgram,
   preflightKittyPrograms,
 } from '../src/render/term/kitty-animation.js';
+import { wrapForTmux } from '../src/render/term/tmux.js';
 
 const ID = 15_825_425;
 const VIRTUAL = Object.freeze({ kind: 'virtual', cols: 4, rows: 12 });
@@ -73,6 +74,29 @@ function reader(entries = {}) {
   };
   return { readFrame, calls };
 }
+
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
+
+test('frame is applied to every command, and encodedBytes still measures the unwrapped program', () => {
+  const readFrame = reader({ '/root.png': tinyPng() }).readFrame;
+  const plain = encodeKittyProgram(staticProgram(), { id: 7, placement: { kind: 'virtual', cols: 4, rows: 4 }, lifecycle: 'create', readFrame });
+  const seen = [];
+  const wrapped = encodeKittyProgram(staticProgram(), {
+    id: 7, placement: { kind: 'virtual', cols: 4, rows: 4 }, lifecycle: 'create', readFrame,
+    frame: (command) => { seen.push(command); return wrapForTmux(command); },
+  });
+  assert.equal(seen.length, plain.metrics.commands, 'one frame() call per command');
+  assert.equal(wrapped.metrics.encodedBytes, plain.metrics.encodedBytes, 'the pack metric does not depend on the transport');
+  assert.equal(wrapped.bytes.length, plain.metrics.encodedBytes + 11 * plain.metrics.commands);
+  const text = wrapped.bytes.toString('latin1');
+  assert.equal(bareApcs(text), 0);
+  assert.equal(text.split('\x1bPtmux;').length - 1, plain.metrics.commands);
+});
+
+test('frame must be a function', () => {
+  assert.throws(() => encodeKittyProgram(staticProgram(), { id: 7, placement: { kind: 'virtual', cols: 4, rows: 4 }, lifecycle: 'create', readFrame: reader({ '/root.png': tinyPng() }).readFrame, frame: 'wrap' }), /frame must be a function/);
+});
 
 function commandsOf(bytes) {
   const wire = Buffer.from(bytes).toString('ascii');
