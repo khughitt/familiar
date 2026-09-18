@@ -1,6 +1,6 @@
 # Rendering inside tmux
 
-**Status:** draft, revised once under review (§8), awaiting review.
+**Status:** draft, revised twice under review (§8), awaiting review.
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 
@@ -171,40 +171,98 @@ to count wrapped bytes.
   branch on `tmux?.ok` (`env.TMUX` alone is no longer sufficient evidence); the
   comment claiming the refusal is a one-line change goes.
 
-### 3.5 The transmission ledger
+### 3.5 The transmission ledger and the emission critical section
 
 Lifecycle evidence changes source. Today `emit()` decides `create` versus
 `update` from `priorIntent`, the bus's previous intent for the session, which
 records what familiar *meant* to show, not what any terminal received. The
-ledger records the latter.
+ledger records the latter, and the rules below make it impossible for the
+ledger and the terminal to disagree in a direction that skips a render.
 
-`emit()` returns, alongside the bytes written, what it transmitted:
-`{ id, lifecycle, capability, transport, intent }`, or `null` when no graphics
-went out (capability `NONE`, `transmitSprite` off, the tty gate, a failed open).
-`transport` is `direct` outside tmux and `tmux:<clientTty>` inside it. The hook
-persists that under the bus lock in `transmissions.json` (a new path beside
-`intent.json` in `src/bus/paths.js`), keyed by session and stamped with the
-agent's `pid` and `starttime`; a `null` result removes the session's entry, and
-SessionEnd removes it too. Dead-process entries are pruned the way `agents.json`
-is. The write is a second, short lock acquisition after `emit()` returns, with
-no process spawn inside it, so the transaction's rule against holding the lock
-across a spawn stands.
+**Sequence.** The bus transaction, under the bus lock, stamps every event it
+processes for a session with `seq = (prev?.seq ?? 0) + 1`, stored on the agent
+record and returned to the hook — for SessionEnd too, whose `next` is `null` but
+whose `seq` is real. Commit order is therefore total per session, and every
+later decision is "which event is newer", never "which hook ran first".
 
-The transaction reads the ledger in the same locked section that reads the
-prior intent today and hands `emit()` `priorTransmission` in place of
-`priorIntent`. `emit()`'s binding evidence becomes: the ledger entry exists, its
-`pid`/`starttime` match `prev`, and its `transport` equals the transport the
-current probe result implies. Only then is `update` possible; any other case is
-`create`. The intent comparison that decides whether a transition is graphical
-at all runs against the ledger entry's `intent`, which is the intent the terminal
-actually holds.
+**Per-session critical section.** The hook, after the transaction returns and
+after the tmux probe (a spawn, so outside every lock), acquires
+`stateDir/transmit/<sessionId>.lock` with the existing `withLock` and holds it
+across the whole of: read the ledger, decide, write the terminal, publish. The
+bus lock is never held at the same time (the transaction has returned), so the
+two cannot deadlock, and sessions do not wait on each other's pty writes. This
+also ends an existing defect: two hooks of one session writing the same pty
+concurrently interleave their escape bytes today. `emit()` becomes async for the
+lock; `emitHookTransition` and `main` already are.
+
+**Ledger entry.** One file per session, `stateDir/transmit/<sessionId>.json`,
+written with `writeJsonAtomic`:
+
+    { seq, pid, starttime,
+      held: null | { transport, capability, id, intent },
+      ended: boolean }
+
+`seq` is the newest event this section has processed for the session. `held`
+is what the terminal holds, or `null` when nothing is known to be held.
+`ended` is the SessionEnd tombstone. A missing file is `{ seq: 0, held: null }`.
+
+**Protocol**, for an event with sequence `S`, agent `next` (or `null`), and the
+transport `T` the probe implies (`direct`, or `tmux:<clientTty>`):
+
+1. Read the entry `E`. If `E.seq >= S`, return `superseded` and touch nothing:
+   a newer event already owns the terminal, whether it ran before this hook
+   acquired the lock or this hook is an old one arriving after SessionEnd.
+2. SessionEnd: write `{ seq: S, held: null, ended: true }`, then write
+   `oscReset()` to the terminal. The reset needs no evidence; if it fails the
+   tombstone is already down, which is the correct state. Return `ended`.
+3. Decide graphics. Evidence is valid when `E.held` is not `null`,
+   `E.pid`/`E.starttime` equal `next`'s, and `E.held.transport === T`; then
+   `lifecycle` is `update`, otherwise `create`. A graphical transmission is
+   needed when the capability is not `NONE`, motion policy is not `off`, and
+   either the evidence is invalid or `E.held.intent` differs from the current
+   intent in the fields `emit()` compares today. Presentation bytes (tint, bell)
+   are computed exactly as now.
+4. No graphics needed: write `{ ...E, seq: S }` — `held` is preserved, this is
+   the **unchanged** case, and three identical hooks in a row leave `held`
+   intact and send zero graphics bytes — then write the presentation bytes, if
+   any. Return `unchanged`. Capability `NONE` (detached, probe failed, plain
+   `TERM`) and `transmitSprite: false` take this path too: nothing on any
+   terminal changed, so the evidence stands; when the same client re-attaches
+   the image it holds is still the one the ledger describes.
+5. Graphics needed: open the fd and apply the tty gate first; on failure write
+   `{ ...E, seq: S }` and return `suppressed` (no byte reached a terminal, the
+   evidence stands). Then **write-ahead**: `{ seq: S, pid, starttime, held: null }`.
+   If that write fails, throw before any terminal byte. Then write the bytes.
+   Then **publish** `{ seq: S, pid, starttime, held: { transport: T, capability,
+   id, intent } }`. Return `transmitted`.
+
+**Why this is safe.** Between write-ahead and publish the entry says nothing is
+held; a partial terminal write, a crash, or a failed publish all leave that
+state, and the next event does a `create`, which under Kitty replaces whatever
+the id currently holds. The reviewer's case — ledger says `working`, terminal
+receives `needs-input`, persistence fails, next `working` hook — now ends with
+`held: null` at the failure and a `create` at the next hook, not a skip. The
+"A emits, B emits, B records, A records" interleaving cannot occur: terminal
+write and publish are in one critical section, and if the older event reaches
+the lock second it is `superseded` by `seq` and writes nothing. An outstanding
+hook after SessionEnd meets the tombstone's higher `seq` and writes nothing.
+
+**Pruning.** Ledger files whose session has no agent record and whose
+`pid`/`starttime` is dead are removed wherever agent records are pruned today
+(the transaction's `pruneDead` pass and `familiar reap`). Tombstones live until
+then.
+
+`priorIntent` leaves the transaction's result and `emit()`'s signature; the
+comment in `transaction.js` that says lifecycle evidence must come from the
+serialized transaction is replaced by one pointing here: evidence comes from the
+one section that touches the terminal.
 
 This closes the reproduced failure by construction: a suppressed emission
-leaves no entry, so the first transition after an attach is a `create`; a fresh
-Kitty window changes `clientTty`, so the transport differs and the next
-transition is a `create`. It also closes a latent pre-existing case outside
-tmux — an unreadable `/proc/<pid>/environ` on one hook (capability `NONE`, tint
-only) followed by a readable one — that could already send `update` first.
+leaves `held` untouched but never claims a transmission that did not happen,
+and a fresh Kitty window changes `clientTty`, so the transport differs and the
+next transition is a `create`. It also closes a latent pre-existing case
+outside tmux — an unreadable `/proc/<pid>/environ` on one hook followed by a
+readable one — that could already send `update` first.
 
 What it does not do: an attach with no further transition stays blank, because
 no hook fires. The cat appears at the next transition. This is a documented
@@ -249,10 +307,13 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   rule.
 - Wrapping happens inside `encode()`, before `emit()` opens the fd, so a program
   that fails limits fails unwrapped and unwritten as it does now.
-- The ledger is written only from a successful `writeAllSync`; a partial write
-  throws before the ledger records anything, so the next transition is a
-  `create`, which is the safe direction. A ledger write that fails leaves the
-  previous entry or none — again `create` next time.
+- Evidence is nulled before the first terminal byte and restored only after the
+  last; every failure between the two leaves `held: null`, and the next event
+  does a `create`. A failed write-ahead throws before any terminal byte. A
+  failed publish after a complete terminal write costs one redundant `create`
+  later, never a skipped render.
+- A hook that dies holding the session lock is released by `withLock`'s holder
+  liveness check, as the bus lock is today.
 
 ## 5. Testing
 
@@ -272,8 +333,31 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   consistent `prev`/intent with no ledger entry → `create`, never `update`; a
   ledger entry with `transport: 'tmux:/dev/pts/5'` and a probe now reporting
   `/dev/pts/9` → `create`; the same transport → `update`; a `direct` entry and a
-  tmux probe → `create`. `emit()` returns `null` transmission when the tty gate
-  fails and a populated one after a successful write.
+  tmux probe → `create`.
+- `test/emit.test.js`, the critical section, with injected `lock`, ledger
+  `read`/`write`, and terminal ops that record every call in order:
+  - Ordering: a graphical event produces exactly read → open → isatty →
+    write-ahead (`held: null`) → terminal writes → publish → close, and the
+    write-ahead precedes the first terminal byte.
+  - Forced interleavings: events `S=1` (`working`) and `S=2` (`needs-input`) for
+    one session, run in both lock orders under a fake lock that hands out the
+    section in the order the test dictates. Both orders end with `held.intent`
+    at `needs-input` and the last graphics on the terminal at `needs-input`; in
+    the "2 then 1" order event 1 returns `superseded` and writes nothing.
+  - Tombstone: SessionEnd at `S=3`, then an outstanding `S=2` → `superseded`,
+    tombstone intact, no bytes.
+  - Unchanged: after a `create`, three identical hooks (`S=2,3,4`) each return
+    `unchanged`, `held` is byte-identical to the published one, `seq` advances,
+    zero graphics bytes.
+  - Failure with an existing entry: `held.intent.state === 'working'`; the
+    `needs-input` terminal write throws mid-stream → entry is
+    `{ seq, held: null }`; the next `working` hook → `create`, not `unchanged`.
+  - Publish failure after a complete terminal write → entry has `held: null`;
+    the next hook → `create`.
+  - Suppressed: tty gate fails → `held` preserved, `seq` advanced, no bytes.
+  - Real lock: two `emit()` calls for one session started concurrently in one
+    process against the real `withLock` on a temporary state dir both complete,
+    and the ledger and the fake terminal agree.
 - `test/kitty.test.js` (transmitter): `frame` wraps every APC and the trailing
   newlines stay outside the framing.
 - `test/bin-familiar.test.js`: the spawned CLI under a fake `tmux` placed first
@@ -281,9 +365,10 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   `preview` emits one wrapped APC group per state and no bare APC; with `on`,
   `theme show` prints the reason on stderr and no APC. This is the CLI-side
   proof that a classifier change did not open a bare-APC path.
-- Transaction and hook: the ledger round-trips — written after a successful
-  emit, read under the lock on the next event, removed on SessionEnd and for a
-  dead pid.
+- Transaction: `seq` is `1` for a first record, increments per event under the
+  bus lock, and is returned for SessionEnd. Reap and the prune pass remove a
+  ledger file whose session is gone and whose pid is dead, and leave one whose
+  agent is alive.
 - `test/tmux-pty.slow.test.js`: a real tmux server on a temporary socket
   (`-f /dev/null`, `allow-passthrough all`), attached through a pty provider
   (`script`), a pane running a command that copies a fifo to its stdout. Three
@@ -318,6 +403,18 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   belongs to `commit()`, which resolves what to show; a flag written by a
   different process at a different time would make one file carry two truths
   with two writers.
+- **Publish the ledger under the bus lock after `emit()`.** Review found the
+  hole: two lock acquisitions let a terminal write and its publication
+  interleave with another hook's, so the ledger can name A while the terminal
+  holds B. Locking the JSON is not locking the terminal.
+- **Hold the bus lock across the terminal write.** Correct, but serializes every
+  session on the machine behind one pty write of up to 8 MiB. The per-session
+  lock gives the same guarantee for the only writers that share a terminal.
+- **One shared ledger file.** Needs the global lock for every update; one file
+  per session lives entirely under that session's lock.
+- **Wall-clock ordering (`updatedAt`) instead of `seq`.** Two hooks committed
+  within the same millisecond are unordered; a counter under the bus lock is
+  not.
 
 ## 7. Known limits (documented, not fixed here)
 
@@ -347,3 +444,9 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
   partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
+- 2026-09-18, review 2: rewrote §3.5. The ledger's publication moved into one
+  per-session critical section with the terminal write, ordered by a `seq` the
+  bus transaction assigns; evidence is nulled by a write-ahead before the first
+  terminal byte; an unchanged hook preserves `held` instead of deleting it;
+  SessionEnd leaves a tombstone that supersedes outstanding hooks. Forced-
+  interleaving tests added to §5.
