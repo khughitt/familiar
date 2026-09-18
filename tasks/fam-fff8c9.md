@@ -1,13 +1,15 @@
 ---
 id: fam-fff8c9
 title: "Render inside tmux: relax the passthrough refusal and wrap the animation program"
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: mid
 process: planned
+owner: tmux-render
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T15:47:37Z
+updated: 2026-09-18T15:54:52Z
+started: 2026-09-18T15:54:52Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
@@ -104,3 +106,6 @@ limits, not in this change.
 - 2026-09-18T15:35:06Z (tmux-render): Spec revision 3 (9644f86): bus-wide events.seq counter, staleMs Infinity on the transmit lock, update only under ANIMATION (Ghostty rule kept), transport keyed on client tty+pid+created, ledgerName() for safe filenames
 - 2026-09-18T15:39:32Z (tmux-render): Spec revision 4 (fc35404): tombstones carry pid/starttime, pruning only on fresh-dead under the session lock, uncached isAlive for transmit locks, in-section agent liveness check, async emitHookTransition awaited in main
 - 2026-09-18T15:47:37Z (tmux-render): Spec revision 5 (d338fa7): ownerAlive (fresh identity, ps -p on Darwin) gates every terminal write incl. tint/bell/reset; stamp() puts pid/starttime on every ledger write; pruning outside the bus transaction on absent-session candidates only
+- 2026-09-18T15:54:52Z (tmux-render): started
+  provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-18T15:54:52Z (tmux-render): Spec revision 6 (64ece03): inherit(E) drops held across an owner change; spec reviewed and approved, moving to the implementation plan
