@@ -30,8 +30,9 @@ Familiar's own terminal rendering — graphics, tint, and bell — is confirmed 
 Node 22 and Node 25, by a byte-level physical-Mac gate run 2026-08-24 to 2026-08-28
 (`docs/ref/2026-08-24-macos-terminal-smoke.md`). That claim covers exactly those
 terminal and agent versions. **The OpenCode sprite renderer remains provisional**:
-the same gate exercised it and found the sprite never changes pose. tmux, Intel
-Macs, macOS 13, and other terminals stay unclaimed.
+the same gate exercised it and found the sprite never changes pose. tmux is supported
+inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes on tmux
+≤ 3.7c; status-line colour depth). Intel Macs, macOS 13, and other terminals stay unclaimed.
 
 ### Claude Code
 
@@ -184,11 +185,15 @@ is warm. Nothing is wrong with the repository or the status line.
 ### Terminal checklist for unclaimed combinations
 
 The physical-Mac gate covers Claude Code and Codex in Kitty 0.46.2 and Ghostty
-1.3.1 only. On any other terminal, on Intel or macOS 13, inside tmux, or with the
-OpenCode renderer, smoke-test before relying on rendering: check launch/idle,
+1.3.1 only. On any other terminal, on Intel or macOS 13, or with the OpenCode
+renderer, smoke-test before relying on rendering: check launch/idle,
 working, approval when exposed, done/error, session exit, and `familiar reap`
 after abnormal termination. Record the agent and terminal versions and any
 failure; passing a checklist is not a live-terminal support claim.
+
+Inside tmux: `tmux set -g allow-passthrough all`, use a full-width pane, check the status
+line renders 24-bit colour (`FORCE_COLOR=3` in the tmux environment if not), and expect
+the cat at the first state change after attaching a client.
 
 ## Linux-only integrations
 

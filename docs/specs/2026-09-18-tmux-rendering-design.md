@@ -1,7 +1,6 @@
 # Rendering inside tmux
 
-**Status:** reviewed 2026-09-18 after six review rounds (§8). Implementation
-plan: `docs/plans/2026-09-18-tmux-rendering.md`.
+**Status:** implemented 2026-09-18 (plan: docs/plans/2026-09-18-tmux-rendering.md).
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 

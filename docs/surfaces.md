@@ -34,8 +34,14 @@ transmits a changed pose without printing cells; `familiar statusline` prints th
 stable cell box. This keeps graphics out of transcript content and lets a state change
 replace the image in place.
 
-Kitty and Ghostty support the same graphics protocol. Familiar declines to render
-inside tmux because passthrough is a user setting the hook cannot verify.
+Kitty and Ghostty support the same graphics protocol. Inside tmux, familiar asks the
+server before drawing: the pane must have `allow-passthrough all` (not `on`, which drops
+escapes while the pane is hidden and would leave a stale cat in a background window), and
+the attached client must be Kitty or Ghostty. Every graphics command is then wrapped in
+DCS passthrough. Known limits: tmux 3.7c redraws placeholders correctly only in
+full-width panes (an upstream combining-character bug), Claude Code's status line arrives
+at 256 colours under tmux (`FORCE_COLOR=3` is an untested workaround), and attaching a
+client shows the cat at the next state change, not on attach.
 
 ## Codex
 

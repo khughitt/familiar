@@ -119,8 +119,12 @@ Additional constraints:
   image work will make the display stale.
 - The hook and status line must not independently stream image chunks. A future animation design
   needs one serialized owner rather than two opportunistic writers.
-- tmux is deliberately rejected by familiar today even though wrapped passthrough can work: a
-  hook cannot verify that the user's tmux server permits passthrough.
+- tmux: familiar probes the server from the hook (`tmux -S <socket> display-message -p -t
+  <pane> '#{allow-passthrough} #{client_termname} #{client_termtype} #{client_tty}
+  #{client_pid} #{client_created}'`) and renders only under `allow-passthrough all` with a
+  Kitty or Ghostty client. Each APC command is wrapped separately in `ESC P tmux; … ESC \`
+  with inner `ESC`s doubled — never the whole program in one DCS, which would exceed
+  tmux's 1 MiB input buffer. Wrapped size is `encodedBytes + 11 × commands`.
 
 Source: [Claude Code status-line documentation][claude-statusline].
 
