@@ -125,17 +125,6 @@ function assertId(id) {
   }
 }
 
-// tmux drops any escape it does not understand, so an unwrapped transmit vanishes and the cat
-// silently never appears. Wrapping it in tmux's DCS passthrough (every ESC inside doubled) gets
-// it through -- MEASURED: 38/38 graphics escapes survive wrapped, 0/38 unwrapped, and the cat
-// renders inside a tmux pane.
-//
-// The caller decides whether it is in tmux. This module does not sniff the environment: a pure
-// function that reads process.env is a function you cannot test.
-export function wrapForTmux(escapes) {
-  return `\x1bPtmux;${escapes.replaceAll('\x1b', '\x1b\x1b')}\x1b\\`;
-}
-
 // The image, as printable text. One string per screen row.
 //
 // Returned as an ARRAY OF LINES rather than one blob, because the caller has to interleave

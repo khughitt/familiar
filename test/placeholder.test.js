@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { transmitVirtual, placeholderLines, imageIdFor, wrapForTmux, diacritics } from '../src/render/term/placeholder.js';
+import { transmitVirtual, placeholderLines, imageIdFor, diacritics } from '../src/render/term/placeholder.js';
+import { wrapForTmux } from '../src/render/term/tmux.js';
 import { loadThemePackSync, memberAssetDir } from 'familiar-theme';
 
 const themeDir = fileURLToPath(new URL('../test/fixtures/theme-pack', import.meta.url));
