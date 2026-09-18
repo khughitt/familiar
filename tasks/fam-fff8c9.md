@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: tmux-render
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T16:21:48Z
+updated: 2026-09-18T16:37:34Z
 started: 2026-09-18T15:54:52Z
 depends: []
 tags: [tmux, terminal]
@@ -114,3 +114,4 @@ limits, not in this change.
 - 2026-09-18T16:07:55Z (tmux-render): parked (waiting on user, review): Review the implementation plan; on approval execute it task-by-task in .worktrees/tmux-render
   provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-18T16:21:48Z (tmux-render): Plan review 1 applied (aa7daf5): in-process hook test, bareApcs() helper everywhere, full caller migration listed, kill injection in liveness tests, fixture root under cats/ with member pip and attach-then-preview gating
+- 2026-09-18T16:37:34Z (tmux-render): Plan review 2 applied (b412e44): spawned-hook test removed, in-process hook test uses ownerAlive false (suppressed/owner-dead both events), near-280 test stays synchronous
