@@ -1,6 +1,6 @@
 # Rendering inside tmux
 
-**Status:** draft, revised three times under review (§8), awaiting review.
+**Status:** draft, revised four times under review (§8), awaiting review.
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 
@@ -211,7 +211,9 @@ bus lock is never held at the same time (the transaction has returned), so the
 two cannot deadlock, and sessions do not wait on each other's pty writes. This
 also ends an existing defect: two hooks of one session writing the same pty
 concurrently interleave their escape bytes today. `emit()` becomes async for the
-lock; `emitHookTransition` and `main` already are.
+lock, and so does `emitHookTransition`; `main` awaits it, so a failure inside
+the section reaches `run()`'s error handler instead of becoming an unhandled
+rejection after the hook has already exited its success path.
 
 The lock is taken with `staleMs: Infinity`. `withLock`'s default reclaims a lock
 whose mtime is ten seconds old *even when the holder is alive* — sized for the
@@ -222,8 +224,20 @@ recovery (`isAlive` on the token's pid and starttime) stays, so a hook killed
 mid-write releases the section. The retry budget is sized to wait 30 seconds
 (`retries: 1500` at the default 20 ms), inside Claude Code's 60-second hook
 budget; a waiter that exhausts it throws, the transaction having already
-committed, and the next event repairs the terminal — the design is
-level-triggered, so a lost render costs one transition, never a wrong state.
+committed, and the next event repairs the terminal. The design is
+level-triggered, so a lost render is repaired by the next transition — but
+until one arrives the previous image stays, which for a final render (the last
+event before a long idle) can be indefinitely. That is the cost of a timeout
+here, and it is the same cost the current code pays for any dropped emission.
+
+The lock's holder-liveness check must be **fresh**. `withLock` defaults to
+`lockHolderAlive`, which memoizes its first answer per pid/starttime for the
+life of the calling process; that is right for the bus lock, whose section is
+milliseconds, and wrong here: a waiter that observed the holder alive on its
+first attempt would keep believing it after the holder died and, with
+`staleMs: Infinity`, exhaust its budget instead of recovering (review confirmed
+this). Transmission locks pass `isAlive: processOps.isAlive`, the uncached
+predicate that stats the pid on every call.
 
 `<name>` is `ledgerName(sessionId)`: the id with every character outside
 `[A-Za-z0-9_-]` replaced by `_`, truncated to 40 characters, then `-` and the
@@ -244,7 +258,9 @@ written with `writeJsonAtomic`:
 
 `seq` is the newest event this section has processed for the session. `held`
 is what the terminal holds, or `null` when nothing is known to be held.
-`ended` is the SessionEnd tombstone. A missing file is `{ seq: 0, held: null }`.
+`ended` is the SessionEnd tombstone. `pid`/`starttime` are always present —
+on a tombstone they come from `prev`, the record SessionEnd removed — because
+they are the identity pruning tests. A missing file is `{ seq: 0, held: null }`.
 
 **Protocol**, for an event with sequence `S`, agent `next` (or `null`), and the
 transport `T` the probe implies (`direct`, or
@@ -253,9 +269,10 @@ transport `T` the probe implies (`direct`, or
 1. Read the entry `E`. If `E.seq >= S`, return `superseded` and touch nothing:
    a newer event already owns the terminal, whether it ran before this hook
    acquired the lock or this hook is an old one arriving after SessionEnd.
-2. SessionEnd: write `{ seq: S, held: null, ended: true }`, then write
-   `oscReset()` to the terminal. The reset needs no evidence; if it fails the
-   tombstone is already down, which is the correct state. Return `ended`.
+2. SessionEnd: write `{ seq: S, pid, starttime, held: null, ended: true }` with
+   `prev`'s identity, then write `oscReset()` to the terminal. The reset needs
+   no evidence; if it fails the tombstone is already down, which is the correct
+   state. Return `ended`.
 3. Decide graphics. Evidence is valid when `E.held` is not `null`,
    `E.pid`/`E.starttime` equal `next`'s, and `E.held.transport === T`.
    `lifecycle` is `update` only when the evidence is valid **and** the
@@ -275,9 +292,13 @@ transport `T` the probe implies (`direct`, or
    `TERM`) and `transmitSprite: false` take this path too: nothing on any
    terminal changed, so the evidence stands; when the same client re-attaches
    the image it holds is still the one the ledger describes.
-5. Graphics needed: open the fd and apply the tty gate first; on failure write
-   `{ ...E, seq: S }` and return `suppressed` (no byte reached a terminal, the
-   evidence stands). Then **write-ahead**: `{ seq: S, pid, starttime, held: null }`.
+5. Graphics needed: check `next`'s `pid`/`starttime` alive with the fresh
+   predicate, then open the fd and apply the tty gate; on any of these failing
+   write `{ ...E, seq: S }` and return `suppressed` (no byte reached a terminal,
+   the evidence stands). The liveness check is what stops a straggler whose
+   agent has since exited from painting a terminal the agent no longer owns; on
+   Linux the `/proc/<pid>/fd/1` open would fail anyway, on Darwin the `/dev/ttys`
+   path can outlive the process. Then **write-ahead**: `{ seq: S, pid, starttime, held: null }`.
    If that write fails, throw before any terminal byte. Then write the bytes.
    Then **publish** `{ seq: S, pid, starttime, held: { transport: T, capability,
    id, intent } }`. Return `transmitted`.
@@ -293,10 +314,19 @@ write and publish are in one critical section, and if the older event reaches
 the lock second it is `superseded` by `seq` and writes nothing. An outstanding
 hook after SessionEnd meets the tombstone's higher `seq` and writes nothing.
 
-**Pruning.** Ledger files whose session has no agent record and whose
-`pid`/`starttime` is dead are removed wherever agent records are pruned today
-(the transaction's `pruneDead` pass and `familiar reap`). Tombstones live until
-then.
+**Pruning.** A ledger file is removable on one condition only: its
+`pid`/`starttime` is dead by the fresh predicate. "The session has no agent
+record" is not a condition — after SessionEnd the record is gone while the
+agent process, and any hook it spawned, may still be running, and the tombstone
+exists precisely to supersede such a straggler. Pruning runs where agent
+records are pruned today (the transaction's prune pass and `familiar reap`),
+but it acts on a ledger file only after acquiring that session's transmission
+lock with a short retry budget: under the lock it re-reads the entry, re-checks
+death, and unlinks the file; if the lock is busy the file is skipped this pass.
+A live section can therefore never see its entry vanish between read and
+publish, and a tombstone outlives every hook of the agent it ends. Lock files
+need no pruning: `withLock` unlinks its own on release, and a dead holder's is
+reclaimed by the next acquirer.
 
 `priorIntent` leaves the transaction's result and `emit()`'s signature; the
 comment in `transaction.js` that says lifecycle evidence must come from the
@@ -393,6 +423,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
     the "2 then 1" order event 1 returns `superseded` and writes nothing.
   - Tombstone: SessionEnd at `S=3`, then an outstanding `S=2` → `superseded`,
     tombstone intact, no bytes.
+  - SessionEnd → prune → older hook: SessionEnd at `S=3` writes the tombstone
+    with `prev`'s pid/starttime; a prune pass with that pid alive leaves the
+    tombstone; the outstanding `S=2` is `superseded`. With the pid dead, the
+    prune removes the tombstone, and the outstanding `S=2` then finds no entry
+    but fails the fresh liveness check → `suppressed`, no bytes. A prune pass
+    that cannot take the session's lock leaves the file.
   - Unchanged: after a `create`, three identical hooks (`S=2,3,4`) each return
     `unchanged`, `held` is byte-identical to the published one, `seq` advances,
     zero graphics bytes.
@@ -408,6 +444,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   - Long write: with an injected clock advanced past ten seconds while the first
     holder is alive inside the section, a second acquirer does not enter
     (`staleMs: Infinity`); with `isAlive` reporting the holder dead, it does.
+  - Fresh liveness: a waiter whose first attempt sees the holder alive and whose
+    later attempt sees it dead recovers the lock, driven through the real
+    process-ops construction with an injected `readStat` that returns the
+    holder's stat once and `ENOENT` after — not through a hand-rolled predicate,
+    so the test fails if the transmission lock is ever wired back to the cached
+    `lockHolderAlive`.
   - Static terminal: two successive transitions under `STATIC` with a populated,
     valid ledger entry both encode `create`; the same two under `ANIMATION`
     encode `create` then `update`.
@@ -440,7 +482,7 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   assertions: bare APC written to the fifo does not appear in the client stream;
   wrapped APC appears with the passthrough framing removed; with
   `allow-passthrough off` the wrapped APC does not appear. A fourth run puts
-  `familiar preview --state idle` in the pane with the fixture theme and asserts
+  `familiar theme preview <member> --state idle` in the pane with the fixture theme and asserts
   the client stream holds the image's APC unframed. Skips, with the reason
   printed, when `tmux` or `script` is absent, and fails instead under `CI=true`.
   This is the test that would have caught the "one-line change" comment.
@@ -516,6 +558,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
   partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
+- 2026-09-18, review 4: tombstones keep `pid`/`starttime`; pruning requires a
+  dead agent by a fresh check and runs under the session's transmission lock;
+  the transmission lock uses the uncached liveness predicate; the section
+  re-checks agent liveness before writing; `emitHookTransition` becomes async and
+  awaited; the pty test's verb corrected to `theme preview`; the timeout cost
+  stated plainly.
 - 2026-09-18, review 3: the sequence is a bus-wide counter that survives
   eviction and SessionEnd; the transmission lock disables age-based
   reclamation; `update` requires `ANIMATION` capability, preserving the Ghostty
