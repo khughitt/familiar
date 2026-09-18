@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T11:32:45Z
+updated: 2026-09-18T15:28:52Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
@@ -100,3 +100,4 @@ limits, not in this change.
 - 2026-09-18T11:15:48Z (tmux-render): parked (waiting on user, review): Review the design spec; on approval run writing-plans against it in .worktrees/tmux-render
   provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-18T11:32:45Z (tmux-render): Spec revised after review 1 (5afab87): transmission ledger replaces priorIntent as lifecycle evidence, CLI transmit() wraps too, slow partition gets npm/just/CI entry points, overhead corrected to 11 x commands; follow-up fam-8d0b82 (repaint on client-attached)
+- 2026-09-18T15:28:52Z (tmux-render): Spec revision 2 (c58f3a7): ledger publication and terminal write share one per-session critical section ordered by a bus-assigned seq; write-ahead nulls evidence before the first terminal byte; unchanged hooks preserve held; SessionEnd tombstone supersedes stragglers
