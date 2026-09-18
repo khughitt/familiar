@@ -1,6 +1,7 @@
 # Rendering inside tmux
 
-**Status:** draft, revised five times under review (§8), awaiting review.
+**Status:** reviewed 2026-09-18 after six review rounds (§8). Implementation
+plan: `docs/plans/2026-09-18-tmux-rendering.md`.
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 
@@ -279,13 +280,25 @@ written with `writeJsonAtomic`:
 is what the terminal holds, or `null` when nothing is known to be held.
 `ended` is the SessionEnd tombstone. `pid`/`starttime` are always present on
 any entry this section writes: every write goes through
-`stamp(E, S) = { ...E, seq: S, pid: owner.pid, starttime: owner.starttime }`
+
+    stamp({ held, ended = false }, S) =
+      { seq: S, pid: owner.pid, starttime: owner.starttime, held, ended }
+
 with `owner = next ?? prev`, so a missing file — read as `{ seq: 0, held: null }`
-— acquires its identity on the first write whatever branch performs it, a
-tombstone carries the identity of the record SessionEnd removed, and a held
-entry whose agent process changed (a resume under a new pid) is restamped
-while its `held` evidence fails the pid comparison and yields a `create`.
-Pruning depends on this identity being present on every file.
+— acquires its identity on the first write whatever branch performs it, and a
+tombstone carries the identity of the record SessionEnd removed. Pruning
+depends on this identity being present on every file.
+
+Evidence never survives a change of owner. The branches that preserve `held`
+pass `inherit(E)`, which is `E.held` when `E.pid`/`E.starttime` equal the
+owner's and `null` otherwise. Without it a resumed session under a new process
+whose first hook was suppressed (capability `NONE`, or a failed tty gate) would
+be restamped with the new identity while keeping the old process's `held`; the
+next graphical hook would then find "valid" evidence and skip an identical
+intent or `update` a changed one against an image the new terminal may never
+have received (review verified this sequence against the previous wording).
+`inherit` clears it at the first write under the new owner, before any path can
+persist it, and the first graphical event is a `create`.
 
 **Protocol**, for an event with sequence `S`, agent `next` (or `null`), and the
 transport `T` the probe implies (`direct`, or
@@ -296,8 +309,9 @@ transport `T` the probe implies (`direct`, or
    acquired the lock or this hook is an old one arriving after SessionEnd.
 2. **Ownership gate**, before any terminal path: `owner = next ?? prev`; if
    `!ownerAlive(owner.pid, owner.starttime)`, write the entry this event would
-   have written anyway — `stamp(E, S)`, or for SessionEnd the tombstone of the
-   next step — and return `suppressed` without opening the terminal. The
+   have written anyway — `stamp({ held: inherit(E) }, S)`, or for SessionEnd the
+   tombstone of the next step — and return `suppressed` without opening the
+   terminal. The
    ordering evidence is kept; only the bytes are withheld. This gates every write below — graphics, tint, bell, and the
    reset — not only the graphical one: a straggler of an exited agent must not
    tint a pty the kernel has since handed to someone else, and on Darwin the
@@ -319,16 +333,16 @@ transport `T` the probe implies (`direct`, or
    evidence is invalid or `E.held.intent` differs from the current intent in the
    fields `emit()` compares today. Presentation bytes (tint, bell) are computed
    exactly as now.
-5. No graphics needed: write `stamp(E, S)` — `held` is preserved, this is
-   the **unchanged** case, and three identical hooks in a row leave `held`
+5. No graphics needed: write `stamp({ held: inherit(E) }, S)` — `held` is
+   preserved under the same owner, this is the **unchanged** case, and three identical hooks in a row leave `held`
    intact and send zero graphics bytes — then write the presentation bytes, if
    any. Return `unchanged`. Capability `NONE` (detached, probe failed, plain
    `TERM`) and `transmitSprite: false` take this path too: nothing on any
    terminal changed, so the evidence stands; when the same client re-attaches
    the image it holds is still the one the ledger describes.
 6. Graphics needed: open the fd and apply the tty gate; on failure write
-   `stamp(E, S)` and return `suppressed` (no byte reached a terminal, the
-   evidence stands). Then **write-ahead**: `stamp({ held: null }, S)`.
+   `stamp({ held: inherit(E) }, S)` and return `suppressed` (no byte reached a
+   terminal, the evidence stands under the same owner). Then **write-ahead**: `stamp({ held: null }, S)`.
    If that write fails, throw before any terminal byte. Then write the bytes.
    Then **publish** `stamp({ held: { transport: T, capability, id, intent } }, S)`.
    Return `transmitted`.
@@ -465,6 +479,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
     motion policy `off`, `transmitSprite: false`), and for a second SessionEnd
     against a dead owner, which writes its tombstone and no reset. A prune pass
     that cannot take the session's lock leaves the file.
+  - Owner change: `held` describes process A's `working` image on `direct`;
+    the session resumes as process B; B's first hook is suppressed (capability
+    `NONE` in one run, tty gate failure in another) → the entry carries B's
+    identity and `held: null`; B's next graphical hook with the identical intent
+    transmits a `create` (not `unchanged`), and with a changed intent a `create`
+    (not `update`).
   - Initialization: a first event that is suppressed (capability `NONE`) or
     fails the tty gate writes an entry carrying `next`'s pid/starttime; a prune
     with that pid alive keeps it and with it dead removes it. The same for a
@@ -605,6 +625,10 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
   partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
+- 2026-09-18, review 6: `inherit(E)` — `held` is carried across a write only
+  under the same owner identity, closing the resume-then-suppressed sequence
+  where a new process inherited the old process's image evidence. Spec marked
+  reviewed; planning begins.
 - 2026-09-18, review 5: one `ownerAlive` predicate (fresh identity, `ps -p` on
   Darwin) gates every terminal write including tint, bell and reset, with the
   no-spawn rule reconciled as a bus-lock rule; the lock's holder check uses it
