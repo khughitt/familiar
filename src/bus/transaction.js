@@ -1,5 +1,6 @@
 import { withLock } from './lock.js';
 import { readJson, writeJsonAtomic } from './store.js';
+import { nextSeq } from './seq.js';
 import { pruneDead } from './prune.js';
 import { defaultProcessOps } from './proc.js';
 import { gitContext as defaultGitContext, projectKeyFor, displayProject } from './identity.js';
@@ -140,12 +141,11 @@ export async function applyHookEvent({ event, stdin, deps }) {
   }
 
   return withLock(paths.lockPath, async () => {
-    // Lifecycle evidence must come from the same serialized transaction as the
-    // agent record. Read it before commit replaces intent.json; the hook cannot
-    // infer a previous virtual placement from process-local memory or a terminal
-    // query it cannot safely perform.
-    const priorIntents = (await readJson(paths.intentPath)) ?? {};
-    const priorIntent = priorIntents[sessionId]?.current ?? null;
+    // The event's place in the bus-wide order (src/bus/seq.js). Lifecycle evidence no
+    // longer comes from here: it comes from the transmission ledger, written by the one
+    // section that writes the terminal (src/render/term/emit.js, spec §3.5). What this
+    // transaction contributes is the ORDER those sections compare.
+    const seq = await nextSeq(paths);
     const agents = pruneDead((await readJson(paths.agentsPath)) ?? {}, { isAlive: processOps.isAlive });
     const prev = agents[sessionId] ?? null;
 
@@ -169,6 +169,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
         cwd,
         pid,
         starttime,
+        seq,
         state,
         updatedAt: now(),
       };
@@ -182,7 +183,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
       paths, agents, tone, motionPolicy, prepareSprites,
       required: level === null ? null : sessionId,
     });
-    return { prev, next, priorIntent, intent, evicted };
+    return { prev, next, seq, intent, evicted };
   }, {
     startTimeOf: processOps.startTimeOf,
     isAlive: processOps.lockHolderAlive,

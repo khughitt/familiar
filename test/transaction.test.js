@@ -28,6 +28,8 @@ function harness(over = {}) {
     agentsPath: join(dir, 'agents.json'),
     lockPath: join(dir, 'agents.lock'),
     intentPath: join(dir, 'intent.json'),
+    seqPath: join(dir, 'events.seq'),
+    transmitDir: join(dir, 'transmit'),
   };
 
   const pack = over.pack ?? PACK;
@@ -86,6 +88,7 @@ test('writes the bus AND the resolved intent in one transaction', async () => {
     cwd: '/home/k/d/api',
     pid: 4242,
     starttime: 987_654,
+    seq: 1,
     state: 'working',
     updatedAt: 1_000_000,
   });
@@ -159,25 +162,22 @@ test('reports the transition, so the terminal emitter can gate on it without ext
   assert.equal(third.next.state, 'working');
 });
 
-test('returns the prior resolved intent from inside the locked transaction', async () => {
+test('numbers each transition inside the locked transaction', async () => {
   const { deps } = harness();
   const first = await applyHookEvent({ event: 'SessionStart', stdin, deps });
-  assert.equal(first.priorIntent, null);
-
+  assert.equal(first.seq, 1);
+  assert.equal('priorIntent' in first, false, 'lifecycle evidence no longer comes from the intent record');
   const second = await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
-  assert.equal(second.priorIntent.state, 'idle');
-  assert.equal(second.priorIntent.sessionId, 's1');
-  assert.deepEqual(second.priorIntent.animation, { kind: 'static' });
+  assert.equal(second.seq, 2);
+  assert.equal(second.next.seq, 2);
 });
 
-test('a corrupt prior intent snapshot is a named transaction failure', async () => {
+test('a corrupt prior intent snapshot does not block a numbered transaction', async () => {
   const { paths, deps } = harness();
   mkdirSync(join(paths.intentPath, '..'), { recursive: true });
   writeFileSync(paths.intentPath, '{broken');
-  await assert.rejects(
-    applyHookEvent({ event: 'SessionStart', stdin, deps }),
-    new RegExp(`corrupt JSON at ${paths.intentPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
-  );
+  const result = await applyHookEvent({ event: 'SessionStart', stdin, deps });
+  assert.equal(result.seq, 1);
 });
 
 test('a transient state is written with its expiry and its successor', async () => {
@@ -198,6 +198,16 @@ test('SessionEnd removes the record from both files', async () => {
   assert.equal(result.next, null);
   assert.deepEqual(await readJson(paths.agentsPath), {});
   assert.deepEqual(await readJson(paths.intentPath), {});
+});
+
+test('SessionEnd and a resume keep counting — the sequence survives record removal', async () => {
+  const { deps } = harness();
+  const a = await applyHookEvent({ event: 'SessionStart', stdin, deps });
+  const end = await applyHookEvent({ event: 'SessionEnd', stdin, deps });
+  assert.equal(end.next, null);
+  assert.equal(end.seq, a.seq + 1);
+  const resumed = await applyHookEvent({ event: 'SessionStart', stdin, deps });
+  assert.equal(resumed.seq, end.seq + 1, 'a readmitted session does not restart at 1');
 });
 
 test('a dead agent is pruned on the next write — portable, no compositor asked', async () => {

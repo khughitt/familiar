@@ -554,6 +554,8 @@ ${poses}
     agentsPath: join(dir, 'state', 'agents.json'),
     intentPath: join(dir, 'state', 'intent.json'),
     lockPath: join(dir, 'state', 'agents.lock'),
+    seqPath: join(dir, 'state', 'events.seq'),
+    transmitDir: join(dir, 'state', 'transmit'),
   };
   const namedFault = 'animation: member "broken-cat" manifest has unknown role "wobble"';
   let preflights = 0;
