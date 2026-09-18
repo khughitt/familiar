@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T11:15:48Z
+updated: 2026-09-18T11:32:45Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
@@ -99,3 +99,4 @@ limits, not in this change.
 - 2026-09-18T11:15:48Z (tmux-render): Design spec drafted at docs/specs/2026-09-18-tmux-rendering-design.md (commit 8faddc9 on branch tmux-render, worktree .worktrees/tmux-render); follow-ups fam-70271a (upstream tmux bug) and fam-9a7a69 (FORCE_COLOR=3) filed as ideas
 - 2026-09-18T11:15:48Z (tmux-render): parked (waiting on user, review): Review the design spec; on approval run writing-plans against it in .worktrees/tmux-render
   provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-18T11:32:45Z (tmux-render): Spec revised after review 1 (5afab87): transmission ledger replaces priorIntent as lifecycle evidence, CLI transmit() wraps too, slow partition gets npm/just/CI entry points, overhead corrected to 11 x commands; follow-up fam-8d0b82 (repaint on client-attached)
