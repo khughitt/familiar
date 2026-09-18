@@ -48,6 +48,11 @@ test('each operational failure is a reason, never a throw', () => {
   assert.deepEqual(tmuxFacts(TMUX_ENV, { exec: () => 'maybe\txterm-kitty\tkitty\t/dev/pts/1\tx\ty\n' }), { ok: false, reason: 'exit' });
 });
 
+test('malformed client identity numbers are rejected instead of truncated', () => {
+  assert.deepEqual(tmuxFacts(TMUX_ENV, { exec: () => LINE.replace('\t9001\t', '\t9001junk\t') }), { ok: false, reason: 'exit' });
+  assert.deepEqual(tmuxFacts(TMUX_ENV, { exec: () => LINE.replace('\t1758200000\n', '\t1758200000junk\n') }), { ok: false, reason: 'exit' });
+});
+
 test('wrapForTmux frames the escapes in DCS passthrough and doubles every ESC, preserving the type', () => {
   const apc = '\x1b_Ga=T,q=2;AAAA\x1b\\';
   const wrapped = wrapForTmux(apc);

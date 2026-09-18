@@ -54,9 +54,9 @@ export function tmuxFacts(env, { exec = execFileSync } = {}) {
   const [passthrough, termname, termtype, tty, pidText, createdText] = String(output).replace(/\n$/, '').split('\t');
   // A detached server has a pane and a setting but no client: nothing to draw on.
   if (!termname) return failure('no-client');
-  const pid = Number.parseInt(pidText, 10);
-  const created = Number.parseInt(createdText, 10);
-  if (!PASSTHROUGH.has(passthrough) || !tty || !Number.isInteger(pid) || !Number.isInteger(created)) {
+  const pid = /^\d+$/.test(pidText) ? Number(pidText) : NaN;
+  const created = /^\d+$/.test(createdText) ? Number(createdText) : NaN;
+  if (!PASSTHROUGH.has(passthrough) || !tty || !Number.isSafeInteger(pid) || !Number.isSafeInteger(created)) {
     return failure('exit');
   }
   return Object.freeze({
