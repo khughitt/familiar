@@ -925,12 +925,27 @@ test('an older event arriving after a newer one is SUPERSEDED and writes nothing
 
 test('SessionEnd writes a tombstone with prev\'s identity, then the reset; a straggler meets the tombstone', async () => {
   const ledger = memoryLedger(stamp({ held: directHeld() }, { seq: 2, owner: OWNER }));
-  const end = await captureEmission({ prev: agentAt('working'), next: null, intent: { identity: { project: 'api' }, pid: 4242, sessionId: 's1' }, ...section({ seq: 3, ledger }) });
+  const trace = [];
+  const end = await captureEmission({
+    prev: agentAt('working'), next: null, intent: { identity: { project: 'api' }, pid: 4242, sessionId: 's1' },
+    ...section({ seq: 3, ledger: {
+      read: ledger.read,
+      write: async (entry) => { await ledger.write(entry); trace.push('tombstone'); },
+    } }),
+    write: (_fd, bytes, offset, length) => {
+      assert.equal(ledger.entry.ended, true);
+      trace.push(bytes.subarray(offset, offset + length).toString('latin1'));
+      return length;
+    },
+  });
   assert.equal(end.result.kind, 'ended');
   assert.deepEqual(ledger.entry, { seq: 3, pid: 4242, starttime: 987654, held: null, ended: true });
-  assert.ok(end.bytes.toString('latin1').includes('\x1b]111'), 'the reset went out');
+  assert.deepEqual(trace, ['tombstone', '\x1b]111\x1b\\\x1b]112\x1b\\']);
   const straggler = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
   assert.equal(straggler.result.kind, 'superseded');
+  assert.equal(straggler.bytes.length, 0);
+  assert.deepEqual(straggler.opens, []);
+  assert.equal(ledger.writes.length, 1, 'the straggler must not overwrite the tombstone');
   assert.equal(ledger.entry.ended, true);
 });
 
@@ -992,4 +1007,157 @@ test('renderTransition wraps a static pose only when the probe says tmux is ok',
   assert.ok(plain.includes(SPRITE));
   assert.equal(bareApcs(wrapped), 0, 'SPRITE still occurs inside the doubled-ESC form; only an unpreceded ESC _ G is bare');
   assert.ok(wrapped.includes('\x1bPtmux;\x1b\x1b_Ga=T'));
+});
+
+// --- ordering inside the section -------------------------------------------
+
+test('a graphical event does read → open → isatty → write-ahead → terminal → publish → close', async () => {
+  const trace = [];
+  const ledger = {
+    read: async () => { trace.push('read'); return EMPTY_ENTRY; },
+    write: async (entry) => { trace.push(entry.held === null ? 'write-ahead' : 'publish'); },
+  };
+  await captureEmission({
+    ...section({ ledger }),
+    open: () => { trace.push('open'); return 7; },
+    checkTty: () => { trace.push('isatty'); return true; },
+    write: (_fd, _bytes, _offset, length) => { trace.push('terminal'); return length; },
+    close: () => { trace.push('close'); },
+  });
+  assert.deepEqual(trace, ['read', 'open', 'isatty', 'write-ahead', 'terminal', 'publish', 'close']);
+});
+
+// Acquisitions follow the test's call order, independently of filesystem scheduling.
+function scriptedLock() {
+  const waiting = [];
+  let busy = false;
+  return async (fn) => {
+    if (busy) await new Promise((resolve) => waiting.push(resolve));
+    busy = true;
+    try {
+      return await fn();
+    } finally {
+      const next = waiting.shift();
+      if (next) next(); else busy = false;
+    }
+  };
+}
+
+test('both interleavings of S=1 (working) and S=2 (needs-input) end with needs-input on the terminal and in the ledger', async () => {
+  for (const order of [[1, 2], [2, 1]]) {
+    const ledger = memoryLedger();
+    const lock = scriptedLock();
+    const writes = [];
+    const run = (seq) => captureEmission({
+      prev: agentAt('idle'),
+      next: agentAt(seq === 1 ? 'working' : 'needs-input'),
+      intent: clipsIntent(seq === 1 ? 'working' : 'needs-input'),
+      ...section({ seq, ledger, lock }),
+      write: (_fd, bytes, offset, length) => {
+        writes.push({ seq, bytes: Buffer.from(bytes.subarray(offset, offset + length)) });
+        return length;
+      },
+    });
+    const results = await Promise.all(order.map(run));
+    const bySeq = Object.fromEntries(order.map((seq, i) => [seq, results[i].result]));
+    assert.equal(ledger.entry.held.intent.state, 'needs-input', `order ${order}`);
+    assert.equal(ledger.entry.seq, 2, `order ${order}`);
+    assert.equal(writes.filter((w) => w.bytes.includes('_G')).at(-1).seq, 2, `order ${order}: the newest event painted last`);
+    assert.equal(bySeq[2].kind, 'transmitted');
+    if (order[0] === 2) {
+      assert.equal(bySeq[1].kind, 'superseded');
+      assert.equal(writes.filter((w) => w.seq === 1).length, 0);
+      assert.deepEqual(results[1].opens, []);
+    } else {
+      assert.equal(bySeq[1].kind, 'transmitted');
+    }
+  }
+});
+
+// --- failures with an existing entry ---------------------------------------
+
+test('a terminal write that fails mid-stream leaves held: null, and the next hook CREATES — not unchanged', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld('working') }, { seq: 1, owner: OWNER }));
+  let calls = 0;
+  let closed = false;
+  await assert.rejects(captureEmission({
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: clipsIntent('needs-input'),
+    ...section({ seq: 2, ledger }),
+    write: (_fd, _bytes, _offset, length) => {
+      assert.equal(ledger.entry.held, null, 'evidence cleared before every terminal write');
+      calls += 1;
+      if (calls === 2) throw new Error('EIO');
+      assert.ok(length > 1, 'the first write must leave bytes outstanding');
+      return 1;
+    },
+    close: () => { closed = true; },
+  }), /EIO/);
+  assert.equal(calls, 2);
+  assert.equal(closed, true);
+  assert.deepEqual([ledger.entry.seq, ledger.entry.held], [2, null]);
+  const next = await captureEmission({ prev: agentAt('needs-input'), next: agentAt('working'), ...section({ seq: 3, ledger }) });
+  assert.equal(next.result.kind, 'transmitted');
+  assert.equal(next.result.lifecycle, 'create');
+  assert.match(next.bytes.toString('latin1'), /a=T,U=1/);
+});
+
+test('a publish that fails after a complete terminal write leaves held: null; the next hook CREATES', async () => {
+  const backing = memoryLedger(stamp({ held: directHeld('working') }, { seq: 1, owner: OWNER }));
+  let writesSeen = 0;
+  let terminalWritten = false;
+  let closed = false;
+  const ledger = {
+    read: backing.read,
+    write: async (entry) => {
+      writesSeen += 1;
+      if (writesSeen === 2) {
+        assert.equal(terminalWritten, true);
+        throw new Error('ENOSPC');
+      }
+      return backing.write(entry);
+    },
+  };
+  await assert.rejects(captureEmission({
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: clipsIntent('needs-input'),
+    ...section({ seq: 2, ledger }),
+    write: (_fd, bytes, offset, length) => {
+      assert.equal(offset, 0);
+      assert.equal(length, bytes.length);
+      terminalWritten = true;
+      return length;
+    },
+    close: () => { closed = true; },
+  }), /ENOSPC/);
+  assert.equal(closed, true);
+  assert.deepEqual([backing.entry.seq, backing.entry.held], [2, null]);
+  const next = await captureEmission({ prev: agentAt('needs-input'), next: agentAt('working'), ...section({ seq: 3, ledger: backing }) });
+  assert.equal(next.result.kind, 'transmitted');
+  assert.equal(next.result.lifecycle, 'create');
+  assert.match(next.bytes.toString('latin1'), /a=T,U=1/);
+});
+
+test('a failed write-ahead throws before any terminal byte', async () => {
+  const ledger = { read: async () => EMPTY_ENTRY, write: async () => { throw new Error('EROFS'); } };
+  const writes = [];
+  let closed = false;
+  await assert.rejects(captureEmission({
+    ...section({ ledger }),
+    write: (_fd, _bytes, _offset, length) => { writes.push(length); return length; },
+    close: () => { closed = true; },
+  }), /EROFS/);
+  assert.deepEqual(writes, []);
+  assert.equal(closed, true);
+});
+
+test('a suppressed event (tty or open gate) preserves held and advances seq', async () => {
+  for (const overrides of [{ checkTty: () => false }, { open: () => { throw new Error('ENOENT'); } }]) {
+    const ledger = memoryLedger(stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }));
+    const { result, bytes } = await captureEmission({
+      prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }), ...overrides,
+    });
+    assert.equal(result.kind, 'suppressed');
+    assert.equal(bytes.length, 0);
+    assert.deepEqual(ledger.entry.held, directHeld('idle'));
+    assert.equal(ledger.entry.seq, 2);
+  }
 });
