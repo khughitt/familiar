@@ -12,7 +12,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y tmux
       - run: python3 tools/tt ci-test -- npm test
+      - run: python3 tools/tt ci-test -- npm run test:slow
   smoke:
     runs-on: ubuntu-latest
     steps:

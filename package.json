@@ -14,7 +14,8 @@
     "familiar-opencode": "bin/familiar-opencode"
   },
   "scripts": {
-    "test": "node tools/test-runner.mjs fast"
+    "test": "node tools/test-runner.mjs fast",
+    "test:slow": "node tools/test-runner.mjs slow"
   },
   "dependencies": {
     "@opentui/solid": "0.4.3",

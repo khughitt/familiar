@@ -13,13 +13,11 @@ tt := "python3 tools/tt"
 # stands in for. `npm test` rather than the runner directly: package.json stays the one
 # definition of what the suite is.
 #
-# fast_cmd is the same command as test_cmd: this project has no affected-only selection.
-# The runner's `fast` mode is a filename partition (everything that is not
-# `*.slow.test.js`), and the slow partition is currently empty, so `fast` is the whole
-# suite. When slow tests appear, test_cmd becomes the two modes in turn and the two
-# targets part company; until then the report showing equal durations is the truth.
+# fast_cmd is the fast partition: everything that is not `*.slow.test.js`. The slow
+# partition holds the real-tmux pty test (test/tmux-pty.slow.test.js), which needs
+# tmux and util-linux `script` and takes seconds; test_cmd runs both modes in turn.
 fast_cmd := "npm test"
-test_cmd := "npm test"
+test_cmd := "npm test && npm run test:slow"
 # No formatter, linter, or typechecker in this project yet; `tasks check` is the gate.
 check_cmd := "python3 tools/ops-check && tasks check"
 
