@@ -1,6 +1,6 @@
 # Rendering inside tmux
 
-**Status:** draft, revised four times under review (§8), awaiting review.
+**Status:** draft, revised five times under review (§8), awaiting review.
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 
@@ -230,14 +230,33 @@ until one arrives the previous image stays, which for a final render (the last
 event before a long idle) can be indefinitely. That is the cost of a timeout
 here, and it is the same cost the current code pays for any dropped emission.
 
-The lock's holder-liveness check must be **fresh**. `withLock` defaults to
+**One liveness predicate for this section**, `ownerAlive(pid, starttime)`,
+defined as `pidExists(pid) && freshStartTimeOf(pid) === starttime`. It is
+*fresh identity*, not fresh existence: on Linux `freshStartTimeOf` reads
+`/proc/<pid>/stat` (no spawn); on Darwin it runs `ps -p <pid>`, because the
+process-ops `isAlive` there compares against the memoized `-axo` snapshot and
+review reproduced it accepting a pid whose starttime had changed. Every use of
+liveness in this section — the lock's holder check, the ownership gate below,
+and pruning — goes through `ownerAlive`.
+
+That puts a spawn inside a lock on Darwin, and the rule against it is
+reconciled, not waived: the rule protects the **bus** lock, which every hook on
+the machine contends for, and holding it across a spawn would serialize them
+all. The transmission lock is per session, already contains a pty write far
+longer than a `ps -p`, and delays only that session's own hooks. The bus lock is
+still never held across any spawn; ledger pruning is placed outside it for that
+reason (see **Pruning**).
+
+The lock's holder check must be fresh too. `withLock` defaults to
 `lockHolderAlive`, which memoizes its first answer per pid/starttime for the
 life of the calling process; that is right for the bus lock, whose section is
 milliseconds, and wrong here: a waiter that observed the holder alive on its
 first attempt would keep believing it after the holder died and, with
 `staleMs: Infinity`, exhaust its budget instead of recovering (review confirmed
-this). Transmission locks pass `isAlive: processOps.isAlive`, the uncached
-predicate that stats the pid on every call.
+this). Transmission locks pass `isAlive` as `ownerAlive` behind a one-second
+time-bounded memo per pid/starttime: a waiter retrying every 20 ms notices a
+dead holder within a second, and a Darwin waiter spawns at most one `ps` a
+second rather than one per attempt.
 
 `<name>` is `ledgerName(sessionId)`: the id with every character outside
 `[A-Za-z0-9_-]` replaced by `_`, truncated to 40 characters, then `-` and the
@@ -258,9 +277,15 @@ written with `writeJsonAtomic`:
 
 `seq` is the newest event this section has processed for the session. `held`
 is what the terminal holds, or `null` when nothing is known to be held.
-`ended` is the SessionEnd tombstone. `pid`/`starttime` are always present —
-on a tombstone they come from `prev`, the record SessionEnd removed — because
-they are the identity pruning tests. A missing file is `{ seq: 0, held: null }`.
+`ended` is the SessionEnd tombstone. `pid`/`starttime` are always present on
+any entry this section writes: every write goes through
+`stamp(E, S) = { ...E, seq: S, pid: owner.pid, starttime: owner.starttime }`
+with `owner = next ?? prev`, so a missing file — read as `{ seq: 0, held: null }`
+— acquires its identity on the first write whatever branch performs it, a
+tombstone carries the identity of the record SessionEnd removed, and a held
+entry whose agent process changed (a resume under a new pid) is restamped
+while its `held` evidence fails the pid comparison and yields a `create`.
+Pruning depends on this identity being present on every file.
 
 **Protocol**, for an event with sequence `S`, agent `next` (or `null`), and the
 transport `T` the probe implies (`direct`, or
@@ -269,11 +294,20 @@ transport `T` the probe implies (`direct`, or
 1. Read the entry `E`. If `E.seq >= S`, return `superseded` and touch nothing:
    a newer event already owns the terminal, whether it ran before this hook
    acquired the lock or this hook is an old one arriving after SessionEnd.
-2. SessionEnd: write `{ seq: S, pid, starttime, held: null, ended: true }` with
-   `prev`'s identity, then write `oscReset()` to the terminal. The reset needs
-   no evidence; if it fails the tombstone is already down, which is the correct
+2. **Ownership gate**, before any terminal path: `owner = next ?? prev`; if
+   `!ownerAlive(owner.pid, owner.starttime)`, write the entry this event would
+   have written anyway — `stamp(E, S)`, or for SessionEnd the tombstone of the
+   next step — and return `suppressed` without opening the terminal. The
+   ordering evidence is kept; only the bytes are withheld. This gates every write below — graphics, tint, bell, and the
+   reset — not only the graphical one: a straggler of an exited agent must not
+   tint a pty the kernel has since handed to someone else, and on Darwin the
+   `/dev/ttys` path can outlive the process where Linux's `/proc/<pid>/fd/1`
+   would simply fail to open.
+3. SessionEnd: write `stamp({ held: null, ended: true }, S)` with `prev`'s
+   identity, then write `oscReset()` to the terminal. The reset needs no
+   evidence; if it fails the tombstone is already down, which is the correct
    state. Return `ended`.
-3. Decide graphics. Evidence is valid when `E.held` is not `null`,
+4. Decide graphics. Evidence is valid when `E.held` is not `null`,
    `E.pid`/`E.starttime` equal `next`'s, and `E.held.transport === T`.
    `lifecycle` is `update` only when the evidence is valid **and** the
    capability is `ANIMATION`; it is `create` otherwise, including for every
@@ -285,23 +319,19 @@ transport `T` the probe implies (`direct`, or
    evidence is invalid or `E.held.intent` differs from the current intent in the
    fields `emit()` compares today. Presentation bytes (tint, bell) are computed
    exactly as now.
-4. No graphics needed: write `{ ...E, seq: S }` — `held` is preserved, this is
+5. No graphics needed: write `stamp(E, S)` — `held` is preserved, this is
    the **unchanged** case, and three identical hooks in a row leave `held`
    intact and send zero graphics bytes — then write the presentation bytes, if
    any. Return `unchanged`. Capability `NONE` (detached, probe failed, plain
    `TERM`) and `transmitSprite: false` take this path too: nothing on any
    terminal changed, so the evidence stands; when the same client re-attaches
    the image it holds is still the one the ledger describes.
-5. Graphics needed: check `next`'s `pid`/`starttime` alive with the fresh
-   predicate, then open the fd and apply the tty gate; on any of these failing
-   write `{ ...E, seq: S }` and return `suppressed` (no byte reached a terminal,
-   the evidence stands). The liveness check is what stops a straggler whose
-   agent has since exited from painting a terminal the agent no longer owns; on
-   Linux the `/proc/<pid>/fd/1` open would fail anyway, on Darwin the `/dev/ttys`
-   path can outlive the process. Then **write-ahead**: `{ seq: S, pid, starttime, held: null }`.
+6. Graphics needed: open the fd and apply the tty gate; on failure write
+   `stamp(E, S)` and return `suppressed` (no byte reached a terminal, the
+   evidence stands). Then **write-ahead**: `stamp({ held: null }, S)`.
    If that write fails, throw before any terminal byte. Then write the bytes.
-   Then **publish** `{ seq: S, pid, starttime, held: { transport: T, capability,
-   id, intent } }`. Return `transmitted`.
+   Then **publish** `stamp({ held: { transport: T, capability, id, intent } }, S)`.
+   Return `transmitted`.
 
 **Why this is safe.** Between write-ahead and publish the entry says nothing is
 held; a partial terminal write, a crash, or a failed publish all leave that
@@ -315,14 +345,17 @@ the lock second it is `superseded` by `seq` and writes nothing. An outstanding
 hook after SessionEnd meets the tombstone's higher `seq` and writes nothing.
 
 **Pruning.** A ledger file is removable on one condition only: its
-`pid`/`starttime` is dead by the fresh predicate. "The session has no agent
-record" is not a condition — after SessionEnd the record is gone while the
-agent process, and any hook it spawned, may still be running, and the tombstone
-exists precisely to supersede such a straggler. Pruning runs where agent
-records are pruned today (the transaction's prune pass and `familiar reap`),
-but it acts on a ledger file only after acquiring that session's transmission
-lock with a short retry budget: under the lock it re-reads the entry, re-checks
-death, and unlinks the file; if the lock is busy the file is skipped this pass.
+`pid`/`starttime` is dead by `ownerAlive`. "The session has no agent record" is
+not a condition — after SessionEnd the record is gone while the agent process,
+and any hook it spawned, may still be running, and the tombstone exists
+precisely to supersede such a straggler. Pruning never runs inside the bus
+transaction (on Darwin `ownerAlive` spawns): the hook prunes after the
+transaction returns, and `familiar reap` prunes after its own bus work. Both
+consider only *candidates* — ledger files whose session is absent from the
+agents snapshot they already hold — so the usual cost is one `readdir` and no
+liveness call at all. Each candidate is handled under that session's
+transmission lock with a short retry budget: re-read, re-check with
+`ownerAlive`, unlink; if the lock is busy the file is skipped this pass.
 A live section can therefore never see its entry vanish between read and
 publish, and a tombstone outlives every hook of the agent it ends. Lock files
 need no pruning: `withLock` unlinks its own on release, and a dead holder's is
@@ -427,8 +460,20 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
     with `prev`'s pid/starttime; a prune pass with that pid alive leaves the
     tombstone; the outstanding `S=2` is `superseded`. With the pid dead, the
     prune removes the tombstone, and the outstanding `S=2` then finds no entry
-    but fails the fresh liveness check → `suppressed`, no bytes. A prune pass
+    and fails the ownership gate → `suppressed`, zero bytes — asserted for a
+    graphical event, for each presentation-only shape (capability `NONE`,
+    motion policy `off`, `transmitSprite: false`), and for a second SessionEnd
+    against a dead owner, which writes its tombstone and no reset. A prune pass
     that cannot take the session's lock leaves the file.
+  - Initialization: a first event that is suppressed (capability `NONE`) or
+    fails the tty gate writes an entry carrying `next`'s pid/starttime; a prune
+    with that pid alive keeps it and with it dead removes it. The same for a
+    first event whose owner is already dead.
+  - Darwin pid reuse: through the Darwin process-ops construction with an
+    injected `runPs`, the snapshot shows the pid with the recorded starttime
+    while `ps -p` shows the same pid with a later starttime → `ownerAlive` is
+    false; the process-ops `isAlive` on the same inputs is true, which is the
+    defect being pinned.
   - Unchanged: after a `create`, three identical hooks (`S=2,3,4`) each return
     `unchanged`, `held` is byte-identical to the published one, `seq` advances,
     zero graphics bytes.
@@ -447,9 +492,11 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   - Fresh liveness: a waiter whose first attempt sees the holder alive and whose
     later attempt sees it dead recovers the lock, driven through the real
     process-ops construction with an injected `readStat` that returns the
-    holder's stat once and `ENOENT` after — not through a hand-rolled predicate,
+    holder's stat once and `ENOENT` after, with the injected clock advanced past
+    the one-second memo between attempts — not through a hand-rolled predicate,
     so the test fails if the transmission lock is ever wired back to the cached
-    `lockHolderAlive`.
+    `lockHolderAlive`. A second run counts liveness calls across fifty attempts
+    within one second and asserts one.
   - Static terminal: two successive transitions under `STATIC` with a populated,
     valid ledger entry both encode `create`; the same two under `ANIMATION`
     encode `create` then `update`.
@@ -558,6 +605,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
   partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
+- 2026-09-18, review 5: one `ownerAlive` predicate (fresh identity, `ps -p` on
+  Darwin) gates every terminal write including tint, bell and reset, with the
+  no-spawn rule reconciled as a bus-lock rule; the lock's holder check uses it
+  behind a one-second memo; `stamp()` puts identity on every ledger write so a
+  first suppressed event is prunable; pruning moves outside the bus
+  transaction and considers only sessions absent from the agents snapshot.
 - 2026-09-18, review 4: tombstones keep `pid`/`starttime`; pruning requires a
   dead agent by a fresh check and runs under the session's transmission lock;
   the transmission lock uses the uncached liveness predicate; the section
