@@ -1,15 +1,16 @@
 ---
 id: fam-fff8c9
 title: "Render inside tmux: relax the passthrough refusal and wrap the animation program"
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: planned
 owner: tmux-render
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T16:37:34Z
+updated: 2026-09-18T20:39:18Z
 started: 2026-09-18T15:54:52Z
+completed: 2026-09-18T20:39:18Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
@@ -115,3 +116,10 @@ limits, not in this change.
   provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-09-18T16:21:48Z (tmux-render): Plan review 1 applied (aa7daf5): in-process hook test, bareApcs() helper everywhere, full caller migration listed, kill injection in liveness tests, fixture root under cats/ with member pip and attach-then-preview gating
 - 2026-09-18T16:37:34Z (tmux-render): Plan review 2 applied (b412e44): spawned-hook test removed, in-process hook test uses ownerAlive false (suppressed/owner-dead both events), near-280 test stays synchronous
+- 2026-09-18T19:14:36Z (tmux-render): resumed
+  provenance: {"harness_session":"codex:01a0b561-e59f-7e92-8b4d-cdfd6ad9d8aa","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-18T19:14:36Z (tmux-render): Resumed reviewed tmux-render plan in .worktrees/tmux-render; implementation beginning.
+- 2026-09-18T20:39:18Z (tmux-render): done
+  provenance: {"harness_session":"codex:01a0b561-e59f-7e92-8b4d-cdfd6ad9d8aa","harness_session_source":"CODEX_SESSION_ID"}
+- 2026-09-18T20:39:18Z (tmux-render): Rendered through tmux with probe-gated per-command passthrough, truthful transmission ledger, real PTY coverage, and documented limits.
+  provenance: {"harness_session":"codex:01a0b561-e59f-7e92-8b4d-cdfd6ad9d8aa","harness_session_source":"CODEX_SESSION_ID"}
