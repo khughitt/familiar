@@ -21,6 +21,9 @@
 - Every ledger write goes through `stamp()`; `held` crosses a write only through `inherit()` (§3.5).
 - Ledger and lock filenames go through `ledgerName()`; they can never escape `stateDir/transmit/` (§3.5).
 - Layout newlines after CLI APC commands stay outside passthrough (§3.4).
+- **Detecting a bare APC in tests:** `ESC _ G` also occurs inside a correctly wrapped `ESC ESC _ G`, so never count `'\x1b_G'` substrings. Every test file that checks framing defines and uses
+  `const BARE_APC = /(?<!\x1b)\x1b_G/g; const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;`
+  and counts wrapped commands with `text.split('\x1bPtmux;').length - 1`.
 - Tests: `node --test <file>` for one file; `npm test` for the fast suite; `npm run test:slow` for the slow partition (Task 13 adds it). Run `tasks check` before every commit (pre-commit hook does too).
 - Commits: conventional commits, no attribution trailers.
 - The repository's `AGENTS.md` and `CLAUDE.md` apply. Comment density in this codebase is high and argumentative; match it where you add code, and never leave a comment that asserts an unmeasured fact.
@@ -294,6 +297,8 @@ Spec: §3.2.
 
 - [ ] **Step 1: Write the failing tests**
 
+In the first table test (`classifies terminal graphics capability explicitly`, `test/kitty.test.js:11-22`) delete the row `[{ TERM: 'xterm-kitty', TMUX: '/tmp/tmux' }, 'none']` — under the new contract that input throws, and the throw is pinned by the test below.
+
 Replace the `MULTIPLEXER_MARKERS` test at `test/kitty.test.js:61-67` with:
 
 ```js
@@ -435,6 +440,9 @@ Append to `test/kitty-animation.test.js` (reuse that file's existing program/rea
 ```js
 import { wrapForTmux } from '../src/render/term/tmux.js';
 
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
+
 test('frame is applied to every command, and encodedBytes still measures the unwrapped program', () => {
   const plain = encodeKittyProgram(staticProgram(), { id: 7, placement: { kind: 'virtual', cols: 4, rows: 4 }, lifecycle: 'create', readFrame });
   const seen = [];
@@ -446,9 +454,11 @@ test('frame is applied to every command, and encodedBytes still measures the unw
   assert.equal(wrapped.metrics.encodedBytes, plain.metrics.encodedBytes, 'the pack metric does not depend on the transport');
   // Spec §3.3: wrapped = unwrapped + 11 × commands for the current APC encoding.
   assert.equal(wrapped.bytes.length, plain.metrics.encodedBytes + 11 * plain.metrics.commands);
-  // No bare APC survives: every ESC _ G is preceded by a doubled ESC inside a DCS.
-  assert.equal(wrapped.bytes.toString('latin1').split('\x1b_G').length - 1, 0);
-  assert.equal(wrapped.bytes.toString('latin1').split('\x1b\x1b_G').length - 1, plain.metrics.commands);
+  // No bare APC survives. `ESC _ G` also occurs INSIDE a wrapped `ESC ESC _ G`, so count
+  // only APC starts not preceded by an ESC, and count frames by their DCS opener.
+  const text = wrapped.bytes.toString('latin1');
+  assert.equal(bareApcs(text), 0);
+  assert.equal(text.split('\x1bPtmux;').length - 1, plain.metrics.commands);
 });
 
 test('frame must be a function', () => {
@@ -461,12 +471,15 @@ Append to `test/kitty.test.js` (it already imports `transmit` and has a PNG fixt
 ```js
 import { wrapForTmux } from '../src/render/term/tmux.js';
 
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
+
 test('transmit frames every APC command and leaves the layout newlines outside the framing', () => {
   const plain = transmit(PNG, { rows: 3 });
   const wrapped = transmit(PNG, { rows: 3, frame: wrapForTmux });
   assert.ok(plain.endsWith('\n\n\n'));
   assert.ok(wrapped.endsWith('\x1b\\\n\n\n'), 'the DCS closes before the newlines, which are tmux layout, not payload');
-  assert.equal(wrapped.split('\x1b_G').length, 1, 'no bare APC');
+  assert.equal(bareApcs(wrapped), 0, 'no bare APC');
   const commands = plain.split('\x1b\\').length - 1;
   assert.equal(wrapped.split('\x1bPtmux;').length - 1, commands, 'one DCS per command');
   assert.equal(wrapped.length, plain.length + 11 * commands);
@@ -708,10 +721,12 @@ Append to `test/proc.test.js` (read the file first: it builds Linux ops with `cr
 ```js
 test('Linux ownerAlive is fresh identity: pid alive but restarted is dead', () => {
   let starttime = 100;
+  // `kill` is the constructor's existence probe (createProcessOps builds pidExists from
+  // it); a kill that never throws says "pid 7 exists" without consulting the real pid 7.
   const ops = createProcessOps({
     platform: 'linux',
     readStat: (pid) => statLine(pid, starttime),
-    pidExists: () => true,
+    kill: () => {},
   });
   assert.equal(ops.ownerAlive(7, { starttime: 100 }), true);
   starttime = 200;                                     // the pid was recycled
@@ -723,7 +738,7 @@ test('Darwin ownerAlive consults ps -p, not the memoized -axo snapshot', () => {
   let fresh = 100;
   const ops = createProcessOps({
     platform: 'darwin',
-    pidExists: () => true,
+    kill: () => {},
     runPs: (args) => (args[0] === '-p' ? darwinRow({ pid: 7, starttime: fresh }) : darwinRow({ pid: 7, starttime: 100 })),
   });
   assert.equal(ops.isAlive(7, { starttime: 100 }), true);
@@ -1260,6 +1275,8 @@ const TMUX_TERMINAL = {
   tmux: TMUX_KITTY,
 };
 const OWNER = { pid: 4242, starttime: 987654 };
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 const directHeld = (state = 'working') => ({
   transport: 'direct', capability: ANIMATION, id: imageIdFor('s1'),
   intent: { state, motionPolicy: 'full', animation: { kind: 'clips', manifest: '/themes/cats/sprites/ginger/animation.yaml', sha256: 'a'.repeat(64) }, sprite: { terminal: '/c/x.png', rows: 8 } },
@@ -1302,7 +1319,10 @@ async function captureEmission(overrides = {}) {
 }
 ```
 
-4. Every existing `emit({ ... })` call: make the enclosing test `async`, `await` the call, spread `...section()` into the options, and delete `priorIntent: …`. Where a test relied on `priorIntent` to obtain `update` (the tests at ~633 "later full Kitty transition updates in place", ~650 "reduced Kitty … staged root composition later"), replace it with a ledger holding the prior evidence:
+4. Migrate every existing caller — the PASS gate below cannot hold otherwise:
+   - All 14 `captureEmission(` calls: make the enclosing test `async` and `await` the call (destructuring `const { bytes } = await captureEmission(...)`).
+   - Every direct `emit({ ... })` call: make the test `async`, `await` it, spread `...section()` into the options, and delete `priorIntent: …`.
+   - Every `assert.throws(() => emit({ ... }))` (the "emit takes an Intent, NOT an IntentRecord" test near line 280, "emit requires an explicit terminal target" near 475, and the two near 760 and 785) becomes `await assert.rejects(emit({ ...section(), ... }), /pattern/)` — `emit` is async now, so its argument validation surfaces as a rejection. `assert.throws` on `renderTransition` (near 446) stays synchronous. Where a test relied on `priorIntent` to obtain `update` (the tests at ~633 "later full Kitty transition updates in place", ~650 "reduced Kitty … staged root composition later"), replace it with a ledger holding the prior evidence:
 
 ```js
     ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld('idle'), intent: { ...directHeld('idle').intent, motionPolicy: 'full' } } }, { seq: 1, owner: OWNER })) }),
@@ -1369,7 +1389,7 @@ test('STATIC capability is always a CREATE, even with valid evidence', async () 
 test('inside tmux every APC is inside DCS passthrough and none is bare', async () => {
   const { bytes } = await captureEmission({ terminal: TMUX_TERMINAL });
   const text = bytes.toString('latin1');
-  assert.equal(text.split('\x1b_G').length, 1, 'no bare APC');
+  assert.equal(bareApcs(text), 0, 'no bare APC');
   assert.ok(text.split('\x1bPtmux;').length > 1);
   // The presentation (tint) is NOT wrapped: tmux handles OSC itself.
   assert.ok(text.includes(`\x1b]11;${COLOR.backdrop}\x1b\\`));
@@ -1478,7 +1498,8 @@ test('renderTransition wraps a static pose only when the probe says tmux is ok',
   const plain = renderTransition({ prev: 'idle', next: 'working', intent: intentAt('working'), readSprite, capability: ANIMATION, tmux: null });
   const wrapped = renderTransition({ prev: 'idle', next: 'working', intent: intentAt('working'), readSprite, capability: ANIMATION, tmux: TMUX_KITTY });
   assert.ok(plain.includes(SPRITE));
-  assert.ok(!wrapped.includes(SPRITE) && wrapped.includes('\x1bPtmux;\x1b\x1b_Ga=T'));
+  assert.equal(bareApcs(wrapped), 0, 'SPRITE still occurs inside the doubled-ESC form; only an unpreceded ESC _ G is bare');
+  assert.ok(wrapped.includes('\x1bPtmux;\x1b\x1b_Ga=T'));
 });
 ```
 
@@ -2070,38 +2091,76 @@ Spec: §3.4 hook path, §3.5 lock construction and pruning placement, mechanical
 - Consumes: everything above.
 - Produces: `async emitHookTransition({ prev, next, intent, seq, transmitSprite, paths, processOps, platform, hookEnv, probe, lockWith })` → the `emit` result. `familiar hook` awaits it, then prunes. `familiar reap` prunes after its bus work.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-The bin tests spawn the real CLI with a temp `FAMILIAR_STATE_DIR` (see the `env()` helper at `test/bin-familiar.test.js:43`). Find the existing hook test that runs `SessionStart` then another event with a fake tty fixture (`ttyBin`, line 31) and add beside it:
+A spawned `familiar hook` cannot reach emission from a test: `resolveAgentPid` walks `/proc` for a `claude` ancestor that owns a tty, a test process has none, and the hook exits 0 with a diagnostic before the transaction. Under a real Claude session it WOULD find one — the developer's own terminal — which `test/bin-familiar.test.js` already warns about. So the hook's half of the section is tested in-process through `emitHookTransition`'s injected collaborators, with a Darwin target whose tty does not exist on this machine, so no terminal is reachable.
+
+First migrate the existing Darwin test at `test/bin-familiar.test.js:190-205` ("a completed hook transition with no Darwin tty is one exit-zero diagnostic"): make it `async`, replace `assert.throws(() => emitHookTransition({...}))` with `await assert.rejects(emitHookTransition({...}), (error) => {...})`, delete `priorIntent: null`, and add `seq: 1, paths: paths(env()), probe: () => null` to the call (import `paths` from `../src/bus/paths.js`). The `recordOf` fake stays; add `ownerAlive: () => true, startTimeOf: () => 1` to the `processOps` fake.
+
+Then add beside it:
 
 ```js
-test('hook events write a transmission ledger entry under transmit/ and SessionEnd leaves a tombstone', () => {
-  const e = env({ TERM: 'xterm-kitty', TMUX: '' });
-  const payload = JSON.stringify({ session_id: 'ledger/../session', cwd: process.cwd() });
-  const start = spawnSync(process.execPath, [bin, 'hook', 'SessionStart'], { encoding: 'utf8', env: e, input: payload });
-  assert.equal(start.status, 0, start.stderr);
-  const dir = join(e.FAMILIAR_STATE_DIR, 'transmit');
-  const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
-  assert.equal(files.length, 1);
-  assert.doesNotMatch(files[0], /\.\./, 'the session id is a name, not a path');
-  assert.ok(!existsSync(join(e.FAMILIAR_STATE_DIR, 'session.json')), 'no traversal out of transmit/');
-  const entry = JSON.parse(readFileSync(join(dir, files[0]), 'utf8'));
-  assert.equal(entry.seq, 1);
-  assert.ok(Number.isInteger(entry.pid) && Number.isInteger(entry.starttime));
-  const end = spawnSync(process.execPath, [bin, 'hook', 'SessionEnd'], { encoding: 'utf8', env: e, input: payload });
-  assert.equal(end.status, 0, end.stderr);
-  const tomb = JSON.parse(readFileSync(join(dir, files[0]), 'utf8'));
+import { ledgerPaths } from '../src/render/term/ledger.js';
+
+// The hook's half of the emission section, in-process. `record.tty` names a Darwin tty
+// that does not exist here, so `open` fails inside emit(): the section runs, the ledger
+// is written, and no terminal anywhere is touched.
+test('emitHookTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
+  const e = env();
+  const p = paths(e);
+  const sessionId = 'ledger/../session';
+  const agent = { sessionId, state: 'working', pid: process.pid, starttime: 1, project: 'api' };
+  const processOps = {
+    recordOf: () => ({ pid: process.pid, tty: 'ttys999' }),
+    ownerAlive: () => true,
+    startTimeOf: () => 1,
+  };
+  const intent = { [sessionId]: { current: {
+    sessionId, pid: process.pid, identity: { project: 'api' }, state: 'working', motionPolicy: 'full',
+    animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
+  } } };
+  const first = await emitHookTransition({
+    prev: null, next: agent, intent, seq: 1, transmitSprite: true,
+    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  });
+  assert.equal(first.kind, 'suppressed');
+  assert.equal(first.reason, 'open');
+  const { entryPath } = ledgerPaths(p.transmitDir, sessionId);
+  assert.equal(dirname(entryPath), p.transmitDir, 'the session id is a name, not a path');
+  assert.ok(!existsSync(join(p.stateDir, 'session.json')) && !existsSync(join(p.stateDir, 'agents.json')), 'no traversal out of transmit/');
+  const entry = JSON.parse(readFileSync(entryPath, 'utf8'));
+  assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, ended: false });
+
+  const end = await emitHookTransition({
+    prev: agent, next: null, intent, seq: 2, transmitSprite: true,
+    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  });
+  assert.equal(end.kind, 'ended');
+  const tomb = JSON.parse(readFileSync(entryPath, 'utf8'));
   assert.deepEqual([tomb.seq, tomb.ended, tomb.held], [2, true, null]);
-  assert.deepEqual(JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'events.seq'), 'utf8')), { seq: 2 });
+});
+
+test('the spawned hook still exits 0 with one diagnostic and touches no terminal when no agent ancestor exists', () => {
+  const e = env({ TERM: 'xterm-kitty', TMUX: '' });
+  assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e }).status, 0);
+  const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart'], {
+    encoding: 'utf8', env: e, input: JSON.stringify({ session_id: 's1', cwd: process.cwd() }),
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '');
+  const lines = result.stderr.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, result.stderr);
+  assert.match(lines[0], /^familiar: /);
+  assert.ok(!existsSync(join(e.FAMILIAR_STATE_DIR, 'transmit')), 'no agent resolved, so no section ran');
 });
 ```
 
-Add `readdirSync, existsSync, readFileSync` to the file's `node:fs` import if missing.
+Add `existsSync, readFileSync` to the file's `node:fs` import and `dirname` to its `node:path` import if missing.
 
 - [ ] **Step 2: Run to verify failure**
 
 Run: `node --test test/bin-familiar.test.js`
-Expected: the new test FAILS (no `transmit/`), and existing hook tests may fail with `emit requires seq` since Task 8.
+Expected: the in-process test FAILS (`emitHookTransition` is synchronous and passes `priorIntent`; `emit` rejects for a missing `seq`); the migrated Darwin test fails until the signature changes.
 
 - [ ] **Step 3: Rewire**
 
@@ -2231,13 +2290,15 @@ const tmuxEnv = (line, over = {}) => env({
   PATH: `${fakeTmuxDir}:${process.env.PATH}`, FAKE_TMUX_LINE: line, ...over,
 });
 const KITTY_LINE = 'all\txterm-kitty\tkitty(0.48.2)\t/dev/pts/16\t9001\t1758200000';
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 
 test('preview inside a passthrough-all tmux pane emits only WRAPPED graphics, never bare APC', () => {
   const e = tmuxEnv(KITTY_LINE);
   assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e }).status, 0);
-  const result = runTty(['theme', 'preview', 'ginger', '--state', 'idle'], { encoding: 'latin1', env: e });
+  const result = runTty(['theme', 'preview', 'pip', '--state', 'idle'], { encoding: 'latin1', env: e });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.split('\x1b_G').length, 1, 'no bare APC');
+  assert.equal(bareApcs(result.stdout), 0, 'no bare APC');
   assert.ok(result.stdout.includes('\x1bPtmux;\x1b\x1b_Ga=T'), 'the transmission is framed');
   assert.match(result.stdout, /\x1b\\\n/, 'layout newlines follow the closed DCS');
 });
@@ -2252,7 +2313,7 @@ test('theme show inside tmux with allow-passthrough=on prints the setting and no
 });
 ```
 
-(`runTty` runs the CLI under the `tty-familiar.mjs` fixture so `stdout.isTTY` is true; it already exists at line 32. Check what member ids the fixture theme provides and use one; `ginger` is a placeholder for that id.)
+(`runTty` runs the CLI under the `tty-familiar.mjs` fixture so `stdout.isTTY` is true; it already exists at line 32. The fixture theme `test/fixtures/theme-pack` is installed by the file's `env()` under the id `cats` with the single member `pip`.)
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -2311,7 +2372,7 @@ Create `test/tmux-pty.slow.test.js`:
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, openSync, closeSync, writeSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, openSync, closeSync, writeSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2332,6 +2393,8 @@ const skip = missing.length > 0 ? `missing ${missing.join(', ')}` : false;
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const APC = '\x1b_Ga=T,f=100,q=2,r=2,C=1,m=0;AAAA\x1b\\';
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
@@ -2348,11 +2411,13 @@ async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
     ? spawn('script', ['-q', log, 'tmux', '-S', sock, 'attach'], { env: { ...process.env, TERM: 'xterm-kitty' }, stdio: 'ignore' })
     : spawn('script', ['-qfc', `tmux -S ${sock} attach`, log], { env: { ...process.env, TERM: 'xterm-kitty' }, stdio: 'ignore' });
   try {
-    for (let i = 0; i < 50; i += 1) {
+    let attached = false;
+    for (let i = 0; i < 50 && !attached; i += 1) {
       const tty = spawnSync('tmux', ['-S', sock, 'display-message', '-p', '#{client_tty}'], { encoding: 'utf8' }).stdout.trim();
-      if (tty) break;
-      await sleep(100);
+      attached = tty !== '';
+      if (!attached) await sleep(100);
     }
+    assert.ok(attached, 'a client attached through the pty within 5 s');
     return await body({ sock, dir, readClient: () => readFileSync(log, 'latin1') });
   } finally {
     spawnSync('tmux', ['-S', sock, 'kill-server']);
@@ -2376,8 +2441,9 @@ for (const [passthrough, bareForwarded, wrappedForwarded] of [['all', false, tru
       await sleep(500);
       const seen = readClient();
       assert.ok(seen.includes('END'), 'the pane text was redrawn to the client');
-      const bare = seen.split('\x1b_Ga=T').length - 1;
-      assert.equal(bare, (bareForwarded ? 1 : 0) + (wrappedForwarded ? 1 : 0), `${passthrough}: forwarded APC count`);
+      // The client sees UNFRAMED output (tmux strips the DCS and un-doubles the ESC), so a
+      // forwarded command is a bare APC here; the same helper counts both cases.
+      assert.equal(bareApcs(seen), (bareForwarded ? 1 : 0) + (wrappedForwarded ? 1 : 0), `${passthrough}: forwarded APC count`);
       assert.equal(seen.includes('\x1bPtmux;'), false, 'the client never sees the DCS framing itself');
     });
   });
@@ -2386,17 +2452,26 @@ for (const [passthrough, bareForwarded, wrappedForwarded] of [['all', false, tru
 test('familiar theme preview inside a passthrough-all pane paints the client', { skip }, async () => {
   const state = mkdtempSync(join(tmpdir(), 'state-'));
   const config = mkdtempSync(join(tmpdir(), 'config-'));
-  const themes = fileURLToPath(new URL('fixtures/theme-pack', import.meta.url));
+  // FAMILIAR_THEMES_DIR is a ROOT of installed themes; the loader expects `<root>/cats/`
+  // (the config default), so the fixture pack is copied under that id, as
+  // test/bin-familiar.test.js does. Its one member is `pip`.
+  const themes = mkdtempSync(join(tmpdir(), 'themes-'));
+  cpSync(fileURLToPath(new URL('fixtures/theme-pack', import.meta.url)), join(themes, 'cats'), { recursive: true });
+  const go = join(state, 'go');
   const paneEnv = { FAMILIAR_STATE_DIR: state, FAMILIAR_CONFIG_DIR: config, FAMILIAR_THEMES_DIR: themes };
-  spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { env: { ...process.env, ...paneEnv } });
-  await withServer({ passthrough: 'all', paneEnv, paneCommand: `${process.execPath} ${bin} theme preview ginger --state idle; sleep 2` }, async ({ readClient }) => {
-    await sleep(1500);
-    assert.ok(readClient().includes('\x1b_Ga=T'), 'the sprite reached the client unframed');
+  assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { env: { ...process.env, ...paneEnv } }).status, 0);
+  // The pane waits for a signal file: preview must run only AFTER the client is attached,
+  // or tmux has no client to forward to and the test races the attachment.
+  const paneCommand = `sh -c 'while [ ! -e ${go} ]; do sleep 0.1; done; ${process.execPath} ${bin} theme preview pip --state idle; sleep 2'`;
+  await withServer({ passthrough: 'all', paneEnv, paneCommand }, async ({ readClient }) => {
+    writeFileSync(go, '');
+    await sleep(2000);
+    const seen = readClient();
+    assert.ok(bareApcs(seen) > 0, `the sprite reached the client unframed:\n${JSON.stringify(seen.slice(0, 200))}`);
+    assert.equal(seen.includes('\x1bPtmux;'), false);
   });
 });
 ```
-
-Replace `ginger` with a member id the fixture theme actually provides (check `test/fixtures/theme-pack`).
 
 - [ ] **Step 2: Wire the entry points**
 
@@ -2510,4 +2585,6 @@ git commit -m "docs: state the real tmux requirement and its known limits"
 
 **Type consistency.** `tmux` result shape (`{ ok, passthrough, termname, termtype, client: { tty, pid, created } }`) is used identically in Tasks 1, 2, 4, 8, 12. `stamp(fields, { seq, owner })` and `inherit(entry, owner)` match between Tasks 6 and 8. `emit`'s return `{ kind, reason?, lifecycle?, bytes? }` is what Tasks 8, 9, 11 read. `transmitLockOptions` is used with the same arguments in Tasks 6, 10, 11. `ownerAlive(pid, { starttime })` has the same signature in Tasks 5, 6, 8, 10, 11.
 
-**Known judgement calls left to the executor.** The exact member id in the fixture theme (Tasks 12, 13); the exact helper names in `test/proc.test.js` and `test/lock.test.js` (Task 5) — the plan names what to assert, the file names how it builds fixtures.
+**Known judgement calls left to the executor.** The exact helper names in `test/proc.test.js` and `test/lock.test.js` (Task 5) — the plan names what to assert, the file names how it builds fixtures.
+
+**Plan review 1 (2026-09-18).** Task 11's spawned-hook ledger test replaced by an in-process `emitHookTransition` test (a spawned hook has no `claude` ancestor and, under a real session, would target the developer's terminal); every "no bare APC" assertion now uses `bareApcs()` (an `ESC _ G` also occurs inside `ESC ESC _ G`); Task 8 and 11 migration steps enumerate the `captureEmission` callers, `assert.throws → assert.rejects`, and the Darwin `emitHookTransition` test; Task 2 drops the classifier table row that now throws; Task 5 injects `kill`, the constructor's real existence probe; Task 13 installs the fixture under `<root>/cats/`, uses member `pip`, and releases `theme preview` only after the client is attached.
