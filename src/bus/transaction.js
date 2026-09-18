@@ -90,9 +90,8 @@ async function commit({
 // There is no resolver daemon. The CLI process handling a hook event does
 // everything in one locked transaction.
 //
-// It returns both the prior resolved intent and the newly resolved `intent`
-// alongside the transition. The terminal emitter therefore has serialized
-// lifecycle evidence without re-reading the file outside the lock.
+// It returns the transition, resolved `intent`, and bus-wide sequence. The
+// terminal emitter compares that sequence with its ledger under its own lock.
 // `adapter` is REQUIRED, and has no default. This function used to import claude-code's adapter
 // directly, which quietly made "the core" and "claude-code" the same thing — and a default here
 // would put that back while looking like a convenience: a codex hook with a forgotten flag would

@@ -15,7 +15,9 @@ test('the counter starts at 1 and increments across sessions', async () => {
   const paths = statePaths();
   assert.equal(await nextSeq(paths), 1);
   assert.equal(await nextSeq(paths), 2);
-  assert.deepEqual(await readJson(paths.seqPath), { seq: 2 });
+  const stored = await readJson(paths.seqPath);
+  assert.equal(typeof stored.seq, 'number');
+  assert.deepEqual(stored, { seq: 2 });
 });
 
 test('a missing counter is seeded above every ledger it finds, so no ledger can outrank it', async () => {
@@ -31,4 +33,12 @@ test('a corrupt counter is an error, not a restart', async () => {
   const paths = statePaths();
   writeFileSync(paths.seqPath, '{');
   await assert.rejects(nextSeq(paths), /corrupt JSON/);
+});
+
+test('an invalid counter value is an error, not a restart or string increment', async () => {
+  for (const value of [{}, { seq: null }, { seq: '100' }]) {
+    const paths = statePaths();
+    writeFileSync(paths.seqPath, JSON.stringify(value));
+    await assert.rejects(nextSeq(paths), /invalid event sequence counter/);
+  }
 });

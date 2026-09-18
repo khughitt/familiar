@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readJson, writeJsonAtomic } from './store.js';
 
@@ -10,10 +10,26 @@ import { readJson, writeJsonAtomic } from './store.js';
 // across all sessions, "which of two events of one session is newer" is still answered
 // by comparing it. Call ONLY under the bus lock: the read-increment-write is not atomic.
 export async function nextSeq(paths) {
-  const current = (await readJson(paths.seqPath))?.seq ?? await seedFromLedgers(paths.transmitDir);
+  const current = await currentSeq(paths);
   const seq = current + 1;
   await writeJsonAtomic(paths.seqPath, { seq });
   return seq;
+}
+
+async function currentSeq(paths) {
+  const stored = await readJson(paths.seqPath);
+  if (stored === null) {
+    try {
+      await access(paths.seqPath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return seedFromLedgers(paths.transmitDir);
+      throw error;
+    }
+  }
+  if (!Number.isSafeInteger(stored?.seq) || stored.seq < 0) {
+    throw new Error(`invalid event sequence counter at ${paths.seqPath}`);
+  }
+  return stored.seq;
 }
 
 // A missing counter with ledgers present (a wiped state directory that kept transmit/,
