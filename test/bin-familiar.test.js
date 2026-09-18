@@ -15,6 +15,8 @@ import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { adapterFor } from '../src/adapters/index.js';
 import { projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { applyHookEvent } from '../src/bus/transaction.js';
+import { paths } from '../src/bus/paths.js';
+import { ledgerPaths } from '../src/render/term/ledger.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
@@ -187,17 +189,23 @@ test('a hook invocation that throws internally still exits 0 and prints exactly 
   assert.match(lines[0], /^familiar: no scheme at .* — run: familiar scheme set dark\|light$/);
 });
 
-test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', () => {
+test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', async () => {
   let targetError;
-  assert.throws(() => emitHookTransition({
+  await assert.rejects(emitHookTransition({
     prev: null,
     next: { sessionId: 's1', pid: 42 },
-    priorIntent: null,
+    seq: 1,
+    paths: paths(env()),
     intent: { s1: { current: {} } },
     transmitSprite: true,
-    processOps: { recordOf: () => ({ pid: 42, tty: null }) },
+    processOps: {
+      recordOf: () => ({ pid: 42, tty: null }),
+      ownerAlive: () => true,
+      startTimeOf: () => 1,
+    },
     platform: 'darwin',
     hookEnv: {},
+    probe: () => null,
   }), (error) => {
     targetError = error;
     return /agent pid 42 has no validated Darwin tty/.test(error.message);
@@ -212,6 +220,43 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
   assert.deepEqual(lines, [
     'familiar: terminal target: agent pid 42 has no validated Darwin tty\n',
   ]);
+});
+
+// The owner-dead gate keeps every terminal unopened while the real emission
+// section writes ordering evidence, including SessionEnd's tombstone.
+test('emitHookTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
+  const p = paths(env());
+  const sessionId = 'ledger/../session';
+  const agent = { sessionId, state: 'working', pid: process.pid, starttime: 1, project: 'api' };
+  const processOps = {
+    recordOf: () => ({ pid: process.pid, tty: 'ttys999' }),
+    ownerAlive: () => false,
+    startTimeOf: () => 1,
+  };
+  const intent = { [sessionId]: { current: {
+    sessionId, pid: process.pid, identity: { project: 'api' }, state: 'working', motionPolicy: 'full',
+    animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
+  } } };
+  const first = await emitHookTransition({
+    prev: null, next: agent, intent, seq: 1, transmitSprite: true,
+    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  });
+  assert.equal(first.kind, 'suppressed');
+  assert.equal(first.reason, 'owner-dead');
+  const { entryPath } = ledgerPaths(p.transmitDir, sessionId);
+  assert.equal(dirname(entryPath), p.transmitDir, 'the session id is a name, not a path');
+  assert.ok(!existsSync(join(p.stateDir, 'session.json')) && !existsSync(join(p.stateDir, 'agents.json')), 'no traversal out of transmit/');
+  const entry = JSON.parse(readFileSync(entryPath, 'utf8'));
+  assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, ended: false });
+
+  const end = await emitHookTransition({
+    prev: agent, next: null, intent, seq: 2, transmitSprite: true,
+    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  });
+  assert.equal(end.kind, 'suppressed');
+  assert.equal(end.reason, 'owner-dead');
+  const tomb = JSON.parse(readFileSync(entryPath, 'utf8'));
+  assert.deepEqual([tomb.seq, tomb.ended, tomb.held], [2, true, null], 'the tombstone is ordering evidence and is written for a dead owner too');
 });
 
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
@@ -244,6 +289,27 @@ test('reap failures are nonzero', () => {
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /^familiar: no scheme at /);
+});
+
+test('reap prunes a dead transmission owner absent from the bus and reports only removals', () => {
+  const e = env();
+  const p = paths(e);
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  mkdirSync(p.transmitDir, { recursive: true });
+  const { entryPath } = ledgerPaths(p.transmitDir, 'ended-session');
+  // A live pid with a different birth stamp is a dead owner, without guessing an unused pid.
+  writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: -1, held: null, ended: true }));
+
+  const first = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: e });
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stderr, '');
+  assert.equal(first.stdout, 'pruned 1 transmission ledger(s)\n');
+  assert.equal(existsSync(entryPath), false);
+
+  const second = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: e });
+  assert.equal(second.status, 0, second.stderr);
+  assert.equal(second.stderr, '');
+  assert.equal(second.stdout, '');
 });
 
 test('an animation asset fault is one concise cosmetic line at the CLI boundary', () => {

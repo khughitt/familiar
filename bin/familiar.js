@@ -19,6 +19,7 @@ import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
 import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
@@ -26,6 +27,9 @@ import { loadIdentities } from '../src/bus/pins.js';
 import { displayedIntent } from '../src/protocol/intent.js';
 import { emit } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
+import { tmuxFacts } from '../src/render/term/tmux.js';
+import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
+import { pruneLedgers } from '../src/render/term/ledger-prune.js';
 import { composeForIntent, textLines } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
@@ -610,30 +614,41 @@ export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, ne
   })}\n`);
 }
 
-export function emitHookTransition({
-  prev, next, priorIntent, intent, transmitSprite,
+// Probe before taking the transmission lock: tmux and Darwin process queries spawn.
+// Await the whole emission section so its failures reach the hook's error boundary.
+export async function emitHookTransition({
+  prev, next, intent, seq, transmitSprite,
+  paths,
   processOps = defaultProcessOps,
   platform = process.platform,
   hookEnv = process.env,
+  probe = tmuxFacts,
+  lockWith = withLock,
 }) {
   const record = next ?? prev;
-  if (record === null) return;
+  if (record === null) return { kind: 'noop' };
   const terminal = terminalTarget(record.pid, {
     platform,
     record: processOps.recordOf(record.pid),
     hookEnv,
+    probe,
   });
-  if (next !== null) {
-    emit({ prev, next, priorIntent, intent: intent[next.sessionId].current, transmitSprite, terminal });
-    return;
-  }
-  emit({
+  const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
+  const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
+  const lock = (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf }));
+  return emit({
     prev,
-    next: null,
-    priorIntent,
-    intent: { identity: { project: prev.project }, pid: prev.pid },
+    next,
+    seq,
     transmitSprite,
     terminal,
+    ledger: fileLedger(entryPath),
+    lock,
+    ownerAlive,
+    // The emitter takes the Intent, not its record. SessionEnd needs only identity.
+    intent: next !== null
+      ? intent[next.sessionId].current
+      : { identity: { project: prev.project }, pid: prev.pid, sessionId: prev.sessionId },
   });
 }
 
@@ -693,7 +708,7 @@ async function main({ command, args: rest }) {
     const ctx = await context();
     const stdin = await readStdin();
 
-    const { prev, next, priorIntent, intent, evicted } = await applyHookEvent({
+    const { prev, next, seq, intent, evicted } = await applyHookEvent({
       event: positionals[0],
       stdin,
       deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
@@ -710,21 +725,19 @@ async function main({ command, args: rest }) {
       });
     }
 
-    // The transaction hands us the transition AND the resolved intent, so nothing
-    // here re-reads the file we just wrote.
-    //
-    // `intent` is keyed to IntentRecord — { current, expiresAt, after }. The
-    // emitter wants the Intent, so pass `.current`. Get this wrong and every
-    // field the emitter reads is undefined, in every project, on every event.
-    // The emitter throws a named error rather than a TypeError if you do, and
-    // test/emit.test.js asserts on exactly that mistake.
-    emitHookTransition({
-      prev,
-      next,
-      priorIntent,
-      intent,
+    await emitHookTransition({
+      prev, next, intent, seq,
       transmitSprite: adapter.printsPlaceholderCells,
+      paths: ctx.paths,
       processOps: defaultProcessOps,
+    });
+
+    // Prune after the transaction releases the bus lock: fresh Darwin liveness spawns.
+    await pruneLedgers({
+      transmitDir: ctx.paths.transmitDir,
+      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
+      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
+      startTimeOf: defaultProcessOps.startTimeOf,
     });
 
     // CODEX ONLY, SessionStart ONLY. Codex draws its own pet from a file rather
@@ -962,6 +975,13 @@ async function main({ command, args: rest }) {
     });
     reportEvictions(evicted);
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
+    const { removed } = await pruneLedgers({
+      transmitDir: ctx.paths.transmitDir,
+      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
+      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
+      startTimeOf: defaultProcessOps.startTimeOf,
+    });
+    if (removed.length > 0) process.stdout.write(`pruned ${removed.length} transmission ledger(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Dispatch to it,
