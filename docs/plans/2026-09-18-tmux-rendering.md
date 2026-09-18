@@ -1322,7 +1322,7 @@ async function captureEmission(overrides = {}) {
 4. Migrate every existing caller — the PASS gate below cannot hold otherwise:
    - All 14 `captureEmission(` calls: make the enclosing test `async` and `await` the call (destructuring `const { bytes } = await captureEmission(...)`).
    - Every direct `emit({ ... })` call: make the test `async`, `await` it, spread `...section()` into the options, and delete `priorIntent: …`.
-   - Every `assert.throws(() => emit({ ... }))` (the "emit takes an Intent, NOT an IntentRecord" test near line 280, "emit requires an explicit terminal target" near 475, and the two near 760 and 785) becomes `await assert.rejects(emit({ ...section(), ... }), /pattern/)` — `emit` is async now, so its argument validation surfaces as a rejection. `assert.throws` on `renderTransition` (near 446) stays synchronous. Where a test relied on `priorIntent` to obtain `update` (the tests at ~633 "later full Kitty transition updates in place", ~650 "reduced Kitty … staged root composition later"), replace it with a ledger holding the prior evidence:
+   - Every `assert.throws` whose callee is `emit(` ("emit requires an explicit terminal target" near 475, and the two near 760 and 785 — check each callee before changing it) becomes `await assert.rejects(emit({ ...section(), ... }), /pattern/)` — `emit` is async now, so its argument validation surfaces as a rejection. `assert.throws` whose callee is `renderTransition(` — the "emit takes an Intent, NOT an IntentRecord" test near 280 and the one near 446 — stays synchronous. Where a test relied on `priorIntent` to obtain `update` (the tests at ~633 "later full Kitty transition updates in place", ~650 "reduced Kitty … staged root composition later"), replace it with a ledger holding the prior evidence:
 
 ```js
     ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld('idle'), intent: { ...directHeld('idle').intent, motionPolicy: 'full' } } }, { seq: 1, owner: OWNER })) }),
@@ -2093,7 +2093,7 @@ Spec: §3.4 hook path, §3.5 lock construction and pruning placement, mechanical
 
 - [ ] **Step 1: Write the failing tests**
 
-A spawned `familiar hook` cannot reach emission from a test: `resolveAgentPid` walks `/proc` for a `claude` ancestor that owns a tty, a test process has none, and the hook exits 0 with a diagnostic before the transaction. Under a real Claude session it WOULD find one — the developer's own terminal — which `test/bin-familiar.test.js` already warns about. So the hook's half of the section is tested in-process through `emitHookTransition`'s injected collaborators, with a Darwin target whose tty does not exist on this machine, so no terminal is reachable.
+A spawned `familiar hook` cannot reach emission from a test: `resolveAgentPid` walks `/proc` for a `claude` ancestor that owns a tty, a test process has none, and the hook exits 0 with a diagnostic before the transaction. Under a real Claude session it WOULD find one — the developer's own terminal — which `test/bin-familiar.test.js` already warns about. So the hook's half of the section is tested in-process through `emitHookTransition`'s injected collaborators, with `ownerAlive` reporting the owner dead so the section's own gate keeps every byte off every terminal. No test spawns `familiar hook` expecting emission; the existing missing-scheme test (`test/bin-familiar.test.js:176`) already proves the exit-zero error path deterministically.
 
 First migrate the existing Darwin test at `test/bin-familiar.test.js:190-205` ("a completed hook transition with no Darwin tty is one exit-zero diagnostic"): make it `async`, replace `assert.throws(() => emitHookTransition({...}))` with `await assert.rejects(emitHookTransition({...}), (error) => {...})`, delete `priorIntent: null`, and add `seq: 1, paths: paths(env()), probe: () => null` to the call (import `paths` from `../src/bus/paths.js`). The `recordOf` fake stays; add `ownerAlive: () => true, startTimeOf: () => 1` to the `processOps` fake.
 
@@ -2102,9 +2102,10 @@ Then add beside it:
 ```js
 import { ledgerPaths } from '../src/render/term/ledger.js';
 
-// The hook's half of the emission section, in-process. `record.tty` names a Darwin tty
-// that does not exist here, so `open` fails inside emit(): the section runs, the ledger
-// is written, and no terminal anywhere is touched.
+// The hook's half of the emission section, in-process. `ownerAlive` reports the owner
+// dead, so the section's ownership gate (spec §3.5 step 2) writes the ledger and opens
+// NOTHING — the guarantee that no terminal is touched rests on the protocol, not on a
+// tty path happening to be absent on this machine.
 test('emitHookTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
   const e = env();
   const p = paths(e);
@@ -2112,7 +2113,7 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
   const agent = { sessionId, state: 'working', pid: process.pid, starttime: 1, project: 'api' };
   const processOps = {
     recordOf: () => ({ pid: process.pid, tty: 'ttys999' }),
-    ownerAlive: () => true,
+    ownerAlive: () => false,
     startTimeOf: () => 1,
   };
   const intent = { [sessionId]: { current: {
@@ -2124,7 +2125,7 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
     paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
   assert.equal(first.kind, 'suppressed');
-  assert.equal(first.reason, 'open');
+  assert.equal(first.reason, 'owner-dead');
   const { entryPath } = ledgerPaths(p.transmitDir, sessionId);
   assert.equal(dirname(entryPath), p.transmitDir, 'the session id is a name, not a path');
   assert.ok(!existsSync(join(p.stateDir, 'session.json')) && !existsSync(join(p.stateDir, 'agents.json')), 'no traversal out of transmit/');
@@ -2135,27 +2136,14 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
     prev: agent, next: null, intent, seq: 2, transmitSprite: true,
     paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
-  assert.equal(end.kind, 'ended');
+  assert.equal(end.kind, 'suppressed');
+  assert.equal(end.reason, 'owner-dead');
   const tomb = JSON.parse(readFileSync(entryPath, 'utf8'));
-  assert.deepEqual([tomb.seq, tomb.ended, tomb.held], [2, true, null]);
-});
-
-test('the spawned hook still exits 0 with one diagnostic and touches no terminal when no agent ancestor exists', () => {
-  const e = env({ TERM: 'xterm-kitty', TMUX: '' });
-  assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e }).status, 0);
-  const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart'], {
-    encoding: 'utf8', env: e, input: JSON.stringify({ session_id: 's1', cwd: process.cwd() }),
-  });
-  assert.equal(result.status, 0);
-  assert.equal(result.stdout, '');
-  const lines = result.stderr.split('\n').filter(Boolean);
-  assert.equal(lines.length, 1, result.stderr);
-  assert.match(lines[0], /^familiar: /);
-  assert.ok(!existsSync(join(e.FAMILIAR_STATE_DIR, 'transmit')), 'no agent resolved, so no section ran');
+  assert.deepEqual([tomb.seq, tomb.ended, tomb.held], [2, true, null], 'the tombstone is ordering evidence and is written for a dead owner too');
 });
 ```
 
-Add `existsSync, readFileSync` to the file's `node:fs` import and `dirname` to its `node:path` import if missing.
+Add `existsSync, readFileSync` to the file's `node:fs` import and `dirname` to its `node:path` import if missing. The test asserts `existsSync(join(p.stateDir, 'agents.json'))` is false: nothing in this in-process path writes the bus, so a file there could only be a traversal.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -2586,5 +2574,7 @@ git commit -m "docs: state the real tmux requirement and its known limits"
 **Type consistency.** `tmux` result shape (`{ ok, passthrough, termname, termtype, client: { tty, pid, created } }`) is used identically in Tasks 1, 2, 4, 8, 12. `stamp(fields, { seq, owner })` and `inherit(entry, owner)` match between Tasks 6 and 8. `emit`'s return `{ kind, reason?, lifecycle?, bytes? }` is what Tasks 8, 9, 11 read. `transmitLockOptions` is used with the same arguments in Tasks 6, 10, 11. `ownerAlive(pid, { starttime })` has the same signature in Tasks 5, 6, 8, 10, 11.
 
 **Known judgement calls left to the executor.** The exact helper names in `test/proc.test.js` and `test/lock.test.js` (Task 5) — the plan names what to assert, the file names how it builds fixtures.
+
+**Plan review 2 (2026-09-18).** The spawned-hook test in Task 11 is removed (nothing enforced its no-ancestor assumption; under a real session it could reach the developer's terminal); the in-process test uses a dead owner so the protocol itself, not an absent tty path, guarantees zero terminal access, and expects `suppressed/owner-dead` for both events; the async-migration list in Task 8 classifies the near-280 test correctly as a synchronous `renderTransition` assertion.
 
 **Plan review 1 (2026-09-18).** Task 11's spawned-hook ledger test replaced by an in-process `emitHookTransition` test (a spawned hook has no `claude` ancestor and, under a real session, would target the developer's terminal); every "no bare APC" assertion now uses `bareApcs()` (an `ESC _ G` also occurs inside `ESC ESC _ G`); Task 8 and 11 migration steps enumerate the `captureEmission` callers, `assert.throws → assert.rejects`, and the Darwin `emitHookTransition` test; Task 2 drops the classifier table row that now throws; Task 5 injects `kill`, the constructor's real existence probe; Task 13 installs the fixture under `<root>/cats/`, uses member `pip`, and releases `theme preview` only after the client is attached.
