@@ -4,6 +4,7 @@ import { openSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderTransition, emit } from '../src/render/term/emit.js';
+import { memoryLedger, stamp, EMPTY_ENTRY } from '../src/render/term/ledger.js';
 import { GRAPHICS_CAPABILITY } from '../src/render/term/capability.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { imageIdFor } from '../src/render/term/placeholder.js';
@@ -68,6 +69,32 @@ const KITTY_TERMINAL = {
   env: { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1' },
 };
 
+const TMUX_KITTY = Object.freeze({
+  ok: true, passthrough: 'all', termname: 'xterm-kitty', termtype: 'kitty(0.48.2)',
+  client: Object.freeze({ tty: '/dev/pts/16', pid: 9001, created: 1758200000 }),
+});
+const TMUX_TERMINAL = {
+  path: '/proc/4242/fd/1',
+  env: { TERM: 'tmux-256color', TMUX: '/tmp/s,1,0', TMUX_PANE: '%0' },
+  tmux: TMUX_KITTY,
+};
+const OWNER = { pid: 4242, starttime: 987654 };
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
+const directHeld = (state = 'working') => ({
+  transport: 'direct', capability: ANIMATION, id: imageIdFor('s1'),
+  intent: { state, motionPolicy: 'full', animation: { kind: 'clips', manifest: '/themes/cats/sprites/ginger/animation.yaml', sha256: 'a'.repeat(64) }, sprite: { terminal: '/c/x.png', rows: 8 } },
+});
+// The section's required collaborators, with the most permissive fakes. Every test that
+// cares about one of them overrides it.
+const section = (overrides = {}) => ({
+  seq: 1,
+  ledger: memoryLedger(),
+  lock: (fn) => fn(),
+  ownerAlive: () => true,
+  ...overrides,
+});
+
 const agentAt = (state, { pid = 4242, starttime = 987654 } = {}) => ({
   sessionId: 's1', state, pid, starttime,
 });
@@ -93,13 +120,12 @@ const clipsIntent = (state = 'working', policy = 'full') => ({
   animation: { kind: 'clips', manifest: '/themes/cats/sprites/ginger/animation.yaml', sha256: 'a'.repeat(64) },
 });
 
-function captureEmission(overrides = {}) {
+async function captureEmission(overrides = {}) {
   const writes = [];
   const opens = [];
-  const result = emit({
+  const result = await emit({
     prev: null,
     next: agentAt('working'),
-    priorIntent: null,
     intent: clipsIntent(),
     terminal: KITTY_TERMINAL,
     loadAnimation: () => clipsSet,
@@ -111,6 +137,7 @@ function captureEmission(overrides = {}) {
     },
     close: () => {},
     checkTty: () => true,
+    ...section(),
     ...overrides,
   });
   return { result, writes, opens, bytes: Buffer.concat(writes.map((entry) => entry.bytes)) };
@@ -458,10 +485,11 @@ test('renderTransition given neither env nor capability throws — it does not a
 // false. These tests inject open/write/close/checkTty so nothing here ever
 // touches a real fd.
 
-test('emit opens the explicit terminal path', () => {
+test('emit opens the explicit terminal path', async () => {
   const opened = [];
-  emit({
-    prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+  await emit({
+    ...section(),
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
     readSprite, terminal: { ...KITTY_TERMINAL, path: '/dev/ttys003' },
     open: (path) => { opened.push(path); return 7; },
     write: (_fd, _bytes, _offset, length) => length,
@@ -471,9 +499,10 @@ test('emit opens the explicit terminal path', () => {
   assert.deepEqual(opened, ['/dev/ttys003']);
 });
 
-test('emit requires an explicit terminal target', () => {
-  assert.throws(() => emit({
-    prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+test('emit requires an explicit terminal target', async () => {
+  await assert.rejects(emit({
+    ...section(),
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
     readSprite,
     open: () => 7,
     write: (_fd, _bytes, _offset, length) => length,
@@ -482,11 +511,12 @@ test('emit requires an explicit terminal target', () => {
   }), /emit requires terminal/);
 });
 
-test('a non-tty fd produces no output at all — open() succeeding is not evidence of a terminal', () => {
+test('a non-tty fd produces no output at all — open() succeeding is not evidence of a terminal', async () => {
   let wrote = false;
   let closed = false;
-  emit({
-    prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+  const result = await emit({
+    ...section(),
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
     readSprite, terminal: KITTY_TERMINAL,
     open: () => 99,
     write: () => { wrote = true; },
@@ -495,13 +525,16 @@ test('a non-tty fd produces no output at all — open() succeeding is not eviden
   });
   assert.equal(wrote, false, 'wrote to a fd that isatty() said was not a terminal');
   assert.equal(closed, true, 'a non-tty fd must still be closed, not leaked');
+  assert.equal(result.kind, 'suppressed');
+  assert.equal(result.reason, 'not-a-tty');
 });
 
-test('a tty fd receives the complete update and presentation bytes, then is closed', () => {
+test('a tty fd receives the complete update and presentation bytes, then is closed', async () => {
   let written = null;
   let closed = false;
-  emit({
-    prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+  const result = await emit({
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld(), intent: { ...directHeld().intent, animation: { kind: 'static' } } } }, { seq: 1, owner: OWNER })) }),
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
     readSprite, terminal: KITTY_TERMINAL,
     open: () => 7,
     write: (fd, bytes, _offset, length) => { written = { fd, bytes }; return length; },
@@ -517,12 +550,14 @@ test('a tty fd receives the complete update and presentation bytes, then is clos
     prev: 'working', next: 'needs-input', intent: intentAt('needs-input'), readSprite, capability: NO_GRAPHICS,
   })));
   assert.equal(closed, true);
+  assert.equal(result.kind, 'transmitted');
 });
 
-test('no transition leaves the terminal fd unopened', () => {
+test('no transition leaves the terminal fd unopened', async () => {
   let opened = false;
-  emit({
-    prev: agentAt('working'), next: agentAt('working'), priorIntent: intentAt('working'), intent: intentAt('working'),
+  const result = await emit({
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld(), intent: { ...directHeld().intent, animation: { kind: 'static' } } } }, { seq: 1, owner: OWNER })) }),
+    prev: agentAt('working'), next: agentAt('working'), intent: intentAt('working'),
     readSprite, terminal: KITTY_TERMINAL,
     open: () => { opened = true; return 7; },
     write: () => { throw new Error('must not write'); },
@@ -530,22 +565,24 @@ test('no transition leaves the terminal fd unopened', () => {
     checkTty: () => true,
   });
   assert.equal(opened, false);
+  assert.equal(result.kind, 'unchanged');
 });
 
-test('a failure to open the fd (no such process, no controlling terminal) is silent, not thrown', () => {
-  assert.doesNotThrow(() => {
-    emit({
-      prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
-      readSprite, terminal: KITTY_TERMINAL,
-      open: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
-      write: () => { throw new Error('must not be called'); },
-      close: () => {},
-      checkTty: () => true,
-    });
+test('a failure to open the fd (no such process, no controlling terminal) is silent, not thrown', async () => {
+  const result = await emit({
+    ...section(),
+    prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
+    readSprite, terminal: KITTY_TERMINAL,
+    open: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    write: () => { throw new Error('must not be called'); },
+    close: () => {},
+    checkTty: () => true,
   });
+  assert.equal(result.kind, 'suppressed');
+  assert.equal(result.reason, 'open');
 });
 
-test('emit defaults isatty to the real node:tty.isatty, and stays silent against a real non-tty fd', () => {
+test('emit defaults isatty to the real node:tty.isatty, and stays silent against a real non-tty fd', async () => {
   // No injected checkTty at all: this exercises the REAL default, against a
   // real fd that is provably not a terminal (an ordinary regular file), so the
   // isatty() gate is proven against the actual Node API, not a stand-in for it.
@@ -553,8 +590,9 @@ test('emit defaults isatty to the real node:tty.isatty, and stays silent against
   writeFileSync(path, '');
   let wrote = false;
   try {
-    emit({
-      prev: agentAt('working'), next: agentAt('needs-input'), priorIntent: intentAt('working'), intent: intentAt('needs-input'),
+    await emit({
+      ...section(),
+      prev: agentAt('working'), next: agentAt('needs-input'), intent: intentAt('needs-input'),
       readSprite, terminal: KITTY_TERMINAL,
       open: () => openSync(path, 'a'),
       write: () => { wrote = true; },
@@ -572,23 +610,25 @@ test('emit defaults isatty to the real node:tty.isatty, and stays silent against
 // emit() receives the path and environment as one target, so capability cannot be
 // computed from a different process than the fd that receives the bytes.
 
-test('graphics capability is read from the explicit terminal environment', () => {
+test('graphics capability is read from the explicit terminal environment', async () => {
   const written = [];
-  emit({
-    prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
+  await emit({
+    ...section(),
+    prev: agentAt('idle'), next: agentAt('error'), intent: intentAt('error'),
     readSprite,
     terminal: { path: '/proc/4242/fd/1', env: { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '3' } },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
   });
 
   assert.ok(written[0].includes('\x1b_G'), 'a recognised terminal must actually get graphics');
-  assert.ok(written[0].includes('a=c'), 'the existing graphical binding must update in place');
+  assert.ok(written[0].includes('a=T'), 'no ledger evidence means a fresh graphical binding');
 });
 
-test('an unavailable terminal environment degrades to no sprite, not to no output', () => {
+test('an unavailable terminal environment degrades to no sprite, not to no output', async () => {
   const written = [];
-  emit({
-    prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
+  await emit({
+    ...section(),
+    prev: agentAt('idle'), next: agentAt('error'), intent: intentAt('error'),
     readSprite,
     terminal: { path: '/proc/4242/fd/1', env: undefined },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
@@ -606,10 +646,11 @@ test('an unavailable terminal environment degrades to no sprite, not to no outpu
 // tell the difference between "we asked graphicsCapability()" and "we asked whether a
 // file was readable". The positive direction alone never proves a gate; it proves a
 // pipe.
-test('a readable environ for a terminal we do NOT support suppresses the sprite', () => {
+test('a readable environ for a terminal we do NOT support suppresses the sprite', async () => {
   const written = [];
-  emit({
-    prev: agentAt('idle'), next: agentAt('error'), priorIntent: intentAt('idle'), intent: intentAt('error'),
+  await emit({
+    ...section(),
+    prev: agentAt('idle'), next: agentAt('error'), intent: intentAt('error'),
     readSprite,
     terminal: { path: '/proc/4242/fd/1', env: { TERM: 'xterm-256color' } },
     open: () => 7, write: (_fd, b, _offset, length) => { written.push(b); return length; }, close: () => {}, checkTty: () => true,
@@ -619,22 +660,21 @@ test('a readable environ for a terminal we do NOT support suppresses the sprite'
   assert.doesNotMatch(written[0].toString(), /\x1b\]2;/);
 });
 
-// --- emit(): complete animation programs and transaction-derived lifecycle --
+// --- emit(): complete animation programs and ledger-derived lifecycle -------
 
-test('first full Kitty clips transition creates one complete root/program/start write', () => {
-  const { writes, bytes } = captureEmission();
+test('first full Kitty clips transition creates one complete root/program/start write', async () => {
+  const { writes, bytes } = await captureEmission();
   assert.equal(writes.length, 1, 'the fully validated transition must reach the fd as one write-all call');
   assert.match(bytes.toString(), /a=T,U=1/);
   assert.match(bytes.toString(), /a=f,f=100/);
   assert.match(bytes.toString(), /a=a,i=\d+,s=3,v=1,q=2/);
 });
 
-test('later full Kitty transition updates in place under the same image id', () => {
-  const priorIntent = clipsIntent('idle');
-  const { writes, bytes } = captureEmission({
+test('later full Kitty transition updates in place under the same image id', async () => {
+  const { writes, bytes } = await captureEmission({
     prev: agentAt('idle'),
     next: agentAt('working'),
-    priorIntent,
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER })) }),
   });
   const out = bytes.toString();
   assert.equal(writes.length, 1);
@@ -646,25 +686,25 @@ test('later full Kitty transition updates in place under the same image id', () 
   assert.ok(out.includes(`i=${imageIdFor('s1')}`));
 });
 
-test('reduced Kitty creates a root first and uses staged root composition later', () => {
-  const first = captureEmission({ intent: clipsIntent('working', 'reduced') }).bytes.toString();
+test('reduced Kitty creates a root first and uses staged root composition later', async () => {
+  const first = (await captureEmission({ intent: clipsIntent('working', 'reduced') })).bytes.toString();
   assert.match(first, /a=T,U=1/);
   assert.doesNotMatch(first, /a=f/);
   assert.doesNotMatch(first, /a=a/);
 
-  const priorIntent = clipsIntent('idle', 'reduced');
-  const later = captureEmission({
-    prev: agentAt('idle'), next: agentAt('working'), priorIntent,
+  const later = (await captureEmission({
+    prev: agentAt('idle'), next: agentAt('working'),
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld('idle'), intent: { ...directHeld('idle').intent, motionPolicy: 'reduced' } } }, { seq: 1, owner: OWNER })) }),
     intent: clipsIntent('working', 'reduced'),
-  }).bytes.toString();
+  })).bytes.toString();
   assert.doesNotMatch(later, /a=T/);
   assert.match(later, /a=a,i=\d+,s=1,q=2/);
   assert.match(later, /a=c,i=\d+,r=2,c=1,C=1,q=2/);
   assert.doesNotMatch(later, /a=a,i=\d+,s=3/);
 });
 
-test('full Ghostty emits only a static root and never animation frame controls', () => {
-  const { bytes } = captureEmission({
+test('full Ghostty emits only a static root and never animation frame controls', async () => {
+  const { bytes } = await captureEmission({
     terminal: { path: '/proc/4242/fd/1', env: { TERM_PROGRAM: 'ghostty' } },
   });
   const out = bytes.toString();
@@ -673,11 +713,11 @@ test('full Ghostty emits only a static root and never animation frame controls',
   assert.doesNotMatch(out, /a=a/);
 });
 
-test('later Ghostty transitions send a fresh static root, never Kitty update controls', () => {
-  const { bytes } = captureEmission({
+test('later Ghostty transitions send a fresh static root, never Kitty update controls', async () => {
+  const { bytes } = await captureEmission({
     prev: agentAt('idle'),
     next: agentAt('working'),
-    priorIntent: clipsIntent('idle'),
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld('idle'), capability: GRAPHICS_CAPABILITY.STATIC } }, { seq: 1, owner: OWNER })) }),
     terminal: { path: '/proc/4242/fd/1', env: { TERM_PROGRAM: 'ghostty' } },
   });
   const out = bytes.toString();
@@ -686,13 +726,13 @@ test('later Ghostty transitions send a fresh static root, never Kitty update con
   assert.doesNotMatch(out, /a=a/);
 });
 
-test('off and no-graphics load no animation and preserve independent OSC output', () => {
+test('off and no-graphics load no animation and preserve independent OSC output', async () => {
   for (const [label, intent, terminal] of [
     ['off', clipsIntent('working', 'off'), KITTY_TERMINAL],
     ['none', clipsIntent('working', 'full'), { path: '/proc/4242/fd/1', env: { TERM: 'xterm-256color' } }],
   ]) {
     let loads = 0;
-    const { bytes } = captureEmission({
+    const { bytes } = await captureEmission({
       intent,
       terminal,
       loadAnimation: () => { loads += 1; throw new Error('must not load'); },
@@ -705,60 +745,49 @@ test('off and no-graphics load no animation and preserve independent OSC output'
   }
 });
 
-test('off epochs and changed agent processes select create; an ordinary successor updates', () => {
+test('absent evidence and changed agent processes select create; an ordinary successor updates', async () => {
   const cases = [
-    ['missing prior graphical intent', agentAt('idle'), null, agentAt('working'), 'create'],
-    ['missing agent record despite stale intent', null, clipsIntent('idle'), agentAt('working'), 'create'],
-    ['off epoch then full', agentAt('idle'), clipsIntent('idle', 'off'), agentAt('working'), 'create'],
-    ['new pid', agentAt('idle'), clipsIntent('idle'), agentAt('working', { pid: 5000, starttime: 22 }), 'create'],
-    ['same pid but new starttime', agentAt('idle'), clipsIntent('idle'), agentAt('working', { pid: 4242, starttime: 22 }), 'create'],
-    ['same process with graphical prior', agentAt('idle'), clipsIntent('idle'), agentAt('working'), 'update'],
+    ['empty ledger', agentAt('idle'), EMPTY_ENTRY, agentAt('working'), 'create'],
+    ['first hook', null, EMPTY_ENTRY, agentAt('working'), 'create'],
+    ['no graphical evidence after off', agentAt('idle'), stamp({}, { seq: 1, owner: OWNER }), agentAt('working'), 'create'],
+    ['new pid', agentAt('idle'), stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }), agentAt('working', { pid: 5000, starttime: 22 }), 'create'],
+    ['same pid but new starttime', agentAt('idle'), stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }), agentAt('working', { pid: 4242, starttime: 22 }), 'create'],
+    ['same process with held evidence', agentAt('idle'), stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }), agentAt('working'), 'update'],
   ];
-  for (const [label, prev, priorIntent, next, expected] of cases) {
-    const out = captureEmission({ prev, next, priorIntent }).bytes.toString();
+  for (const [label, prev, entry, next, expected] of cases) {
+    const out = (await captureEmission({ prev, next, ...section({ seq: 2, ledger: memoryLedger(entry) }) })).bytes.toString();
     assert.equal(out.includes('a=T,U=1'), expected === 'create', label);
   }
 });
 
-test('prior binding evidence must match the prior agent session, pid, and state', () => {
-  const mismatches = [
-    ['session id', { sessionId: 'other-session' }],
-    ['pid', { pid: 9999 }],
-    // The stale prior intent already names the new state. Without comparing it
-    // to prev.state, the emitter suppresses graphics entirely instead of
-    // restoring a binding whose serialized evidence is internally inconsistent.
-    ['state', { state: 'working' }],
-  ];
-
-  for (const [label, mismatch] of mismatches) {
-    const priorIntent = { ...clipsIntent('idle'), ...mismatch };
-    const out = captureEmission({
-      prev: agentAt('idle'),
+test('bus record mismatches cannot substitute for terminal evidence', async () => {
+  for (const [label, mismatch] of [['session id', { sessionId: 'other-session' }], ['pid', { pid: 9999 }], ['state', { state: 'working' }]]) {
+    const out = (await captureEmission({
+      prev: { ...agentAt('idle'), ...mismatch },
       next: agentAt('working'),
-      priorIntent,
-    }).bytes.toString();
+    })).bytes.toString();
     assert.match(out, /a=T,U=1/, `${label} mismatch reused an unproven binding`);
     assert.doesNotMatch(out, /a=a,i=\d+,s=1/, `${label} mismatch selected update`);
   }
 });
 
-test('same-state sprite identity changes update the graphical binding', () => {
-  const priorIntent = clipsIntent('working');
-  priorIntent.sprite = { ...priorIntent.sprite, terminal: '/c/old.png', rows: 7 };
-  const out = captureEmission({
+test('same-state sprite identity changes update the graphical binding', async () => {
+  const held = directHeld('working');
+  held.intent.sprite = { terminal: '/c/old.png', rows: 7 };
+  const out = (await captureEmission({
     prev: agentAt('working'),
     next: agentAt('working'),
-    priorIntent,
-  }).bytes.toString();
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ held }, { seq: 1, owner: OWNER })) }),
+  })).bytes.toString();
   assert.doesNotMatch(out, /a=T/);
   assert.match(out, /a=c,i=\d+,r=2,c=1,C=1,q=2/);
 });
 
-test('a stale animation reference fails before the tty is opened or any byte is emitted', () => {
+test('a stale animation reference fails before the tty is opened or any byte is emitted', async () => {
   let opened = false;
   let wrote = false;
-  assert.throws(
-    () => captureEmission({
+  await assert.rejects(
+    captureEmission({
       loadAnimation: () => { throw new Error('animation reference sha256 changed for member "ginger"'); },
       open: () => { opened = true; return 7; },
       write: () => { wrote = true; return 1; },
@@ -769,9 +798,9 @@ test('a stale animation reference fails before the tty is opened or any byte is 
   assert.equal(wrote, false);
 });
 
-test('emit drains short writes and does not retry a mid-write failure', () => {
+test('emit drains short writes and does not retry a mid-write failure', async () => {
   const accepted = [];
-  const first = captureEmission({
+  const first = await captureEmission({
     write: (_fd, bytes, offset, length) => {
       const n = Math.min(17, length);
       accepted.push(bytes.subarray(offset, offset + n));
@@ -779,11 +808,12 @@ test('emit drains short writes and does not retry a mid-write failure', () => {
     },
   });
   assert.ok(accepted.length > 1);
-  assert.equal(Buffer.concat(accepted).length, first.result);
+  assert.equal(first.result.kind, 'transmitted');
+  assert.equal(Buffer.concat(accepted).length, first.result.bytes);
 
   let calls = 0;
-  assert.throws(
-    () => captureEmission({
+  await assert.rejects(
+    captureEmission({
       write: () => {
         calls += 1;
         if (calls === 1) return 10;
@@ -793,4 +823,173 @@ test('emit drains short writes and does not retry a mid-write failure', () => {
     /tty write failed/,
   );
   assert.equal(calls, 2);
+});
+
+// --- the critical section: what the terminal received, not what the bus intended ------
+
+test('the section refuses to run without its evidence, lock, liveness, or order', async () => {
+  const base = { prev: null, next: agentAt('working'), intent: clipsIntent(), terminal: KITTY_TERMINAL };
+  await assert.rejects(emit({ ...base, ...section({ seq: undefined }) }), /seq/);
+  await assert.rejects(emit({ ...base, ...section({ ledger: undefined }) }), /ledger/);
+  await assert.rejects(emit({ ...base, ...section({ lock: undefined }) }), /lock/);
+  await assert.rejects(emit({ ...base, ...section({ ownerAlive: undefined }) }), /ownerAlive/);
+});
+
+test('with no ledger entry a consistent prev/intent is still a CREATE — the bus is not evidence', async () => {
+  const { bytes, result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 5 }) });
+  assert.equal(result.kind, 'transmitted');
+  assert.equal(result.lifecycle, 'create');
+  assert.match(bytes.toString('latin1'), /a=T,|a=t,/);
+  assert.doesNotMatch(bytes.toString('latin1'), /a=a,i=\d+,s=1/);
+});
+
+test('a same-transport, same-owner entry with a changed intent is an UPDATE under Kitty', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }));
+  const { bytes, result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
+  assert.equal(result.lifecycle, 'update');
+  assert.match(bytes.toString('latin1'), /a=a,i=\d+,s=1,q=2/);
+  assert.equal(ledger.entry.held.intent.state, 'working');
+  assert.equal(ledger.entry.seq, 2);
+});
+
+test('a different transport is a CREATE: another client, the same tty path reused, or direct vs tmux', async () => {
+  for (const [held, terminal, label] of [
+    [{ ...directHeld('idle'), transport: 'tmux:/dev/pts/5:1:1' }, TMUX_TERMINAL, 'another client tty'],
+    [{ ...directHeld('idle'), transport: 'tmux:/dev/pts/16:8000:1758100000' }, TMUX_TERMINAL, 'same tty path, new client incarnation'],
+    [directHeld('idle'), TMUX_TERMINAL, 'direct evidence, tmux now'],
+    [{ ...directHeld('idle'), transport: 'tmux:/dev/pts/16:9001:1758200000' }, KITTY_TERMINAL, 'tmux evidence, direct now'],
+  ]) {
+    const ledger = memoryLedger(stamp({ held }, { seq: 1, owner: OWNER }));
+    const { result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), terminal, ...section({ seq: 2, ledger }) });
+    assert.equal(result.lifecycle, 'create', label);
+  }
+  const same = memoryLedger(stamp({ held: { ...directHeld('idle'), transport: 'tmux:/dev/pts/16:9001:1758200000' } }, { seq: 1, owner: OWNER }));
+  const { result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), terminal: TMUX_TERMINAL, ...section({ seq: 2, ledger: same }) });
+  assert.equal(result.lifecycle, 'update', 'identical incarnation');
+});
+
+test('STATIC capability is always a CREATE, even with valid evidence', async () => {
+  const ghostty = { path: '/proc/4242/fd/1', env: { TERM_PROGRAM: 'ghostty' }, tmux: null };
+  const ledger = memoryLedger(stamp({ held: { ...directHeld('idle'), capability: GRAPHICS_CAPABILITY.STATIC } }, { seq: 1, owner: OWNER }));
+  const first = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), terminal: ghostty, ...section({ seq: 2, ledger }) });
+  assert.equal(first.result.lifecycle, 'create');
+  const second = await captureEmission({ prev: agentAt('working'), next: agentAt('needs-input'), intent: clipsIntent('needs-input'), terminal: ghostty, ...section({ seq: 3, ledger }) });
+  assert.equal(second.result.lifecycle, 'create');
+  assert.doesNotMatch(second.bytes.toString('latin1'), /a=a,|a=f,/);
+});
+
+test('inside tmux every APC is inside DCS passthrough and none is bare', async () => {
+  const { bytes } = await captureEmission({ terminal: TMUX_TERMINAL });
+  const text = bytes.toString('latin1');
+  assert.equal(bareApcs(text), 0, 'no bare APC');
+  assert.ok(text.split('\x1bPtmux;').length > 1);
+  // The presentation (tint) is NOT wrapped: tmux handles OSC itself.
+  assert.ok(text.includes(`\x1b]11;${COLOR.backdrop}\x1b\\`));
+});
+
+test('a refused tmux pane sends tint but no graphics, and leaves the evidence alone', async () => {
+  const ledger = memoryLedger(stamp({ held: { ...directHeld('idle'), transport: 'tmux:/dev/pts/16:9001:1758200000' } }, { seq: 1, owner: OWNER }));
+  const { bytes, result } = await captureEmission({
+    prev: agentAt('idle'), next: agentAt('working'),
+    terminal: { ...TMUX_TERMINAL, tmux: { ok: false, reason: 'no-client' } },
+    ...section({ seq: 2, ledger }),
+  });
+  assert.equal(result.kind, 'unchanged');
+  assert.doesNotMatch(bytes.toString('latin1'), /_G/);
+  assert.ok(bytes.toString('latin1').includes(`\x1b]11;`));
+  assert.deepEqual(ledger.entry.held, { ...directHeld('idle'), transport: 'tmux:/dev/pts/16:9001:1758200000' }, 'held preserved: nothing on that client changed');
+  assert.equal(ledger.entry.seq, 2);
+});
+
+test('three identical hooks after a create send zero graphics bytes and keep held byte-identical', async () => {
+  const ledger = memoryLedger();
+  await captureEmission({ ...section({ seq: 1, ledger }) });
+  const published = JSON.stringify(ledger.entry.held);
+  for (const seq of [2, 3, 4]) {
+    const { bytes, result } = await captureEmission({ prev: agentAt('working'), next: agentAt('working'), ...section({ seq, ledger }) });
+    assert.equal(result.kind, 'unchanged');
+    assert.equal(bytes.length, 0);
+    assert.equal(JSON.stringify(ledger.entry.held), published);
+    assert.equal(ledger.entry.seq, seq);
+  }
+});
+
+test('an older event arriving after a newer one is SUPERSEDED and writes nothing', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld('needs-input') }, { seq: 2, owner: OWNER }));
+  const { bytes, result, opens } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 1, ledger }) });
+  assert.equal(result.kind, 'superseded');
+  assert.equal(bytes.length, 0);
+  assert.deepEqual(opens, []);
+  assert.deepEqual(ledger.writes, []);
+});
+
+test('SessionEnd writes a tombstone with prev\'s identity, then the reset; a straggler meets the tombstone', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld() }, { seq: 2, owner: OWNER }));
+  const end = await captureEmission({ prev: agentAt('working'), next: null, intent: { identity: { project: 'api' }, pid: 4242, sessionId: 's1' }, ...section({ seq: 3, ledger }) });
+  assert.equal(end.result.kind, 'ended');
+  assert.deepEqual(ledger.entry, { seq: 3, pid: 4242, starttime: 987654, held: null, ended: true });
+  assert.ok(end.bytes.toString('latin1').includes('\x1b]111'), 'the reset went out');
+  const straggler = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
+  assert.equal(straggler.result.kind, 'superseded');
+  assert.equal(ledger.entry.ended, true);
+});
+
+test('the ownership gate withholds EVERY byte from a dead owner: graphics, tint, bell, reset', async () => {
+  const dead = { ownerAlive: () => false };
+  const shapes = [
+    ['graphical', {}],
+    ['NONE capability', { terminal: { path: '/proc/4242/fd/1', env: { TERM: 'dumb' }, tmux: null } }],
+    ['motion off', { intent: clipsIntent('working', 'off') }],
+    ['no sprite', { transmitSprite: false }],
+  ];
+  for (const [label, overrides] of shapes) {
+    const ledger = memoryLedger();
+    const { bytes, opens, result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('needs-input'), intent: clipsIntent('needs-input'), ...overrides, ...section({ seq: 2, ledger, ...dead }) });
+    assert.equal(result.kind, 'suppressed', label);
+    assert.equal(result.reason, 'owner-dead', label);
+    assert.equal(bytes.length, 0, label);
+    assert.deepEqual(opens, [], label);
+    assert.deepEqual(ledger.entry, { seq: 2, pid: 4242, starttime: 987654, held: null, ended: false }, `${label}: identity stamped, nothing held`);
+  }
+  const ledger = memoryLedger();
+  const end = await captureEmission({ prev: agentAt('working'), next: null, intent: { identity: { project: 'api' }, pid: 4242, sessionId: 's1' }, ...section({ seq: 3, ledger, ...dead }) });
+  assert.equal(end.result.kind, 'suppressed');
+  assert.equal(end.bytes.length, 0);
+  assert.equal(ledger.entry.ended, true, 'the tombstone is ordering evidence and is still written');
+});
+
+test('the first write under a new owner drops the old owner\'s evidence; the next graphical hook CREATES', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld('working') }, { seq: 5, owner: OWNER }));
+  const B = { pid: 5150, starttime: 111 };
+  const suppressedShapes = [
+    ['NONE capability', { terminal: { path: '/proc/5150/fd/1', env: { TERM: 'dumb' }, tmux: null } }],
+    ['tty gate', { checkTty: () => false }],
+  ];
+  for (const [label, overrides] of suppressedShapes) {
+    ledger.write(stamp({ held: directHeld('working') }, { seq: 5, owner: OWNER }));
+    const first = await captureEmission({ prev: agentAt('working'), next: agentAt('working', B), ...overrides, ...section({ seq: 6, ledger }) });
+    assert.notEqual(first.result.kind, 'transmitted', label);
+    assert.deepEqual([ledger.entry.pid, ledger.entry.starttime, ledger.entry.held], [5150, 111, null], `${label}: identity B, nothing inherited`);
+    const identical = await captureEmission({ prev: agentAt('working', B), next: agentAt('working', B), ...section({ seq: 7, ledger }) });
+    assert.equal(identical.result.kind, 'transmitted', `${label}: identical intent is not 'unchanged' under a new owner`);
+    assert.equal(identical.result.lifecycle, 'create');
+    const changed = await captureEmission({ prev: agentAt('working', B), next: agentAt('needs-input', B), intent: clipsIntent('needs-input'), ...section({ seq: 8, ledger }) });
+    assert.equal(changed.result.lifecycle, 'update', `${label}: after B's own create, B's evidence is valid`);
+  }
+});
+
+test('a first event that is suppressed or fails the tty gate still stamps its identity', async () => {
+  for (const overrides of [{ terminal: { path: '/proc/4242/fd/1', env: { TERM: 'dumb' }, tmux: null } }, { checkTty: () => false }, { open: () => { throw new Error('ENOENT'); } }]) {
+    const ledger = memoryLedger();
+    await captureEmission({ ...overrides, ...section({ seq: 1, ledger }) });
+    assert.deepEqual([ledger.entry.pid, ledger.entry.starttime, ledger.entry.seq], [4242, 987654, 1]);
+  }
+});
+
+test('renderTransition wraps a static pose only when the probe says tmux is ok', () => {
+  const plain = renderTransition({ prev: 'idle', next: 'working', intent: intentAt('working'), readSprite, capability: ANIMATION, tmux: null });
+  const wrapped = renderTransition({ prev: 'idle', next: 'working', intent: intentAt('working'), readSprite, capability: ANIMATION, tmux: TMUX_KITTY });
+  assert.ok(plain.includes(SPRITE));
+  assert.equal(bareApcs(wrapped), 0, 'SPRITE still occurs inside the doubled-ESC form; only an unpreceded ESC _ G is bare');
+  assert.ok(wrapped.includes('\x1bPtmux;\x1b\x1b_Ga=T'));
 });
