@@ -209,3 +209,34 @@ test('OLD budget (100 x 20ms = 2000ms) cannot outlast the same guard — pins th
     'a 2000ms budget against a 5000ms guard must still fail — this is the bug Finding 1 fixed'
   );
 });
+
+test('staleMs: Infinity never reclaims a live holder, however long the section runs', async () => {
+  const lockPath = join(dir(), 'transmit.lock');
+  let clock = 0;
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const first = withLock(lockPath, () => held, {
+    staleMs: Infinity, now: () => clock, isAlive: () => true,
+    sleep: async () => { clock += 5_000; },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  let entered = false;
+  const second = withLock(lockPath, async () => { entered = true; }, {
+    staleMs: Infinity, retries: 5, now: () => clock, isAlive: () => true,
+    sleep: async () => { clock += 5_000; },
+  });
+  await assert.rejects(second, /could not acquire lock/);
+  assert.equal(entered, false, 'a live holder is never displaced by age');
+  release();
+  await first;
+});
+
+test('a dead holder is reclaimed under staleMs: Infinity', async () => {
+  const lockPath = join(dir(), 'transmit.lock');
+  writeFileSync(lockPath, '4242:1:dead-token');
+  let entered = false;
+  await withLock(lockPath, async () => { entered = true; }, {
+    staleMs: Infinity, isAlive: () => false, sleep: async () => {},
+  });
+  assert.equal(entered, true);
+});

@@ -161,6 +161,11 @@ export function createProcessOps({
           && Number.isInteger(starttime)
           && startTimeOf(pid, { readStat: read }) === starttime;
       },
+      ownerAlive(pid, { starttime = null } = {}) {
+        return pidExists(pid)
+          && Number.isInteger(starttime)
+          && freshStartTimeOf(pid) === starttime;
+      },
     };
   }
 
@@ -230,6 +235,11 @@ export function createProcessOps({
           && Number.isInteger(starttime)
           && startTimeOf(pid) === starttime;
       },
+      ownerAlive(pid, { starttime = null } = {}) {
+        return pidExists(pid)
+          && Number.isInteger(starttime)
+          && freshStartTimeOf(pid) === starttime;
+      },
     };
   }
 
@@ -243,5 +253,6 @@ export const startTimeOf = (...args) => defaultProcessOps.startTimeOf(...args);
 export const freshRecordOf = (...args) => defaultProcessOps.freshRecordOf(...args);
 export const freshStartTimeOf = (...args) => defaultProcessOps.freshStartTimeOf(...args);
 export const isAlive = (...args) => defaultProcessOps.isAlive(...args);
+export const ownerAlive = (...args) => defaultProcessOps.ownerAlive(...args);
 export const lockHolderAlive = (...args) => defaultProcessOps.lockHolderAlive(...args);
 export const pidExists = (...args) => defaultProcessOps.pidExists(...args);

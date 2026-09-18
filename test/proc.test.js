@@ -376,3 +376,39 @@ test('a row too damaged to attribute to a pid is not mistaken for a live process
   assert.equal(ops.recordOf(10).comm, 'zsh');
   assert.equal(ops.recordOf(99), null);
 });
+
+test('Linux ownerAlive is fresh identity: pid alive but restarted is dead', () => {
+  let starttime = 100;
+  const ops = createProcessOps({
+    platform: 'linux',
+    readStat: (pid) => statLine({ pid, starttime }),
+    kill: () => {},
+  });
+  assert.equal(ops.ownerAlive(7, { starttime: 100 }), true);
+  starttime = 200;
+  assert.equal(ops.ownerAlive(7, { starttime: 100 }), false);
+  assert.equal(ops.ownerAlive(7, { starttime: null }), false);
+});
+
+const darwinRow = ({ pid, starttime }) => {
+  const date = new Date(starttime * 1000);
+  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${pid} 1 ?? ${weekdays[date.getDay()]} ${months[date.getMonth()]} ${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')} ${date.getFullYear()} /usr/bin/node`;
+};
+
+test('Darwin ownerAlive consults ps -p, not the memoized -axo snapshot', () => {
+  const old = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
+  let fresh = old;
+  const ops = createProcessOps({
+    platform: 'darwin',
+    kill: () => {},
+    runPs: (args) => args[0] === '-p'
+      ? darwinRow({ pid: 7, starttime: fresh })
+      : darwinRow({ pid: 7, starttime: old }),
+  });
+  assert.equal(ops.isAlive(7, { starttime: old }), true);
+  fresh += 1;
+  assert.equal(ops.isAlive(7, { starttime: old }), true, 'the snapshot-backed predicate is stale');
+  assert.equal(ops.ownerAlive(7, { starttime: old }), false);
+});
