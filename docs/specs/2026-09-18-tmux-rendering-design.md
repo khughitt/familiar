@@ -1,6 +1,6 @@
 # Rendering inside tmux
 
-**Status:** draft, revised twice under review (§8), awaiting review.
+**Status:** draft, revised three times under review (§8), awaiting review.
 **Date:** 2026-09-18
 **Task:** fam-fff8c9
 
@@ -71,16 +71,22 @@ One function, `tmuxFacts(env, { exec = execFileSync } = {})`, returns:
 - Otherwise a frozen record, never a throw:
 
       { ok: true,  passthrough: 'off' | 'on' | 'all',
-        termname: string, termtype: string, clientTty: string }
+        termname: string, termtype: string,
+        client: { tty: string, pid: number, created: number } }
       { ok: false, reason: 'no-binary' | 'timeout' | 'exit' | 'no-pane' | 'no-client' }
 
 The probe runs `tmux -S <socket> display-message -p -t <pane> '<format>'` with
 the socket from the first comma-separated field of `$TMUX`, the pane from
 `$TMUX_PANE`, and a format joining `#{allow-passthrough}`, `#{client_termname}`,
-`#{client_termtype}` and `#{client_tty}` with tabs. `clientTty` identifies *which*
-outer terminal is attached; §3.5 keys the transmission ledger on it, because
-the same `xterm-kitty` name from a different Kitty window is a terminal that
-holds no image. A missing
+`#{client_termtype}`, `#{client_tty}`, `#{client_pid}` and `#{client_created}`
+with tabs. The three `client` fields together identify *which* outer terminal
+incarnation is attached, and §3.5 keys the transmission ledger on all three: the
+same `xterm-kitty` name from a different Kitty window is a terminal that holds
+no image, and the tty pathname alone is not enough — review allocated two
+successive ptys and both were `/dev/pts/16`, so a closed and reopened Kitty can
+present the same path with an empty image store. `client_pid` is the attaching
+`tmux` client process, new per attach, and `client_created` guards that pid
+against reuse. A missing
 `$TMUX_PANE` is `no-pane`; empty `termname` is `no-client` (a detached server has
 nothing to draw on). `ENOENT` is `no-binary`, the timeout is `timeout`, and any
 other failure is `exit`. The timeout constant is `TMUX_PROBE_TIMEOUT_MS = 1000`,
@@ -180,14 +186,26 @@ ledger records the latter, and the rules below make it impossible for the
 ledger and the terminal to disagree in a direction that skips a render.
 
 **Sequence.** The bus transaction, under the bus lock, stamps every event it
-processes for a session with `seq = (prev?.seq ?? 0) + 1`, stored on the agent
-record and returned to the hook — for SessionEnd too, whose `next` is `null` but
-whose `seq` is real. Commit order is therefore total per session, and every
-later decision is "which event is newer", never "which hook ran first".
+processes with the next value of one counter for the whole bus,
+`stateDir/events.seq`, read and rewritten atomically inside the locked section
+and returned to the hook — for SessionEnd too, whose `next` is `null` but whose
+`seq` is real. The counter is deliberately not derived from the agent record:
+eviction (`commit()` evicts and later readmits live sessions) and SessionEnd
+followed by a resume both remove the record while the ledger below survives,
+and a restarted per-session counter would sit below the ledger's `seq` and
+suppress every event until it caught up. A bus-wide counter is never removed,
+and because it is monotonic across all sessions, comparing two events of one
+session by it is still "which is newer". If the counter file is missing (a
+wiped state directory with ledgers left behind, or first run), the transaction
+seeds it from the highest `seq` found in `stateDir/transmit/*.json`, else `0`,
+so a ledger can never outrank the counter. The agent record also carries the
+`seq` of its latest event, for diagnostics only. Commit order is therefore
+total, and every later decision is "which event is newer", never "which hook
+ran first".
 
 **Per-session critical section.** The hook, after the transaction returns and
 after the tmux probe (a spawn, so outside every lock), acquires
-`stateDir/transmit/<sessionId>.lock` with the existing `withLock` and holds it
+`stateDir/transmit/<name>.lock` with the existing `withLock` and holds it
 across the whole of: read the ledger, decide, write the terminal, publish. The
 bus lock is never held at the same time (the transaction has returned), so the
 two cannot deadlock, and sessions do not wait on each other's pty writes. This
@@ -195,7 +213,29 @@ also ends an existing defect: two hooks of one session writing the same pty
 concurrently interleave their escape bytes today. `emit()` becomes async for the
 lock; `emitHookTransition` and `main` already are.
 
-**Ledger entry.** One file per session, `stateDir/transmit/<sessionId>.json`,
+The lock is taken with `staleMs: Infinity`. `withLock`'s default reclaims a lock
+whose mtime is ten seconds old *even when the holder is alive* — sized for the
+bus transaction's few hundred `stat()`s, and wrong for a section that contains a
+pty write of up to 8 MiB to a terminal that may be slow to drain. Review
+reproduced a second holder entering while the first was still inside. Dead-holder
+recovery (`isAlive` on the token's pid and starttime) stays, so a hook killed
+mid-write releases the section. The retry budget is sized to wait 30 seconds
+(`retries: 1500` at the default 20 ms), inside Claude Code's 60-second hook
+budget; a waiter that exhausts it throws, the transaction having already
+committed, and the next event repairs the terminal — the design is
+level-triggered, so a lost render costs one transition, never a wrong state.
+
+`<name>` is `ledgerName(sessionId)`: the id with every character outside
+`[A-Za-z0-9_-]` replaced by `_`, truncated to 40 characters, then `-` and the
+first 16 hex digits of the id's SHA-256. `parsePayload` accepts any non-empty
+string as a session id, so `../agents` is a valid id today and would resolve a
+naive `stateDir/transmit/<sessionId>.json` to `stateDir/agents.json` — a hook
+overwriting the bus. The sanitised prefix keeps the file readable to a person;
+the hash keeps distinct ids distinct after sanitising; and the function asserts
+its result contains no path separator and resolves inside `transmit/`. Both the
+ledger file and the lock file use it.
+
+**Ledger entry.** One file per session, `stateDir/transmit/<name>.json`,
 written with `writeJsonAtomic`:
 
     { seq, pid, starttime,
@@ -207,7 +247,8 @@ is what the terminal holds, or `null` when nothing is known to be held.
 `ended` is the SessionEnd tombstone. A missing file is `{ seq: 0, held: null }`.
 
 **Protocol**, for an event with sequence `S`, agent `next` (or `null`), and the
-transport `T` the probe implies (`direct`, or `tmux:<clientTty>`):
+transport `T` the probe implies (`direct`, or
+`tmux:<client.tty>:<client.pid>:<client.created>`):
 
 1. Read the entry `E`. If `E.seq >= S`, return `superseded` and touch nothing:
    a newer event already owns the terminal, whether it ran before this hook
@@ -216,12 +257,17 @@ transport `T` the probe implies (`direct`, or `tmux:<clientTty>`):
    `oscReset()` to the terminal. The reset needs no evidence; if it fails the
    tombstone is already down, which is the correct state. Return `ended`.
 3. Decide graphics. Evidence is valid when `E.held` is not `null`,
-   `E.pid`/`E.starttime` equal `next`'s, and `E.held.transport === T`; then
-   `lifecycle` is `update`, otherwise `create`. A graphical transmission is
-   needed when the capability is not `NONE`, motion policy is not `off`, and
-   either the evidence is invalid or `E.held.intent` differs from the current
-   intent in the fields `emit()` compares today. Presentation bytes (tint, bell)
-   are computed exactly as now.
+   `E.pid`/`E.starttime` equal `next`'s, and `E.held.transport === T`.
+   `lifecycle` is `update` only when the evidence is valid **and** the
+   capability is `ANIMATION`; it is `create` otherwise, including for every
+   `STATIC` transition with valid evidence. That preserves the rule the current
+   `emit()` encodes: the update encoder emits animation and frame-composition
+   commands, which a static-only terminal such as Ghostty does not accept, so
+   Ghostty always receives a fresh `create`. A graphical transmission is needed
+   when the capability is not `NONE`, motion policy is not `off`, and either the
+   evidence is invalid or `E.held.intent` differs from the current intent in the
+   fields `emit()` compares today. Presentation bytes (tint, bell) are computed
+   exactly as now.
 4. No graphics needed: write `{ ...E, seq: S }` — `held` is preserved, this is
    the **unchanged** case, and three identical hooks in a row leave `held`
    intact and send zero graphics bytes — then write the presentation bytes, if
@@ -259,8 +305,9 @@ one section that touches the terminal.
 
 This closes the reproduced failure by construction: a suppressed emission
 leaves `held` untouched but never claims a transmission that did not happen,
-and a fresh Kitty window changes `clientTty`, so the transport differs and the
-next transition is a `create`. It also closes a latent pre-existing case
+and a fresh Kitty window — or a closed and reopened one on the same pty path —
+changes the client incarnation, so the transport differs and the next
+transition is a `create`. It also closes a latent pre-existing case
 outside tmux — an unreadable `/proc/<pid>/environ` on one hook followed by a
 readable one — that could already send `update` first.
 
@@ -358,6 +405,21 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   - Real lock: two `emit()` calls for one session started concurrently in one
     process against the real `withLock` on a temporary state dir both complete,
     and the ledger and the fake terminal agree.
+  - Long write: with an injected clock advanced past ten seconds while the first
+    holder is alive inside the section, a second acquirer does not enter
+    (`staleMs: Infinity`); with `isAlive` reporting the holder dead, it does.
+  - Static terminal: two successive transitions under `STATIC` with a populated,
+    valid ledger entry both encode `create`; the same two under `ANIMATION`
+    encode `create` then `update`.
+  - Pathname reuse: `held.transport` is `tmux:/dev/pts/16:4242:1758200000` and
+    the probe now reports `/dev/pts/16` with a different `client.pid` → `create`;
+    identical three fields → `update`.
+- `test/transmit-ledger.test.js` (or beside the ledger module): `ledgerName`
+  on `../agents`, `/etc/passwd`, an id with a `\0`, a 300-character id, and two
+  ids differing only in a character the sanitiser replaces: every result is a
+  single path component inside `transmit/`, the two near-duplicates differ, and
+  the traversal ids never resolve to `agents.json`, `intent.json`, or anything
+  outside `transmit/`.
 - `test/kitty.test.js` (transmitter): `frame` wraps every APC and the trailing
   newlines stay outside the framing.
 - `test/bin-familiar.test.js`: the spawned CLI under a fake `tmux` placed first
@@ -365,10 +427,13 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   `preview` emits one wrapped APC group per state and no bare APC; with `on`,
   `theme show` prints the reason on stderr and no APC. This is the CLI-side
   proof that a classifier change did not open a bare-APC path.
-- Transaction: `seq` is `1` for a first record, increments per event under the
-  bus lock, and is returned for SessionEnd. Reap and the prune pass remove a
-  ledger file whose session is gone and whose pid is dead, and leave one whose
-  agent is alive.
+- Transaction: `seq` comes from `events.seq`, increments per event under the
+  bus lock across sessions, and is returned for SessionEnd. Eviction followed by
+  readmission of the same session, and SessionEnd followed by a resume, both
+  continue above the ledger's `seq` and are not `superseded`. A missing counter
+  with ledgers present is seeded above their highest `seq`. Reap and the prune
+  pass remove a ledger file whose session is gone and whose pid is dead, and
+  leave one whose agent is alive.
 - `test/tmux-pty.slow.test.js`: a real tmux server on a temporary socket
   (`-f /dev/null`, `allow-passthrough all`), attached through a pty provider
   (`script`), a pane running a command that copies a fifo to its stdout. Three
@@ -415,6 +480,13 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
 - **Wall-clock ordering (`updatedAt`) instead of `seq`.** Two hooks committed
   within the same millisecond are unordered; a counter under the bus lock is
   not.
+- **A per-session counter on the agent record.** Review found it restarts at
+  `1` after eviction or SessionEnd while the ledger keeps counting; a hundred
+  events would be suppressed. The bus-wide counter survives record removal.
+- **The default `withLock` staleness.** Reclaims a live holder after ten
+  seconds; a pty write can take longer. `staleMs: Infinity` with dead-holder
+  recovery is the existing option built for exactly this.
+- **The raw session id as a filename.** `parsePayload` accepts `../agents`.
 
 ## 7. Known limits (documented, not fixed here)
 
@@ -444,6 +516,12 @@ Nothing in this change can strand bytes on the agent's terminal or block a hook:
   the CLI transmitter (§3.4) since the verbs bypass the encoder; added the slow
   partition's entry points (§3.6); corrected the wrapping overhead from "<1.01×"
   to `11 × commands` (§3.3) against a measured 3,911 → 5,352 bytes.
+- 2026-09-18, review 3: the sequence is a bus-wide counter that survives
+  eviction and SessionEnd; the transmission lock disables age-based
+  reclamation; `update` requires `ANIMATION` capability, preserving the Ghostty
+  rule; the transport identity carries `client_pid` and `client_created`, not
+  the tty path alone; ledger and lock filenames go through `ledgerName`, which
+  cannot escape `transmit/`.
 - 2026-09-18, review 2: rewrote §3.5. The ledger's publication moved into one
   per-session critical section with the terminal write, ordered by a `seq` the
   bus transaction assigns; evidence is nulled by a write-ahead before the first
