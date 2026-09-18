@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { tmuxFacts } from './tmux.js';
 
 function envOf(pid, read) {
   const raw = read(`/proc/${pid}/environ`, 'utf8');
@@ -13,18 +14,19 @@ export function terminalTarget(pid, {
   record,
   hookEnv = process.env,
   readEnviron = readFileSync,
+  probe = tmuxFacts,
 } = {}) {
   if (platform === 'linux') {
     let env;
     try { env = envOf(pid, readEnviron); }
     catch { /* tint and bell do not need graphics capability */ }
-    return { path: `/proc/${pid}/fd/1`, env };
+    return { path: `/proc/${pid}/fd/1`, env, tmux: env === undefined ? undefined : probe(env) };
   }
   if (platform === 'darwin') {
     if (!record || typeof record.tty !== 'string' || !/^ttys[0-9a-f]+$/i.test(record.tty)) {
       throw new Error(`terminal target: agent pid ${pid} has no validated Darwin tty`);
     }
-    return { path: `/dev/${record.tty}`, env: hookEnv };
+    return { path: `/dev/${record.tty}`, env: hookEnv, tmux: probe(hookEnv) };
   }
   throw new Error(`terminal target: unsupported platform ${JSON.stringify(platform)}`);
 }
