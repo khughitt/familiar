@@ -1,0 +1,4 @@
+#!/bin/sh
+# A tmux that answers display-message with whatever FAKE_TMUX_LINE holds. The CLI probe
+# spawns `tmux` by PATH lookup, so putting this directory first on PATH is enough.
+printf '%s\n' "${FAKE_TMUX_LINE:?}"

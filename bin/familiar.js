@@ -27,7 +27,7 @@ import { loadIdentities } from '../src/bus/pins.js';
 import { displayedIntent } from '../src/protocol/intent.js';
 import { emit } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
-import { tmuxFacts } from '../src/render/term/tmux.js';
+import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js';
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
 import { composeForIntent, textLines } from '../src/render/term/statusline.js';
@@ -1044,7 +1044,9 @@ async function main({ command, args: rest }) {
     const member = memberOrThrow(pack, memberId);
     const assets = assetsFor(pack, memberId, mode);
 
-    const capability = graphicsCapability(process.env);
+    const tmux = tmuxFacts(process.env);
+    const capability = graphicsCapability(process.env, tmux);
+    const frame = tmux?.ok ? wrapForTmux : (command) => command;
     const graphical = process.stdout.isTTY === true && (
       capability === GRAPHICS_CAPABILITY.ANIMATION ||
       capability === GRAPHICS_CAPABILITY.STATIC
@@ -1063,7 +1065,7 @@ async function main({ command, args: rest }) {
       // count, carried onto every state's asset as assets[state].rows. A preview that
       // renders at a different height than the live terminal is not a preview.
       if (graphical) {
-        process.stdout.write(transmit(readFileSync(assets[state].terminal), { rows: assets[state].rows }));
+        process.stdout.write(transmit(readFileSync(assets[state].terminal), { rows: assets[state].rows, frame }));
       }
       process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
     }
@@ -1158,22 +1160,24 @@ async function main({ command, args: rest }) {
     const ctxTone = await loadTone({ paths });
     const { mode } = ctxTone;
     const interactive = process.stdout.isTTY === true;
-    const capability = graphicsCapability(process.env);
+    const tmux = tmuxFacts(process.env);
+    const capability = graphicsCapability(process.env, tmux);
+    const frame = tmux?.ok ? wrapForTmux : (command) => command;
     const graphical = interactive && (
       capability === GRAPHICS_CAPABILITY.ANIMATION ||
       capability === GRAPHICS_CAPABILITY.STATIC
     );
 
     // THIS VERB'S ENTIRE VALUE IS THE ART — README says `familiar theme show` renders
-    // the twelve slots WITH their art. Without graphics (a plain TERM, or any
-    // tmux session — graphicsCapability returns NONE for both) it silently
+    // the twelve slots WITH their art. Without graphics (a plain TERM, or a
+    // tmux pane the probe refuses — and for tmux it says which setting) it silently
     // degrades to a bare slot listing. `preview` stays quiet about this on
     // purpose (test/bin-familiar.test.js pins that); `theme` does not, because
     // a human judging whether twelve familiars cohere as a set needs to know
     // they are looking at labels, not the set.
     if (interactive && !graphical) {
       process.stderr.write(
-        `familiar: no graphics capability (${capability}) — showing labels only, no art\n`
+        `familiar: no graphics capability (${capability})${describeTmux(tmux)} — showing labels only, no art\n`
       );
     }
 
@@ -1230,7 +1234,7 @@ async function main({ command, args: rest }) {
           // with exactly `rows` newlines, so consecutive images always stack
           // vertically. Twelve side by side would need a placement-capable
           // emitter that does not exist — see the spec's §1.2 and §9.
-          rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows });
+          rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows, frame });
         }
       } catch (error) {
         fault = error.message;
@@ -1328,7 +1332,9 @@ async function main({ command, args: rest }) {
     }
 
     const interactive = process.stdout.isTTY === true;
-    const capability = graphicsCapability(process.env);
+    const tmux = tmuxFacts(process.env);
+    const capability = graphicsCapability(process.env, tmux);
+    const frame = tmux?.ok ? wrapForTmux : (command) => command;
     const graphical = interactive && (
       capability === GRAPHICS_CAPABILITY.ANIMATION ||
       capability === GRAPHICS_CAPABILITY.STATIC
@@ -1337,7 +1343,7 @@ async function main({ command, args: rest }) {
     const captions = sheetRowCaptions(boxed, ctxTone);
     for (const [index, row] of boxed.entries()) {
       if (graphical) {
-        process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows }));
+        process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows, frame }));
       }
       // Caption UNDER the art, same constant-box reason as `theme` — see the note there.
       process.stdout.write(captions[index]);

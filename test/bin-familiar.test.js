@@ -33,6 +33,14 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
 const runTty = (args, options) => spawnSync(process.execPath, [ttyBin, ...args], options);
 const themeFixture = fileURLToPath(new URL('../test/fixtures/theme-pack', import.meta.url));
+const fakeTmuxDir = fileURLToPath(new URL('fixtures/fake-tmux', import.meta.url));
+const tmuxEnv = (line, over = {}) => env({
+  TERM: 'tmux-256color', TMUX: '/tmp/fake,1,0', TMUX_PANE: '%0',
+  PATH: `${fakeTmuxDir}:${process.env.PATH}`, FAKE_TMUX_LINE: line, ...over,
+});
+const KITTY_LINE = 'all\txterm-kitty\tkitty(0.48.2)\t/dev/pts/16\t9001\t1758200000';
+const BARE_APC = /(?<!\x1b)\x1b_G/g;
+const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 
 // The engine ships no art: FAMILIAR_THEMES_DIR (src/bus/paths.js) redirects
 // the SHIPPED themes root away from the repo's own themes/ (absent
@@ -538,6 +546,25 @@ test('preview emits a graphics escape per state when the terminal supports it', 
     Object.fromEntries(STATES.map((s, i) => [s, heights[i]])),
     Object.fromEntries(STATES.map((s) => [s, theme.rows])),
   );
+});
+
+test('preview inside a passthrough-all tmux pane emits only WRAPPED graphics, never bare APC', () => {
+  const e = tmuxEnv(KITTY_LINE);
+  assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e }).status, 0);
+  const result = runTty(['theme', 'preview', 'pip', '--state', 'idle'], { encoding: 'latin1', env: e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(bareApcs(result.stdout), 0, 'no bare APC');
+  assert.ok(result.stdout.includes('\x1bPtmux;\x1b\x1b_Ga=T'), 'the transmission is framed');
+  assert.match(result.stdout, /\x1b\\\n/, 'layout newlines follow the closed DCS');
+});
+
+test('theme show inside tmux with allow-passthrough=on prints the setting and no art', () => {
+  const e = tmuxEnv(KITTY_LINE.replace(/^all/, 'on'));
+  assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e }).status, 0);
+  const result = runTty(['theme', 'show'], { encoding: 'utf8', env: e });
+  assert.equal(result.status, 0);
+  assert.match(result.stderr, /no graphics capability \(none\) — tmux allow-passthrough=on, needs all/);
+  assert.doesNotMatch(result.stdout, /_G/);
 });
 
 // The negative half, and it is the one that makes the positive half mean anything: a
