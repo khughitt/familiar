@@ -7,10 +7,11 @@ size: m
 complexity: mid
 process: planned
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T11:11:01Z
+updated: 2026-09-18T11:15:48Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
+spec: docs/specs/2026-09-18-tmux-rendering-design.md
 ---
 
 ## Why
@@ -95,3 +96,6 @@ limits, not in this change.
 ## Notes
 
 - 2026-09-18T11:11:01Z (main): scope: scoped; todo p2 size m complexity mid process planned — investigation is complete and bounded to blocker 1, but the probe design (effectful tmux query feeding a pure classifier), wrap placement vs ENCODED_BYTES_MAX, and on-vs-all acceptance need a reviewed spec
+- 2026-09-18T11:15:48Z (tmux-render): Design spec drafted at docs/specs/2026-09-18-tmux-rendering-design.md (commit 8faddc9 on branch tmux-render, worktree .worktrees/tmux-render); follow-ups fam-70271a (upstream tmux bug) and fam-9a7a69 (FORCE_COLOR=3) filed as ideas
+- 2026-09-18T11:15:48Z (tmux-render): parked (waiting on user, review): Review the design spec; on approval run writing-plans against it in .worktrees/tmux-render
+  provenance: {"harness_session":"claude-code:4034d5b3-2c73-46fd-a1e9-7e05d71a212d","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
