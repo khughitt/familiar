@@ -16,7 +16,6 @@ test('classifies terminal graphics capability explicitly', () => {
     [{ TERM_PROGRAM: 'ghostty', KITTY_WINDOW_ID: '12' }, 'static-graphics'],
     [{ GHOSTTY_RESOURCES_DIR: '/x' }, 'static-graphics'],
     [{ GHOSTTY_BIN_DIR: '/x' }, 'static-graphics'],
-    [{ TERM: 'xterm-kitty', TMUX: '/tmp/tmux' }, 'none'],
     [{ TERM: 'screen-256color', KITTY_WINDOW_ID: '12' }, 'none'],
     [{ TERM: 'xterm-256color' }, 'none'],
   ]) assert.equal(graphicsCapability(env), expected);
@@ -54,17 +53,42 @@ test('every GRAPHICS_MARKER actually enables graphics, one at a time', () => {
   }
 });
 
-test('every MULTIPLEXER_MARKER rejects, even beside every accept condition at once', () => {
-  // Not one marker against an empty env — one marker against EVERY positive signal
-  // simultaneously. That is the real shape of the bug: tmux inherits the outer
-  // terminal's whole environment, so a multiplexer arrives carrying all of these.
+test('a multiplexer marker demands the probe result; without one it throws rather than guessing', () => {
   const everyAccept = Object.fromEntries(GRAPHICS_MARKERS.map(({ name, value }) => [name, value ?? '1']));
   for (const name of MULTIPLEXER_MARKERS) {
-    assert.equal(
-      graphicsCapability({ ...everyAccept, [name]: '/tmp/sock,1,0' }), GRAPHICS_CAPABILITY.NONE,
-      `${name} is in MULTIPLEXER_MARKERS but does not reject — it accepted before it rejected`,
-    );
+    const env = { ...everyAccept, [name]: '/tmp/sock,1,0' };
+    assert.throws(() => graphicsCapability(env), TypeError, `${name} set, no probe: must throw`);
+    assert.throws(() => graphicsCapability(env, null), TypeError, `${name} set, null probe: must throw`);
   }
+});
+
+const KITTY_CLIENT = Object.freeze({
+  ok: true, passthrough: 'all', termname: 'xterm-kitty', termtype: 'kitty(0.48.2)',
+  client: { tty: '/dev/pts/16', pid: 9001, created: 1758200000 },
+});
+const TMUX_ENV = { TERM: 'tmux-256color', TMUX: '/tmp/sock,1,0', TMUX_PANE: '%0' };
+
+test('inside tmux, only allow-passthrough=all with a graphics-capable client renders', () => {
+  assert.equal(graphicsCapability(TMUX_ENV, KITTY_CLIENT), GRAPHICS_CAPABILITY.ANIMATION);
+  assert.equal(graphicsCapability(TMUX_ENV, { ...KITTY_CLIENT, termname: 'xterm-ghostty', termtype: 'ghostty 1.3.1' }), GRAPHICS_CAPABILITY.STATIC);
+  assert.equal(graphicsCapability(TMUX_ENV, { ...KITTY_CLIENT, termname: 'xterm-256color', termtype: 'foot(1.0)' }), GRAPHICS_CAPABILITY.NONE);
+  // `on` drops passthrough while the pane is invisible; a level-triggered cat would go stale.
+  assert.equal(graphicsCapability(TMUX_ENV, { ...KITTY_CLIENT, passthrough: 'on' }), GRAPHICS_CAPABILITY.NONE);
+  assert.equal(graphicsCapability(TMUX_ENV, { ...KITTY_CLIENT, passthrough: 'off' }), GRAPHICS_CAPABILITY.NONE);
+  for (const reason of ['no-binary', 'timeout', 'exit', 'no-pane', 'no-client']) {
+    assert.equal(graphicsCapability(TMUX_ENV, { ok: false, reason }), GRAPHICS_CAPABILITY.NONE, reason);
+  }
+});
+
+test('inside tmux the inherited environment loses to the attached client', () => {
+  const inherited = { ...TMUX_ENV, KITTY_WINDOW_ID: '1' };
+  assert.equal(graphicsCapability(inherited, { ...KITTY_CLIENT, termname: 'xterm-256color', termtype: '' }), GRAPHICS_CAPABILITY.NONE);
+});
+
+test('outside tmux the probe result is ignored and the TERM-prefix refusal still stands', () => {
+  assert.equal(graphicsCapability({ TERM: 'xterm-kitty' }, null), GRAPHICS_CAPABILITY.ANIMATION);
+  assert.equal(graphicsCapability({ TERM: 'tmux-256color' }, null), GRAPHICS_CAPABILITY.NONE);
+  assert.equal(graphicsCapability({ TERM: 'screen-256color', KITTY_WINDOW_ID: '1' }, null), GRAPHICS_CAPABILITY.NONE);
 });
 
 // transmit() never decodes its argument -- kitty's f=100 takes PNG BYTES, so these

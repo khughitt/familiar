@@ -295,8 +295,8 @@ test('familiar theme list reports a user theme that shadows a shipped one', () =
 // sets status to null. Every GRAPHICAL call below needs the same raise.
 const THEME_MAX_BUFFER = 64 * 1024 * 1024;
 
-// FIX 2: graphicsCapability returns NONE for a plain TERM and for any tmux
-// session (src/render/term/capability.js). The verb's entire value is the
+// FIX 2: graphicsCapability returns NONE for a plain TERM and for a tmux pane
+// whose probe refuses (src/render/term/capability.js). The verb's entire value is the
 // art, so a human looking at a bare slot listing in tmux needs to be told
 // that is not the full view — one stderr line naming the capability.
 test('familiar theme show without graphics names the capability on stderr', () => {
