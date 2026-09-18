@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, writeFileSync, readFileSync, openSync, closeSync, writeSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +21,17 @@ const APC = '\x1b_Ga=T,f=100,q=2,r=2,C=1,m=0;AAAA\x1b\\';
 const WRAPPED_APC = '\x1b_Ga=T,f=100,q=2,r=2,C=1,m=0;BBBB\x1b\\';
 const bareApcs = (text) => (text.match(/(?<!\x1b)\x1b_G/g) ?? []).length;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const CAPTURE_DONE = 'FAMILIAR_CAPTURE_DONE';
+
+async function captureThroughMarker(readClient) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const seen = readClient();
+    if (seen.includes(CAPTURE_DONE)) return seen;
+    await sleep(50);
+  }
+  assert.fail(`client did not receive ${CAPTURE_DONE} within 10 s`);
+}
 
 async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
   const dir = mkdtempSync(join(tmpdir(), 'tmux-pty-'));
@@ -35,6 +47,8 @@ async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
   const client = process.platform === 'darwin'
     ? spawn('script', ['-q', log, 'tmux', '-S', sock, 'attach'], { env: clientEnv, stdio: 'ignore' })
     : spawn('script', ['-qfc', `tmux -S ${sock} attach`, log], { env: clientEnv, stdio: 'ignore' });
+  const closed = once(client, 'close');
+  closed.catch(() => {}); // Observe errors now; cleanup awaits and propagates them below.
   try {
     let attached = false;
     for (let i = 0; i < 50 && !attached; i += 1) {
@@ -47,6 +61,7 @@ async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
   } finally {
     spawnSync('tmux', ['-S', sock, 'kill-server']);
     client.kill();
+    await closed;
   }
 }
 
@@ -57,19 +72,20 @@ for (const [passthrough, wrappedForwarded] of [['all', true], ['off', false]]) {
     assert.equal(spawnSync('mkfifo', [fifo]).status, 0);
     await withServer({ passthrough, paneCommand: `cat ${fifo}` }, async ({ readClient }) => {
       const fd = openSync(fifo, 'w');
-      writeSync(fd, 'BARE>');
-      writeSync(fd, APC);
-      writeSync(fd, '<WRAPPED>');
-      writeSync(fd, wrapForTmux(WRAPPED_APC));
-      writeSync(fd, '<END\n');
-      closeSync(fd);
-      await sleep(500);
-      const seen = readClient();
-      assert.ok(seen.includes('END'), 'the pane text was redrawn to the client');
-      assert.equal(seen.includes(APC), false, 'the bare command is dropped');
-      assert.equal(seen.includes(WRAPPED_APC), wrappedForwarded, 'the wrapped command reaches the client only with passthrough all');
-      assert.equal(bareApcs(seen), wrappedForwarded ? 1 : 0, `${passthrough}: forwarded APC count`);
-      assert.equal(seen.includes('\x1bPtmux;'), false, 'the client never sees the DCS framing itself');
+      try {
+        writeSync(fd, 'BARE>');
+        writeSync(fd, APC);
+        writeSync(fd, '<WRAPPED>');
+        writeSync(fd, wrapForTmux(WRAPPED_APC));
+        writeSync(fd, `\n${CAPTURE_DONE}\n`);
+        const seen = await captureThroughMarker(readClient);
+        assert.equal(seen.includes(APC), false, 'the bare command is dropped');
+        assert.equal(seen.includes(WRAPPED_APC), wrappedForwarded, 'the wrapped command reaches the client only with passthrough all');
+        assert.equal(bareApcs(seen), wrappedForwarded ? 1 : 0, `${passthrough}: forwarded APC count`);
+        assert.equal(seen.includes('\x1bPtmux;'), false, 'the client never sees the DCS framing itself');
+      } finally {
+        closeSync(fd);
+      }
     });
   });
 }
@@ -83,12 +99,13 @@ test('familiar theme preview inside a passthrough-all pane paints the client', {
   const paneEnv = { FAMILIAR_STATE_DIR: state, FAMILIAR_CONFIG_DIR: config, FAMILIAR_THEMES_DIR: themes };
   assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { env: { ...process.env, ...paneEnv } }).status, 0);
   // Wait for attachment: a detached server has no client to forward preview's bytes to.
-  const paneCommand = `sh -c 'while [ ! -e ${go} ]; do sleep 0.1; done; ${process.execPath} ${bin} theme preview pip --state idle; sleep 2'`;
+  const paneCommand = `sh -c 'while [ ! -e ${go} ]; do sleep 0.1; done; ${process.execPath} ${bin} theme preview pip --state idle && printf "\\n${CAPTURE_DONE}\\n"; while :; do sleep 1; done'`;
   await withServer({ passthrough: 'all', paneEnv, paneCommand }, async ({ readClient }) => {
     writeFileSync(go, '');
-    await sleep(2000);
-    const seen = readClient();
-    assert.ok(bareApcs(seen) > 0, `the sprite reached the client unframed:\n${JSON.stringify(seen.slice(0, 200))}`);
+    const seen = await captureThroughMarker(readClient);
+    const png = readFileSync(join(themes, 'cats', 'sprites', 'pip', 'idle.png'));
+    const completeImage = `\x1b_Ga=T,f=100,q=2,r=4,C=1,m=0;${png.toString('base64')}\x1b\\`;
+    assert.ok(seen.includes(completeImage), 'the complete fixture image and APC terminator reached the client');
     assert.equal(seen.includes('\x1bPtmux;'), false);
   });
 });
