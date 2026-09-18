@@ -21,3 +21,9 @@ test('FAMILIAR_THEMES_DIR overrides the shipped themes root, like its siblings',
   const { themesDir } = paths({ FAMILIAR_THEMES_DIR: '/fixture/themes' });
   assert.equal(themesDir, '/fixture/themes');
 });
+
+test('the transmission ledger and the event counter live under the state dir', () => {
+  const p = paths({ HOME: '/h', FAMILIAR_STATE_DIR: '/s' });
+  assert.equal(p.transmitDir, '/s/transmit');
+  assert.equal(p.seqPath, '/s/events.seq');
+});

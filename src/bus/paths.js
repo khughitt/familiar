@@ -23,5 +23,9 @@ export function paths(env = process.env) {
     agentsPath: join(stateDir, 'agents.json'),
     lockPath: join(stateDir, 'agents.lock'),
     intentPath: join(stateDir, 'intent.json'),
+    // The transmission ledger (spec §3.5): one entry and one lock per session, named by
+    // ledgerName() so a session id can never be a path. And the bus-wide event counter.
+    transmitDir: join(stateDir, 'transmit'),
+    seqPath: join(stateDir, 'events.seq'),
   };
 }
