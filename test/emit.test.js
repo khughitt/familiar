@@ -556,7 +556,7 @@ test('a tty fd receives the complete update and presentation bytes, then is clos
 test('no transition leaves the terminal fd unopened', async () => {
   let opened = false;
   const result = await emit({
-    ...section({ seq: 2, ledger: memoryLedger(stamp({ held: { ...directHeld(), intent: { ...directHeld().intent, animation: { kind: 'static' } } } }, { seq: 1, owner: OWNER })) }),
+    ...section({ seq: 2, ledger: memoryLedger(stamp({ presented: 'working', held: { ...directHeld(), intent: { ...directHeld().intent, animation: { kind: 'static' } } } }, { seq: 1, owner: OWNER })) }),
     prev: agentAt('working'), next: agentAt('working'), intent: intentAt('working'),
     readSprite, terminal: KITTY_TERMINAL,
     open: () => { opened = true; return 7; },
@@ -939,7 +939,7 @@ test('SessionEnd writes a tombstone with prev\'s identity, then the reset; a str
     },
   });
   assert.equal(end.result.kind, 'ended');
-  assert.deepEqual(ledger.entry, { seq: 3, pid: 4242, starttime: 987654, held: null, ended: true });
+  assert.deepEqual(ledger.entry, { seq: 3, pid: 4242, starttime: 987654, held: null, presented: null, ended: true });
   assert.deepEqual(trace, ['tombstone', '\x1b]111\x1b\\\x1b]112\x1b\\']);
   const straggler = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
   assert.equal(straggler.result.kind, 'superseded');
@@ -964,7 +964,7 @@ test('the ownership gate withholds EVERY byte from a dead owner: graphics, tint,
     assert.equal(result.reason, 'owner-dead', label);
     assert.equal(bytes.length, 0, label);
     assert.deepEqual(opens, [], label);
-    assert.deepEqual(ledger.entry, { seq: 2, pid: 4242, starttime: 987654, held: null, ended: false }, `${label}: identity stamped, nothing held`);
+    assert.deepEqual(ledger.entry, { seq: 2, pid: 4242, starttime: 987654, held: null, presented: null, ended: false }, `${label}: identity stamped, nothing held`);
   }
   const ledger = memoryLedger();
   const end = await captureEmission({ prev: agentAt('working'), next: null, intent: { identity: { project: 'api' }, pid: 4242, sessionId: 's1' }, ...section({ seq: 3, ledger, ...dead }) });
@@ -1075,6 +1075,67 @@ test('both interleavings of S=1 (working) and S=2 (needs-input) end with needs-i
 });
 
 // --- failures with an existing entry ---------------------------------------
+
+test('a duplicate alert that enters first still presents the pending transition once', async () => {
+  for (const terminal of [KITTY_TERMINAL, { ...KITTY_TERMINAL, env: { TERM: 'dumb' } }]) {
+    for (const order of [[2, 3], [3, 2]]) {
+      const ledger = memoryLedger();
+      const lock = scriptedLock();
+      await captureEmission({ terminal, ...section({ seq: 1, ledger, lock }) });
+      const results = await Promise.all(order.map((seq) => captureEmission({
+        prev: agentAt(seq === 2 ? 'working' : 'needs-approval'),
+        next: agentAt('needs-approval'), intent: clipsIntent('needs-approval'),
+        terminal, ...section({ seq, ledger, lock }),
+      })));
+      const output = Buffer.concat(results.map(({ bytes }) => bytes)).toString('latin1');
+      assert.equal(output.split('\x07').length - 1, 1, `order ${order}, ${terminal.env.TERM}`);
+      assert.ok(output.includes('\x1b]11;'), 'the pending tint is also presented');
+      assert.equal(ledger.entry.seq, 3);
+      const repeated = await captureEmission({
+        prev: agentAt('needs-approval'), next: agentAt('needs-approval'),
+        intent: clipsIntent('needs-approval'), terminal, ...section({ seq: 4, ledger, lock }),
+      });
+      assert.equal(repeated.bytes.length, 0, 'an already presented alert stays silent');
+    }
+  }
+});
+
+test('suppressed or failed presentation remains pending for the next identical hook', async () => {
+  for (const overrides of [
+    { checkTty: () => false },
+    { open: () => { throw new Error('ENOENT'); } },
+    { write: () => { throw new Error('EIO'); } },
+  ]) {
+    const ledger = memoryLedger();
+    const terminal = { ...KITTY_TERMINAL, env: { TERM: 'dumb' } };
+    await captureEmission({ terminal, ...section({ seq: 1, ledger }) });
+    const alert = {
+      next: agentAt('needs-approval'), intent: clipsIntent('needs-approval'), terminal,
+    };
+    const pending = captureEmission({
+      ...alert, prev: agentAt('working'), ...section({ seq: 2, ledger }), ...overrides,
+    });
+    if (overrides.write) await assert.rejects(pending, /EIO/);
+    else await pending;
+    const retry = await captureEmission({
+      ...alert, prev: agentAt('needs-approval'), ...section({ seq: 3, ledger }),
+    });
+    assert.ok(retry.bytes.includes(7), 'the unsent alert still rings');
+  }
+});
+
+test('a new owner cannot inherit an already presented alert', async () => {
+  const ledger = memoryLedger();
+  const terminal = { ...KITTY_TERMINAL, env: { TERM: 'dumb' } };
+  const alert = { next: agentAt('needs-approval'), intent: clipsIntent('needs-approval'), terminal };
+  await captureEmission({ ...alert, ...section({ seq: 1, ledger }) });
+  const resumed = await captureEmission({
+    ...alert, prev: agentAt('needs-approval'),
+    next: agentAt('needs-approval', { pid: 5150, starttime: 111 }),
+    ...section({ seq: 2, ledger }),
+  });
+  assert.ok(resumed.bytes.includes(7), 'the new owner receives its own alert');
+});
 
 test('a terminal write that fails mid-stream leaves held: null, and the next hook CREATES — not unchanged', async () => {
   const ledger = memoryLedger(stamp({ held: directHeld('working') }, { seq: 1, owner: OWNER }));

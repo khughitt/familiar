@@ -150,7 +150,11 @@ export async function emit({
 
   return lock(async () => {
     const entry = await ledger.read();
-    const stampWith = (fields) => stamp(fields, { seq, owner });
+    // Presentation has its own evidence: graphics may be disabled, and the bus's
+    // previous state may belong to an event that has not reached this lock yet.
+    const presented = entry.pid === owner.pid && entry.starttime === owner.starttime
+      ? entry.presented ?? null : null;
+    const stampWith = (fields) => stamp({ presented, ...fields }, { seq, owner });
 
     // 1. Order. A newer event already owns the terminal — whether it ran before we got
     //    the lock, or we are a straggler arriving after SessionEnd's tombstone.
@@ -164,7 +168,7 @@ export async function emit({
     // 3. SessionEnd: the tombstone first (it is ordering evidence, written even for a
     //    dead owner), then the reset, which needs no evidence.
     if (next === null) {
-      await ledger.write(stampWith({ held: null, ended: true }));
+      await ledger.write(stampWith({ held: null, presented: null, ended: true }));
       if (!alive) return { kind: 'suppressed', reason: 'owner-dead' };
       writeTerminal(Buffer.from(oscReset()));
       return { kind: 'ended' };
@@ -188,7 +192,7 @@ export async function emit({
       && intent.motionPolicy !== 'off'
       && (!evidence || !sameBinding(held.intent, bindingFields(intent)));
     const presentation = renderTransition({
-      prev: prev?.state ?? null,
+      prev: presented,
       next: next.state,
       intent,
       readSprite,
@@ -200,7 +204,9 @@ export async function emit({
     // 5. Unchanged (or nothing graphical possible): the evidence stands, the order advances.
     if (!graphical) {
       await ledger.write(stampWith({ held }));
-      if (presentation.length > 0) writeTerminal(Buffer.from(presentation));
+      if (presentation.length > 0 && writeTerminal(Buffer.from(presentation)).written) {
+        await ledger.write(stampWith({ held, presented: next.state }));
+      }
       return { kind: 'unchanged' };
     }
 
@@ -244,7 +250,7 @@ export async function emit({
       // creates. A failed write-ahead throws before any terminal byte.
       await ledger.write(stampWith({ held: null }));
       writeAllSync(bytes, { fd, write });
-      await ledger.write(stampWith({ held: { transport, capability, id, intent: bindingFields(intent) } }));
+      await ledger.write(stampWith({ held: { transport, capability, id, intent: bindingFields(intent) }, presented: next.state }));
       return { kind: 'transmitted', lifecycle, bytes: bytes.length };
     } finally {
       close(fd);

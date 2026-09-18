@@ -62,8 +62,8 @@ export function memoryLedger(initial = null) {
 }
 
 // EVERY write goes through here, so every entry carries the identity pruning tests.
-export function stamp({ held = null, ended = false } = {}, { seq, owner }) {
-  return { seq, pid: owner.pid, starttime: owner.starttime, held, ended };
+export function stamp({ held = null, presented = null, ended = false } = {}, { seq, owner }) {
+  return { seq, pid: owner.pid, starttime: owner.starttime, held, presented, ended };
 }
 
 // Evidence never survives a change of owner. A resumed session under a new process

@@ -255,7 +255,7 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
   assert.equal(dirname(entryPath), p.transmitDir, 'the session id is a name, not a path');
   assert.ok(!existsSync(join(p.stateDir, 'session.json')) && !existsSync(join(p.stateDir, 'agents.json')), 'no traversal out of transmit/');
   const entry = JSON.parse(readFileSync(entryPath, 'utf8'));
-  assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, ended: false });
+  assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, presented: null, ended: false });
 
   const end = await emitHookTransition({
     prev: agent, next: null, intent, seq: 2, transmitSprite: true,

@@ -45,8 +45,8 @@ test('fileLedger reads EMPTY_ENTRY for a missing file and round-trips a write', 
 });
 
 test('stamp puts the owner identity and the seq on every entry', () => {
-  assert.deepEqual(stamp({}, { seq: 9, owner: OWNER }), { seq: 9, pid: 4242, starttime: 987654, held: null, ended: false });
-  assert.deepEqual(stamp({ held: null, ended: true }, { seq: 9, owner: OWNER }), { seq: 9, pid: 4242, starttime: 987654, held: null, ended: true });
+  assert.deepEqual(stamp({}, { seq: 9, owner: OWNER }), { seq: 9, pid: 4242, starttime: 987654, held: null, presented: null, ended: false });
+  assert.deepEqual(stamp({ held: null, ended: true }, { seq: 9, owner: OWNER }), { seq: 9, pid: 4242, starttime: 987654, held: null, presented: null, ended: true });
 });
 
 test('inherit carries held only across the same owner', () => {

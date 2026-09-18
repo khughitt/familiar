@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withLock } from '../src/bus/lock.js';
@@ -212,23 +212,33 @@ test('OLD budget (100 x 20ms = 2000ms) cannot outlast the same guard — pins th
 
 test('staleMs: Infinity never reclaims a live holder, however long the section runs', async () => {
   const lockPath = join(dir(), 'transmit.lock');
-  let clock = 0;
+  let clock = Date.now();
   let release;
+  let signalEntry;
+  const acquired = new Promise((resolve) => { signalEntry = resolve; });
   const held = new Promise((resolve) => { release = resolve; });
-  const first = withLock(lockPath, () => held, {
+  const first = withLock(lockPath, () => { signalEntry(); return held; }, {
     staleMs: Infinity, now: () => clock, isAlive: () => true,
     sleep: async () => { clock += 5_000; },
   });
-  await new Promise((resolve) => setImmediate(resolve));
-  let entered = false;
-  const second = withLock(lockPath, async () => { entered = true; }, {
-    staleMs: Infinity, retries: 5, now: () => clock, isAlive: () => true,
-    sleep: async () => { clock += 5_000; },
-  });
-  await assert.rejects(second, /could not acquire lock/);
-  assert.equal(entered, false, 'a live holder is never displaced by age');
-  release();
-  await first;
+  try {
+    await Promise.race([acquired, first]);
+    clock = statSync(lockPath).mtimeMs;
+    let entered = false;
+    const options = {
+      retries: 5, now: () => clock, isAlive: () => true,
+      sleep: async () => { clock += 5_000; },
+    };
+    await assert.rejects(withLock(lockPath, async () => { entered = true; }, {
+      ...options, staleMs: Infinity,
+    }), /could not acquire lock/);
+    assert.equal(entered, false, 'a live holder is never displaced by age');
+    await withLock(lockPath, async () => { entered = true; }, { ...options, staleMs: 10_000 });
+    assert.equal(entered, true, 'a finite timeout displaces the same live holder at this age');
+  } finally {
+    release();
+    await first;
+  }
 });
 
 test('a dead holder is reclaimed under staleMs: Infinity', async () => {
