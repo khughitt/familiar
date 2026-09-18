@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-09-18T11:05:35Z
-updated: 2026-09-18T15:35:06Z
+updated: 2026-09-18T15:39:32Z
 depends: []
 tags: [tmux, terminal]
 agent: "claude-code/claude-opus-5[1m]"
@@ -102,3 +102,4 @@ limits, not in this change.
 - 2026-09-18T11:32:45Z (tmux-render): Spec revised after review 1 (5afab87): transmission ledger replaces priorIntent as lifecycle evidence, CLI transmit() wraps too, slow partition gets npm/just/CI entry points, overhead corrected to 11 x commands; follow-up fam-8d0b82 (repaint on client-attached)
 - 2026-09-18T15:28:52Z (tmux-render): Spec revision 2 (c58f3a7): ledger publication and terminal write share one per-session critical section ordered by a bus-assigned seq; write-ahead nulls evidence before the first terminal byte; unchanged hooks preserve held; SessionEnd tombstone supersedes stragglers
 - 2026-09-18T15:35:06Z (tmux-render): Spec revision 3 (9644f86): bus-wide events.seq counter, staleMs Infinity on the transmit lock, update only under ANIMATION (Ghostty rule kept), transport keyed on client tty+pid+created, ledgerName() for safe filenames
+- 2026-09-18T15:39:32Z (tmux-render): Spec revision 4 (fc35404): tombstones carry pid/starttime, pruning only on fresh-dead under the session lock, uncached isAlive for transmit locks, in-section agent liveness check, async emitHookTransition awaited in main
