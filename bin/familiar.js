@@ -169,7 +169,8 @@ Usage:
   familiar projects [DIR...] [--rows N]
 
 Arguments:
-  DIR             Project directories; default to the paths pinned in identities.yaml
+  DIR             Project directories; default to the paths pinned in identities.yaml.
+                  Files are skipped, so a glob over a directory of checkouts works
 
 Options:
   --rows N        Draw each sprite N rows tall instead of the theme's height
@@ -748,18 +749,20 @@ async function main({ command, args: rest }) {
     const resolver = await identityResolver();
     // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
     // names no directory, so only `path:` pins can be walked.
-    const dirs = positionals.length > 0
+    const given = positionals.length > 0
       ? positionals
       : resolver.catalog.identities.flatMap((pin) => (pin.path ? [pinPath(pin.path)] : []));
-    for (const dir of dirs) {
+    // A path that is not there is a typo and an error. A path that is not a
+    // directory is what `~/src/*` sweeps up beside the checkouts, and is skipped.
+    const dirs = given.filter((dir) => {
       let stat;
       try {
         stat = statSync(dir);
       } catch {
         throw new Error(`no such directory: ${dir}`);
       }
-      if (!stat.isDirectory()) throw new Error(`not a directory: ${dir}`);
-    }
+      return stat.isDirectory();
+    });
     const resolved = await Promise.all(dirs.map((dir) => resolver.resolve(dir)));
     resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
 

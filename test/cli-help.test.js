@@ -243,6 +243,15 @@ test('projects prints one cell per directory and says who decided the slot', (t)
   const missing = run(['projects', join(f.root, 'nowhere')], f.env);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /nowhere/);
+
+  // A file is skipped: `familiar projects ~/src/*` is the documented call, and a
+  // glob matches whatever else lives beside the checkouts.
+  writeFileSync(join(f.root, 'notes.md'), '');
+  const globbed = run(['projects', hashed, join(f.root, 'notes.md')], f.env);
+  assert.equal(globbed.status, 0, globbed.stderr);
+  assert.equal(globbed.stderr, '');
+  assert.match(globbed.stdout, /loose/);
+  assert.doesNotMatch(globbed.stdout, /notes/);
 });
 
 test('projects fills the terminal width with columns', (t) => {
