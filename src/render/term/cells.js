@@ -12,29 +12,39 @@
 import { printedWidth as width } from './sgr.js';
 
 // Columns is the terminal width, or undefined when there is no terminal to ask —
-// a pipe gets one column, never a guess at eighty.
-export function layoutCells(cells, { width: columns, gutter }) {
-  if (cells.length === 0) return [];
-  const cellWidth = Math.max(...cells.flatMap((lines) => lines.map(width)));
+// a pipe gets one column, never a guess at eighty. minCellWidth is a floor from
+// something that is not a line of text: the sprite drawn above a caption.
+export function gridPlan(cells, { width: columns, gutter, minCellWidth = 0 }) {
+  const widest = Math.max(0, ...cells.flatMap((lines) => lines.map(width)));
+  const cellWidth = Math.max(widest, minCellWidth);
   const perColumn = cellWidth + gutter;
   const fit = columns === undefined ? 1 : Math.floor((columns + gutter) / perColumn);
-  const perRow = Math.max(1, fit);
-  const height = Math.max(...cells.map((lines) => lines.length));
+  return { cellWidth, perRow: Math.max(1, fit) };
+}
 
+// One row of cells, each padded to cellWidth plus the gutter. The last column is
+// never padded: trailing spaces are invisible until a terminal wraps them, and
+// then they are a blank line.
+export function layoutRow(row, { cellWidth, gutter }) {
+  const height = Math.max(...row.map((lines) => lines.length));
+  const out = [];
+  for (let line = 0; line < height; line += 1) {
+    out.push(row.map((lines, index) => {
+      const text = lines[line] ?? '';
+      if (index === row.length - 1) return text;
+      return text + ' '.repeat(cellWidth - width(text) + gutter);
+    }).join(''));
+  }
+  return out;
+}
+
+export function layoutCells(cells, options) {
+  if (cells.length === 0) return [];
+  const { cellWidth, perRow } = gridPlan(cells, options);
   const out = [];
   for (let start = 0; start < cells.length; start += perRow) {
     if (start > 0) out.push('');
-    const row = cells.slice(start, start + perRow);
-    for (let line = 0; line < height; line += 1) {
-      const parts = row.map((lines, index) => {
-        const text = lines[line] ?? '';
-        // The last column is never padded: trailing spaces are invisible until a
-        // terminal wraps them, and then they are a blank line.
-        if (index === row.length - 1) return text;
-        return text + ' '.repeat(cellWidth - width(text) + gutter);
-      });
-      out.push(parts.join(''));
-    }
+    out.push(...layoutRow(cells.slice(start, start + perRow), { cellWidth, gutter: options.gutter }));
   }
   return out;
 }

@@ -6,7 +6,7 @@ import {
   MULTIPLEXER_MARKERS,
   graphicsCapability,
 } from '../src/render/term/capability.js';
-import { transmit } from '../src/render/term/kitty.js';
+import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { wrapForTmux } from '../src/render/term/tmux.js';
 
 test('classifies terminal graphics capability explicitly', () => {
@@ -208,4 +208,38 @@ test('an empty PNG is REFUSED, not silently transmitted as nothing', () => {
   //
   // KILLS: removal of the length guard at the top of transmit().
   assert.throws(() => transmit(Buffer.alloc(0), { rows: 12 }), /empty/i);
+});
+
+// SIDE BY SIDE. transmit() stacks: C=1 and then `rows` newlines. A row of cells needs
+// each image in its OWN column box (c= and r=, so a wrong cell-aspect guess is air
+// inside the box, never drift along the row) and the cursor walked right between them
+// by plain CSI -- text, which tmux passthrough must leave alone -- with the newlines
+// once, at the end.
+test('transmitAcross places each image in its own column box and advances by CSI between them', () => {
+  const a = filler(3072);
+  const b = filler(5000);
+  const out = transmitAcross([{ png: a, cols: 10, advance: 14 }, { png: b, cols: 7, advance: 11 }], { rows: 6 });
+
+  const controls = controlsOf(out);
+  assert.equal(controls[0], 'a=T,f=100,q=2,c=10,r=6,C=1,m=0');
+  assert.equal(controls[1], 'a=T,f=100,q=2,c=7,r=6,C=1,m=1');
+  assert.equal(controls[2], 'm=0');
+  assert.equal(controls.length, 3);
+  const afterA = out.indexOf('\x1b\\') + 2;
+  assert.ok(out.startsWith('\x1b[14C', afterA), 'the cursor walks right by the whole cell after the first image');
+  assert.equal((out.match(/\x1b\[\d+C/g) ?? []).join(' '), '\x1b[14C \x1b[11C');
+  assert.ok(out.endsWith('\x1b[11C' + '\n'.repeat(6)), 'newlines once, after the last cell, exactly rows');
+  assert.equal(payloadOf(out), a.toString('base64') + b.toString('base64'));
+});
+
+test('transmitAcross frames the APCs for tmux and leaves the CSI advances outside', () => {
+  const png = filler(3072);
+  const wrapped = transmitAcross([{ png, cols: 4, advance: 8 }], { rows: 2, frame: wrapForTmux });
+  assert.equal(bareApcs(wrapped), 0);
+  assert.ok(wrapped.includes('\x1b\\\x1b[8C\n\n'), 'the DCS closes before the advance and the newlines');
+});
+
+test('transmitAcross refuses an empty row and an empty PNG', () => {
+  assert.throws(() => transmitAcross([], { rows: 2 }), /at least one/);
+  assert.throws(() => transmitAcross([{ png: Buffer.alloc(0), cols: 4, advance: 4 }], { rows: 2 }), /empty PNG/);
 });

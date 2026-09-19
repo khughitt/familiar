@@ -2,7 +2,7 @@
 // is wide. The layout is pure: cells and a width in, lines out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { layoutCells } from '../src/render/term/cells.js';
+import { gridPlan, layoutCells, layoutRow } from '../src/render/term/cells.js';
 import { fg, RESET, strip } from '../src/render/term/sgr.js';
 
 const cell = (name, detail) => [name, `  ${detail}`];
@@ -59,4 +59,17 @@ test('SGR sequences do not count toward a column width', () => {
 
 test('no cells lays out to no lines', () => {
   assert.deepEqual(layoutCells([], { width: 80, gutter: 3 }), []);
+});
+
+test('gridPlan sizes the cell from the widest line or the caller\'s floor, whichever is wider', () => {
+  const cells = [cell('alpha', 'one'), cell('beta', 'two'), cell('gamma', 'three')];
+  assert.deepEqual(gridPlan(cells, { width: 30, gutter: 3 }), { cellWidth: 7, perRow: 3 });
+  // A sprite wider than any caption sets the column; fewer columns fit.
+  assert.deepEqual(gridPlan(cells, { width: 30, gutter: 3, minCellWidth: 12 }), { cellWidth: 12, perRow: 2 });
+  assert.deepEqual(gridPlan(cells, { width: undefined, gutter: 3, minCellWidth: 12 }), { cellWidth: 12, perRow: 1 });
+});
+
+test('layoutRow lays one row at a given cell width and leaves the last cell unpadded', () => {
+  const lines = layoutRow([cell('a', '1'), cell('b', '2')], { cellWidth: 4, gutter: 2 });
+  assert.deepEqual(lines, ['a     b', '  1     2']);
 });

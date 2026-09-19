@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderHelp } from '../bin/familiar.js';
+import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -40,6 +41,18 @@ function fixture(t) {
     },
   };
 }
+
+// The SAME scrub as test/bin-familiar.test.js, for the same reason: fixture().env
+// spreads process.env, so a developer's kitty is inherited unless every marker
+// graphicsCapability() reads is removed -- and its list is the source of truth.
+const noGraphics = (base) => {
+  const e = { ...base };
+  for (const { name } of GRAPHICS_MARKERS) delete e[name];
+  for (const name of MULTIPLEXER_MARKERS) delete e[name];
+  e.TERM = 'xterm-256color';
+  return e;
+};
+const kittyGraphics = (base) => ({ ...noGraphics(base), TERM: 'xterm-kitty' });
 
 const run = (args, env) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env });
 const runTty = (args, options) => spawnSync(process.execPath, [ttyBin, ...args], options);
@@ -240,14 +253,59 @@ test('projects fills the terminal width with columns', (t) => {
     mkdirSync(dir);
     return dir;
   });
-  const wide = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...f.env, TTY_COLUMNS: '200', NO_COLOR: '1' } });
+  const text = noGraphics({ ...f.env, NO_COLOR: '1' });
+  const wide = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...text, TTY_COLUMNS: '200' } });
   assert.equal(wide.status, 0, wide.stderr);
   const [, names] = wide.stdout.split('\n\n');
   assert.match(names.split('\n')[0], /aa.*bb.*cc/);
 
-  const narrow = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...f.env, TTY_COLUMNS: '20', NO_COLOR: '1' } });
+  const narrow = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...text, TTY_COLUMNS: '20' } });
   assert.equal(narrow.status, 0, narrow.stderr);
   assert.equal(narrow.stdout.trim().split('\n\n').length, 4);
+});
+
+test('projects draws each sprite above its caption on a graphics terminal', (t) => {
+  const f = fixture(t);
+  fixtureTheme(f);
+  const dirs = ['aa', 'bb', 'cc'].map((name) => {
+    const dir = join(f.root, name);
+    mkdirSync(dir);
+    return dir;
+  });
+  const kitty = kittyGraphics({ ...f.env, TTY_COLUMNS: '200', NO_COLOR: '1' });
+  const result = runTty(['projects', ...dirs], { encoding: 'utf8', env: kitty });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+
+  // One placement per cell, each in its own column box, the same rows as the theme.
+  const controls = [...result.stdout.matchAll(/\x1b_G([^;]*);/g)].map((m) => m[1]);
+  const first = controls.filter((c) => c.startsWith('a=T'));
+  assert.equal(first.length, 3);
+  for (const control of first) assert.match(control, /^a=T,f=100,q=2,c=\d+,r=\d+,C=1,m=[01]$/);
+  const rows = Number(first[0].match(/r=(\d+)/)[1]);
+  // The captions are the text grid, unchanged, under a box exactly `rows` tall.
+  const text = result.stdout.replace(/\x1b_G[^\x1b]*\x1b\\/g, '').replace(/\x1b\[\d+C/g, '');
+  const lines = text.split('\n');
+  const caption = lines.findIndex((line) => /aa.*bb.*cc/.test(line));
+  assert.ok(caption > rows, text);
+  assert.equal(lines.slice(caption - rows, caption).join('').trim(), '', 'the sprite box is blank lines, rows of them');
+  // ...and exactly rows: above the box is the header's trailing blank, then the header.
+  assert.equal(lines[caption - rows - 1], '');
+  assert.match(lines[caption - rows - 2], /^  fixture — /);
+
+  // --rows is a view control, as it is for theme show.
+  const short = runTty(['projects', '--rows', '2', ...dirs], { encoding: 'utf8', env: kitty });
+  assert.equal(short.status, 0, short.stderr);
+  assert.match(short.stdout, /r=2,/);
+  const bad = runTty(['projects', '--rows', '0', ...dirs], { encoding: 'utf8', env: kitty });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /--rows/);
+
+  // No graphics: the text grid and one line saying so.
+  const plain = runTty(['projects', ...dirs], { encoding: 'utf8', env: noGraphics(kitty) });
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.doesNotMatch(plain.stdout, /\x1b_G/);
+  assert.match(plain.stderr, /no graphics capability/);
 });
 
 test('current user and agent surfaces contain no retired CLI invocations', () => {

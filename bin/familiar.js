@@ -24,7 +24,7 @@ import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
-import { layoutCells } from '../src/render/term/cells.js';
+import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
 import { emit } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
@@ -36,7 +36,8 @@ import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
 import { readJson } from '../src/bus/store.js';
 import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capability.js';
-import { transmit } from '../src/render/term/kitty.js';
+import { transmit, transmitAcross } from '../src/render/term/kitty.js';
+import { boxFor } from '../src/render/term/box.js';
 import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
 import { preflightKittyPrograms } from '../src/render/term/kitty-animation.js';
 import {
@@ -162,20 +163,25 @@ Examples:
   familiar whoami
   familiar whoami /path/to/project
 `,
-  projects: `Show every project's familiar identity, in a grid.
+  projects: `Show every project's familiar, in a grid.
 
 Usage:
-  familiar projects [DIR...]
+  familiar projects [DIR...] [--rows N]
 
 Arguments:
   DIR             Project directories; default to the paths pinned in identities.yaml
 
-Each cell names the project, its member and slot, and whether a pin or the
-project's hash chose the slot. Columns fill the terminal width; a pipe gets one.
+Options:
+  --rows N        Draw each sprite N rows tall instead of the theme's height
+
+Each cell draws the project's familiar over its name, member, slot, and whether a
+pin or the project's hash chose the slot. Columns fill the terminal width; a pipe
+gets one, and a terminal without kitty graphics gets the captions alone.
 
 Examples:
   familiar projects
   familiar projects ~/src/*
+  familiar projects --rows 3 ~/src/*
 `,
   theme: `Browse and inspect themes.
 
@@ -735,7 +741,10 @@ async function main({ command, args: rest }) {
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'projects') {
-    const { positionals } = parseLeaf(rest, { minPositionals: 0, maxPositionals: Infinity, help: 'projects' });
+    const { positionals, values } = parseLeaf(rest, {
+      options: { rows: { type: 'string' } },
+      minPositionals: 0, maxPositionals: Infinity, help: 'projects',
+    });
     const resolver = await identityResolver();
     // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
     // names no directory, so only `path:` pins can be walked.
@@ -754,21 +763,69 @@ async function main({ command, args: rest }) {
     const resolved = await Promise.all(dirs.map((dir) => resolver.resolve(dir)));
     resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
 
+    // The same view control, the same bounds, and the same reason as `theme show`.
+    const viewRows = values.rows === undefined ? resolver.pack.rows : Number(values.rows);
+    if (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX) {
+      throw new Error(
+        `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(values.rows)}`
+      );
+    }
+    const interactive = process.stdout.isTTY === true;
+    const tmux = tmuxFacts(process.env);
+    const capability = graphicsCapability(process.env, tmux);
+    const frame = tmux?.ok ? wrapForTmux : (command) => command;
+    const graphical = interactive && (
+      capability === GRAPHICS_CAPABILITY.ANIMATION ||
+      capability === GRAPHICS_CAPABILITY.STATIC
+    );
+    if (interactive && !graphical) {
+      process.stderr.write(
+        `familiar: no graphics capability (${capability})${describeTmux(tmux)} — showing captions only, no art\n`
+      );
+    }
+
     const color = cliColor();
     const cells = resolved.map(({ identity, pin }) => {
       const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color });
       const name = color ? `${BOLD}${identity.project}${RESET}` : identity.project;
-      return [
-        `  ${swatch}  ${name}`,
-        `      ${identity.label} · slot ${identity.slot} · ${pin ? 'pin' : 'auto'}`,
-      ];
+      // resolve() proved the member's assets exist; the idle pose is what a
+      // roster shows, as it is for `theme show`.
+      const png = graphical
+        ? readFileSync(assetsFor(resolver.pack, identity.member, resolver.tone.mode).idle.terminal)
+        : null;
+      return {
+        lines: [
+          `  ${swatch}  ${name}`,
+          `      ${identity.label} · slot ${identity.slot} · ${pin ? 'pin' : 'auto'}`,
+        ],
+        png,
+        cols: png ? boxFor(png, viewRows).cols : 0,
+      };
     });
-    const width = process.stdout.isTTY === true ? process.stdout.columns : undefined;
-    const lines = layoutCells(cells, { width, gutter: 4 });
-    process.stdout.write(
-      `\n  ${resolver.pack.id} — ${resolver.pack.label}\n\n` +
-      (lines.length > 0 ? `${lines.join('\n')}\n\n` : '  (no projects: pass directories, or pin paths in identities.yaml)\n\n'),
-    );
+    const gutter = 4;
+    const width = interactive ? process.stdout.columns : undefined;
+    // The sprite is part of the cell's width: a wide member must not overhang the
+    // caption column beside it.
+    const { cellWidth, perRow } = gridPlan(cells.map((c) => c.lines), {
+      width, gutter, minCellWidth: Math.max(0, ...cells.map((c) => c.cols)),
+    });
+
+    process.stdout.write(`\n  ${resolver.pack.id} — ${resolver.pack.label}\n\n`);
+    if (cells.length === 0) {
+      process.stdout.write('  (no projects: pass directories, or pin paths in identities.yaml)\n\n');
+    }
+    for (let start = 0; start < cells.length; start += perRow) {
+      const row = cells.slice(start, start + perRow);
+      if (graphical) {
+        // The caption's two-space indent is where the sprite's box starts too, so
+        // the art sits over its own name; each advance is one whole cell.
+        process.stdout.write('  ' + transmitAcross(
+          row.map((c) => ({ png: c.png, cols: c.cols, advance: cellWidth + gutter })),
+          { rows: viewRows, frame },
+        ));
+      }
+      process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
+    }
   } else if (command === 'hook') {
     const { positionals, values } = parseLeaf(rest, {
       options: { agent: { type: 'string' }, trace: { type: 'string' } },

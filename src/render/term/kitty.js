@@ -12,12 +12,7 @@
 const CHUNK = 4096;   // the protocol's maximum payload per escape
 
 export function transmit(png, { rows, frame = (command) => command }) {
-  // FAIL EARLY. The chunk loop below never runs on an empty buffer, so without this
-  // an empty PNG transmits as bare newlines -- a silent gap where the cat should be.
-  // assetsFor() proves a sprite EXISTS; nothing proves it has BYTES.
-  if (png.length === 0) throw new Error('kitty: refusing to transmit an empty PNG — the asset has no bytes');
-
-  const payload = Buffer.from(png).toString('base64');
+  const payload = encode(png);
 
   // q=2: SUPPRESS THE TERMINAL'S REPLIES. Kitty answers a graphics escape ON STDIN, and
   // the stdin our bytes share is the CODING AGENT's pty, because emit() writes to
@@ -54,17 +49,55 @@ export function transmit(png, { rows, frame = (command) => command }) {
   // An earlier draft appended `\x1b_Gm=0;\x1b\\` whenever `payload.length % CHUNK === 0`,
   // borrowed from the other common idiom -- mark every chunk m=1, then close with a
   // bare m=0. That idiom NEEDS the terminator because no chunk ever says it is last.
-  // This loop already computes `more` from the remaining bytes, so its final chunk
-  // says so itself, and the extra escape was pure double-emission. Two idioms, half
-  // of each.
+  // chunked()'s loop already computes `more` from the remaining bytes, so its final
+  // chunk says so itself, and the extra escape was pure double-emission. Two idioms,
+  // half of each. Everything above describes the control string chunked() builds;
+  // it is read here because transmit() is the caller that earned each rule.
+  const out = chunked(payload, `r=${rows}`);
+
+  // The newlines are layout for the multiplexer grid, so keep them outside framing.
+  return out.map(frame).join('') + '\n'.repeat(rows);
+}
+
+function encode(png) {
+  // FAIL EARLY. The chunk loop never runs on an empty buffer, so without this an empty
+  // PNG transmits as bare newlines -- a silent gap where the cat should be.
+  // assetsFor() proves a sprite EXISTS; nothing proves it has BYTES.
+  if (png.length === 0) throw new Error('kitty: refusing to transmit an empty PNG — the asset has no bytes');
+  return Buffer.from(png).toString('base64');
+}
+
+// One image as APC commands: the first carries the display keys plus `box` (the
+// r=, or c= and r=, that size it), every chunk carries m, the last m=0.
+function chunked(payload, box) {
   const out = [];
   for (let at = 0; at < payload.length; at += CHUNK) {
     const slice = payload.slice(at, at + CHUNK);
     const more = at + CHUNK < payload.length ? 1 : 0;
-    const control = at === 0 ? `a=T,f=100,q=2,r=${rows},C=1,m=${more}` : `m=${more}`;
+    const control = at === 0 ? `a=T,f=100,q=2,${box},C=1,m=${more}` : `m=${more}`;
     out.push(`\x1b_G${control};${slice}\x1b\\`);
   }
+  return out;
+}
 
-  // The newlines are layout for the multiplexer grid, so keep them outside framing.
-  return out.map(frame).join('') + '\n'.repeat(rows);
+// A ROW OF IMAGES, side by side. transmit() can only stack, and that is a property of
+// how it advances: C=1 parks the cursor, and `rows` newlines move it down. This walks
+// it RIGHT instead: each image is placed in its own `cols` x `rows` box -- kitty fits
+// the image inside the box preserving aspect, so a cell-aspect guess that is off
+// (box.js) costs air inside that cell and never pushes the next cell along -- then a
+// plain CSI cursor-forward of `advance` (the cell plus its gutter) brings the cursor
+// to where the next image starts. The newlines come once, after the last image.
+//
+// The CSI is TEXT, not graphics: it goes through no framing, and a tmux pane handles
+// it as it handles any cursor motion, which is why `frame` wraps only the APCs.
+export function transmitAcross(images, { rows, frame = (command) => command }) {
+  if (!Array.isArray(images) || images.length === 0) {
+    throw new Error('kitty: a row needs at least one image');
+  }
+  let out = '';
+  for (const { png, cols, advance } of images) {
+    out += chunked(encode(png), `c=${cols},r=${rows}`).map(frame).join('');
+    out += `\x1b[${advance}C`;
+  }
+  return out + '\n'.repeat(rows);
 }
