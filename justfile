@@ -7,6 +7,8 @@
 # ops `bin/tt`), which appends one line per run to the shared timing log.
 # Design: ops docs/specs/2026-09-04-test-ci-audit-design.md.
 
+set quiet
+
 tt := "python3 tools/tt"
 
 # The three commands, each written once, so a hook can never drift from the gate it
