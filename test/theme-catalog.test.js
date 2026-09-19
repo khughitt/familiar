@@ -414,6 +414,7 @@ test('CLI color requires a TTY and honours NO_COLOR', () => {
 test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
   const env = cliEnv(GRAPHICAL);
   env.NO_COLOR = '1';
+  delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
   const result = runTty(['theme', 'show'], { encoding: 'utf8', env, maxBuffer: THEME_MAX_BUFFER });
   assert.equal(result.status, 0, result.stderr);
   assert.equal((result.stdout.match(/\x1b_Ga=T,/g) ?? []).length, SLOT_COUNT);

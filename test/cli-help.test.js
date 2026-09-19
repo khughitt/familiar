@@ -55,6 +55,15 @@ const noGraphics = (base) => {
 };
 const kittyGraphics = (base) => ({ ...noGraphics(base), TERM: 'xterm-kitty' });
 
+// NO_COLOR on top of an inherited FORCE_COLOR is a contradiction node itself reports:
+// since 26 it warns on stderr that NO_COLOR is ignored, and a test that asserts an
+// empty stderr fails in any shell exporting FORCE_COLOR. Drop the override first.
+const noColor = (base) => {
+  const e = { ...base, NO_COLOR: '1' };
+  delete e.FORCE_COLOR;
+  return e;
+};
+
 const run = (args, env) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env });
 const runTty = (args, options) => spawnSync(process.execPath, [ttyBin, ...args], options);
 
@@ -125,8 +134,7 @@ test('help color changes headings only and honours NO_COLOR', (t) => {
   assert.match(interactive.stdout, /familiar — your coding agent gets a face/);
   assert.match(interactive.stdout, /\x1b\[/);
 
-  env.NO_COLOR = '1';
-  const uncolored = spawnSync(process.execPath, [ttyBin, '--help'], { encoding: 'utf8', env });
+  const uncolored = spawnSync(process.execPath, [ttyBin, '--help'], { encoding: 'utf8', env: noColor(env) });
   assert.equal(uncolored.status, 0, uncolored.stderr);
   assert.match(uncolored.stdout, /familiar — your coding agent gets a face/);
   assert.doesNotMatch(uncolored.stdout, /\x1b\[/);
@@ -263,7 +271,7 @@ test('projects fills the terminal width with columns', (t) => {
     mkdirSync(dir);
     return dir;
   });
-  const text = noGraphics({ ...f.env, NO_COLOR: '1' });
+  const text = noGraphics(noColor(f.env));
   const wide = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...text, TTY_COLUMNS: '200' } });
   assert.equal(wide.status, 0, wide.stderr);
   const [, names] = wide.stdout.split('\n\n');
@@ -282,7 +290,7 @@ test('projects draws each sprite above its caption on a graphics terminal', (t) 
     mkdirSync(dir);
     return dir;
   });
-  const kitty = kittyGraphics({ ...f.env, TTY_COLUMNS: '200', NO_COLOR: '1' });
+  const kitty = kittyGraphics({ ...noColor(f.env), TTY_COLUMNS: '200' });
   const result = runTty(['projects', ...dirs], { encoding: 'utf8', env: kitty });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
