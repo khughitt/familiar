@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fg, BOLD, RESET, strip, width, sanitize } from '../src/render/term/sgr.js';
+import * as sgr from '../src/render/term/sgr.js';
 
 test('fg turns a ramp hex into a truecolor SGR sequence', () => {
   assert.equal(fg('#c8703a'), '\x1b[38;2;200;112;58m');
@@ -99,4 +100,16 @@ test('a sanitized string contains nothing width() would measure as zero', () => 
   assert.ok(!clean.includes('\x1b'));
   assert.ok(!clean.includes('\n'));
   assert.equal(width(clean), clean.length);   // no hidden escapes left to strip
+});
+
+test('printedWidth is the width a terminal draws, not the pessimistic bound', () => {
+  const { printedWidth } = sgr;
+  assert.equal(printedWidth('main'), 4);
+  assert.equal(printedWidth(`${fg('#c8703a')}main${RESET}`), 4);
+  assert.equal(printedWidth('███ · Ginger'), 12);      // block glyphs and the middle dot are one column
+  assert.equal(printedWidth('日本'), 4);                 // East Asian Wide is two
+  assert.equal(printedWidth('é'), 1);             // a combining mark adds nothing
+  assert.equal(printedWidth('🐈'), 2);                   // emoji presentation is two
+  assert.equal(printedWidth(''), 0);
+  assert.ok(width('███ · Ginger') > printedWidth('███ · Ginger'));   // width() stays the bound
 });

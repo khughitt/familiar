@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -23,7 +23,8 @@ import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
-import { loadIdentities } from '../src/bus/pins.js';
+import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
+import { layoutCells } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
 import { emit } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
@@ -58,7 +59,7 @@ const FAMILIES = new Map([
   ['scheme', new Set(['set'])],
   ['setup', new Set(['claude-code', 'codex'])],
 ]);
-const ROOT_LEAVES = new Set(['whoami', 'hook', 'statusline', 'reap']);
+const ROOT_LEAVES = new Set(['whoami', 'projects', 'hook', 'statusline', 'reap']);
 
 function usageError(message, help) {
   return Object.assign(new Error(message), { help });
@@ -122,6 +123,7 @@ Usage:
 
 Explore
   whoami [PATH]                Show this project's familiar identity
+  projects [DIR...]            Show every project's familiar, pinned or hashed
   theme list                   List installed themes
   theme add SOURCE             Install a theme from an HTTPS URL or local directory
   theme validate DIR           Prove a theme directory conforms
@@ -159,6 +161,21 @@ Arguments:
 Examples:
   familiar whoami
   familiar whoami /path/to/project
+`,
+  projects: `Show every project's familiar identity, in a grid.
+
+Usage:
+  familiar projects [DIR...]
+
+Arguments:
+  DIR             Project directories; default to the paths pinned in identities.yaml
+
+Each cell names the project, its member and slot, and whether a pin or the
+project's hash chose the slot. Columns fill the terminal width; a pipe gets one.
+
+Examples:
+  familiar projects
+  familiar projects ~/src/*
 `,
   theme: `Browse and inspect themes.
 
@@ -669,6 +686,32 @@ export function sheetRowCaptions(rows, tone) {
   });
 }
 
+// The identity pipeline whoami and projects share: config -> pack -> pin catalog,
+// loaded once, then one directory at a time through git and the resolver. The
+// asset proof (assetsFor) is part of resolving, not of printing: an identity whose
+// sprites are missing is not an identity the surfaces can show.
+async function identityResolver() {
+  const paths = resolvePaths();
+  const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
+  const pack = await loadThemePack(themeDirFor(paths, themeId));
+  const catalog = await loadIdentities(paths.identitiesPath);
+  return {
+    themeId,
+    tone,
+    pack,
+    catalog,
+    async resolve(cwd) {
+      const { remote, repoRoot } = await gitContext(cwd);
+      const projectKey = projectKeyFor({ remote, repoRoot, cwd });
+      const project = displayProject({ repoRoot, cwd });
+      const pin = matchPin(catalog, { remote, repoRoot, project });
+      const identity = resolveIdentity({ projectKey, project, remote, repoRoot, catalog, pack });
+      assetsFor(pack, identity.member, tone.mode);
+      return { identity, pin };
+    },
+  };
+}
+
 async function main({ command, args: rest }) {
   if (command === 'setup claude-code' || command === 'setup codex') {
     parseLeaf(rest, { help: command });
@@ -682,21 +725,49 @@ async function main({ command, args: rest }) {
       minPositionals: 0, maxPositionals: 1, help: 'whoami',
     });
     const cwd = positionals[0] ?? process.cwd();
-    const paths = resolvePaths();
-    const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
-    const pack = await loadThemePack(themeDirFor(paths, themeId));
-    const catalog = await loadIdentities(paths.identitiesPath);
-    const { remote, repoRoot } = await gitContext(cwd);
-    const projectKey = projectKeyFor({ remote, repoRoot, cwd });
-    const project = displayProject({ repoRoot, cwd });
-    const identity = resolveIdentity({ projectKey, project, remote, repoRoot, catalog, pack });
-    assetsFor(pack, identity.member, tone.mode);
+    const resolver = await identityResolver();
+    const { identity } = await resolver.resolve(cwd);
     const { hue } = slotSpec(identity.slot);
     process.stdout.write(
       `${identity.project}\n` +
-      `  theme   ${themeId}\n` +
+      `  theme   ${resolver.themeId}\n` +
       `  slot    ${identity.slot} · hue ${hue}°\n` +
       `  member  ${identity.label} (${identity.member})\n`,
+    );
+  } else if (command === 'projects') {
+    const { positionals } = parseLeaf(rest, { minPositionals: 0, maxPositionals: Infinity, help: 'projects' });
+    const resolver = await identityResolver();
+    // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
+    // names no directory, so only `path:` pins can be walked.
+    const dirs = positionals.length > 0
+      ? positionals
+      : resolver.catalog.identities.flatMap((pin) => (pin.path ? [pinPath(pin.path)] : []));
+    for (const dir of dirs) {
+      let stat;
+      try {
+        stat = statSync(dir);
+      } catch {
+        throw new Error(`no such directory: ${dir}`);
+      }
+      if (!stat.isDirectory()) throw new Error(`not a directory: ${dir}`);
+    }
+    const resolved = await Promise.all(dirs.map((dir) => resolver.resolve(dir)));
+    resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
+
+    const color = cliColor();
+    const cells = resolved.map(({ identity, pin }) => {
+      const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color });
+      const name = color ? `${BOLD}${identity.project}${RESET}` : identity.project;
+      return [
+        `  ${swatch}  ${name}`,
+        `      ${identity.label} · slot ${identity.slot} · ${pin ? 'pin' : 'auto'}`,
+      ];
+    });
+    const width = process.stdout.isTTY === true ? process.stdout.columns : undefined;
+    const lines = layoutCells(cells, { width, gutter: 4 });
+    process.stdout.write(
+      `\n  ${resolver.pack.id} — ${resolver.pack.label}\n\n` +
+      (lines.length > 0 ? `${lines.join('\n')}\n\n` : '  (no projects: pass directories, or pin paths in identities.yaml)\n\n'),
     );
   } else if (command === 'hook') {
     const { positionals, values } = parseLeaf(rest, {

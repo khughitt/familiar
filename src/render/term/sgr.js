@@ -59,3 +59,22 @@ export function width(s) {
   for (const ch of strip(s)) n += ch.codePointAt(0) <= 0x7f ? 1 : 2;
   return n;
 }
+
+// THE OTHER WIDTH: what the terminal draws, for laying columns that must line up.
+// width() is a bound, and a bound is the wrong tool for alignment: it overcounts
+// `·` and `█` on one line and not the next, and the columns drift by the difference.
+// This one counts combining marks as nothing, East Asian Wide/Fullwidth and emoji
+// presentation as two, and everything else -- including Ambiguous -- as one, which
+// is how every terminal Familiar targets renders them by default. Never use it to
+// decide whether a line WRAPS; that is width()'s question.
+const WIDE = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]|\p{Emoji_Presentation}|[\u{20000}-\u{3fffd}]/u;
+const ZERO = /\p{M}/u;
+
+export function printedWidth(s) {
+  let n = 0;
+  for (const ch of strip(s)) {
+    if (ZERO.test(ch)) continue;
+    n += WIDE.test(ch) ? 2 : 1;
+  }
+  return n;
+}

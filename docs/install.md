@@ -102,8 +102,10 @@ pet = "custom:familiar-ginger"
 ```
 
 For a project-specific pet, use `familiar whoami <project>` to find the assigned
-member, then set `pet = "custom:familiar-<member>"` in that trusted project's
-`.codex/config.toml`. Restart an existing Codex session after syncing.
+member (`familiar projects <dir>...` shows several at once, and says whether a
+pin or the project's hash chose each slot), then set
+`pet = "custom:familiar-<member>"` in that trusted project's `.codex/config.toml`.
+Restart an existing Codex session after syncing.
 
 ### OpenCode
 

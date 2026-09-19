@@ -23,8 +23,11 @@ const defaultRealpath = (path) => {
   }
 };
 
-const canonical = (path, realpath) =>
-  realpath(path.startsWith('~/') ? resolve(homedir(), path.slice(2)) : resolve(path));
+// A pin's `path:` may start with `~/`; this is the one place that spelling is read.
+export const pinPath = (path) =>
+  path.startsWith('~/') ? resolve(homedir(), path.slice(2)) : resolve(path);
+
+const canonical = (path, realpath) => realpath(pinPath(path));
 
 export function parseIdentities(text) {
   const data = parse(text) ?? {};

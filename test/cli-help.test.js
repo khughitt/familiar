@@ -42,6 +42,7 @@ function fixture(t) {
 }
 
 const run = (args, env) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env });
+const runTty = (args, options) => spawnSync(process.execPath, [ttyBin, ...args], options);
 
 function gitRepo(t) {
   const root = mkdtempSync(join(tmpdir(), 'familiar-whoami-'));
@@ -69,7 +70,7 @@ test('root and bare families print offline help with status zero', (t) => {
     assert.equal(root.match(new RegExp(`^${heading}$`, 'gm'))?.length, 1);
   }
   for (const command of [
-    'whoami [PATH]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
+    'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
     'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup codex', 'hook EVENT', 'statusline', 'reap',
   ]) {
     assert.equal(root.split(command).length - 1, 1, command);
@@ -79,7 +80,7 @@ test('root and bare families print offline help with status zero', (t) => {
 });
 
 const leaves = [
-  ['whoami'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
+  ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
   ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'codex'], ['hook'], ['statusline'], ['reap'],
 ];
@@ -192,6 +193,61 @@ test('whoami reports the resolver and proves selected assets', (t) => {
   assert.match(failed.stderr, new RegExp(member));
   assert.match(failed.stderr, /idle/);
   assert.match(failed.stderr, new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+function fixtureTheme(f) {
+  mkdirSync(join(f.config, 'themes'));
+  cpSync(themeFixture, join(f.config, 'themes', 'fixture'), { recursive: true });
+  writeFileSync(join(f.config, 'config.yaml'), 'theme: fixture\nmotion: full\n');
+  writeFileSync(join(f.config, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+}
+
+test('projects prints one cell per directory and says who decided the slot', (t) => {
+  const f = fixture(t);
+  fixtureTheme(f);
+  const pinned = gitRepo(t);                       // a path pin below claims slot 7
+  const hashed = join(f.root, 'loose');            // no repo, no pin: the cwd is the key
+  mkdirSync(hashed);
+  writeFileSync(join(f.config, 'identities.yaml'), `identities:\n  - path: ${pinned}\n    slot: 7\n`);
+
+  const result = run(['projects', hashed, pinned], f.env);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.match(result.stdout, /^  fixture — /m);
+  // Sorted by label, one column off a TTY, blank line between cells.
+  const cells = result.stdout.trim().split('\n\n').slice(1);
+  assert.equal(cells.length, 2);
+  assert.match(cells[0], /^  #[0-9a-f]{6}  loose\n      .+ · slot \d+ · auto$/);
+  assert.match(cells[1], /^  #[0-9a-f]{6}  widget\n      .+ · slot 7 · pin$/);
+
+  // With no DIR the pin catalog's paths are the list.
+  const pinsOnly = run(['projects'], f.env);
+  assert.equal(pinsOnly.status, 0, pinsOnly.stderr);
+  assert.match(pinsOnly.stdout, /widget/);
+  assert.doesNotMatch(pinsOnly.stdout, /loose/);
+
+  // A directory that is not there is an error, not a missing cell.
+  const missing = run(['projects', join(f.root, 'nowhere')], f.env);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /nowhere/);
+});
+
+test('projects fills the terminal width with columns', (t) => {
+  const f = fixture(t);
+  fixtureTheme(f);
+  const dirs = ['aa', 'bb', 'cc'].map((name) => {
+    const dir = join(f.root, name);
+    mkdirSync(dir);
+    return dir;
+  });
+  const wide = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...f.env, TTY_COLUMNS: '200', NO_COLOR: '1' } });
+  assert.equal(wide.status, 0, wide.stderr);
+  const [, names] = wide.stdout.split('\n\n');
+  assert.match(names.split('\n')[0], /aa.*bb.*cc/);
+
+  const narrow = runTty(['projects', ...dirs], { encoding: 'utf8', env: { ...f.env, TTY_COLUMNS: '20', NO_COLOR: '1' } });
+  assert.equal(narrow.status, 0, narrow.stderr);
+  assert.equal(narrow.stdout.trim().split('\n\n').length, 4);
 });
 
 test('current user and agent surfaces contain no retired CLI invocations', () => {
