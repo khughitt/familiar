@@ -166,7 +166,7 @@ Examples:
   projects: `Show every project's familiar, in a grid.
 
 Usage:
-  familiar projects [DIR...] [--rows N]
+  familiar projects [DIR...] [--rows N] [--state STATE]
 
 Arguments:
   DIR             Project directories; default to the paths pinned in identities.yaml.
@@ -174,6 +174,7 @@ Arguments:
 
 Options:
   --rows N        Draw each sprite N rows tall instead of the theme's height
+  --state STATE   Draw that pose instead of idle
 
 Each cell draws the project's familiar over its name, member, slot, and whether a
 pin or the project's hash chose the slot. Columns fill the terminal width; a pipe
@@ -183,6 +184,7 @@ Examples:
   familiar projects
   familiar projects ~/src/*
   familiar projects --rows 3 ~/src/*
+  familiar projects --state working
 `,
   theme: `Browse and inspect themes.
 
@@ -743,7 +745,7 @@ async function main({ command, args: rest }) {
     );
   } else if (command === 'projects') {
     const { positionals, values } = parseLeaf(rest, {
-      options: { rows: { type: 'string' } },
+      options: { rows: { type: 'string' }, state: { type: 'string' } },
       minPositionals: 0, maxPositionals: Infinity, help: 'projects',
     });
     const resolver = await identityResolver();
@@ -773,6 +775,10 @@ async function main({ command, args: rest }) {
         `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(values.rows)}`
       );
     }
+    const state = values.state ?? 'idle';
+    if (!STATES.includes(state)) {
+      throw new Error(`unknown state "${state}" — one of: ${STATES.join(', ')}`);
+    }
     const interactive = process.stdout.isTTY === true;
     const tmux = tmuxFacts(process.env);
     const capability = graphicsCapability(process.env, tmux);
@@ -791,10 +797,10 @@ async function main({ command, args: rest }) {
     const cells = resolved.map(({ identity, pin }) => {
       const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color });
       const name = color ? `${BOLD}${identity.project}${RESET}` : identity.project;
-      // resolve() proved the member's assets exist; the idle pose is what a
-      // roster shows, as it is for `theme show`.
+      // resolve() proved the member's assets exist. Idle is what a roster shows,
+      // as it is for `theme show`; --state asks for another pose.
       const png = graphical
-        ? readFileSync(assetsFor(resolver.pack, identity.member, resolver.tone.mode).idle.terminal)
+        ? readFileSync(assetsFor(resolver.pack, identity.member, resolver.tone.mode)[state].terminal)
         : null;
       return {
         lines: [

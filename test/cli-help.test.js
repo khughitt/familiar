@@ -10,6 +10,7 @@ import { extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderHelp } from '../bin/familiar.js';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
+import { decodeRgba, encodeRgba } from 'familiar-theme';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -309,6 +310,29 @@ test('projects draws each sprite above its caption on a graphics terminal', (t) 
   const bad = runTty(['projects', '--rows', '0', ...dirs], { encoding: 'utf8', env: kitty });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /--rows/);
+
+  // --state picks the pose, validated against the theme contract's list.
+  const working = runTty(['projects', '--state', 'working', ...dirs], { encoding: 'utf8', env: kitty });
+  assert.equal(working.status, 0, working.stderr);
+  // The fixture ships one PNG for every pose, so the wire cannot tell them apart
+  // until one pose is made different: then the bytes on the wire must be that
+  // file's, and idle's must still be idle's.
+  const spriteDirs = readdirSync(join(f.config, 'themes', 'fixture', 'sprites'))
+    .map((dir) => join(f.config, 'themes', 'fixture', 'sprites', dir));
+  for (const dir of spriteDirs) {
+    const frame = decodeRgba(readFileSync(join(dir, 'idle.png')));
+    frame.buf[3] = frame.buf[3] === 0 ? 255 : 0;   // one pixel's alpha, flipped
+    writeFileSync(join(dir, 'working.png'), encodeRgba(frame));
+  }
+  const payloadOf = (out) => [...out.matchAll(/\x1b_G[^;]*;([^\x1b]*)\x1b\\/g)].map((m) => m[1]).join('');
+  const drawn = runTty(['projects', '--state', 'working', dirs[0]], { encoding: 'utf8', env: kitty });
+  assert.equal(drawn.status, 0, drawn.stderr);
+  assert.equal(payloadOf(drawn.stdout), readFileSync(join(spriteDirs[0], 'working.png')).toString('base64'));
+  const idle = runTty(['projects', dirs[0]], { encoding: 'utf8', env: kitty });
+  assert.equal(payloadOf(idle.stdout), readFileSync(join(spriteDirs[0], 'idle.png')).toString('base64'));
+  const unknown = runTty(['projects', '--state', 'napping', ...dirs], { encoding: 'utf8', env: kitty });
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /unknown state "napping" — one of: idle, working/);
 
   // No graphics: the text grid and one line saying so.
   const plain = runTty(['projects', ...dirs], { encoding: 'utf8', env: noGraphics(kitty) });
