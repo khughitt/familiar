@@ -11,37 +11,39 @@ const integrationDir = fileURLToPath(new URL('../integrations/opencode/', import
 const HELP = `Install Familiar's OpenCode server and TUI plugins.
 
 Usage:
-  familiar install opencode [--project DIR | --config-dir DIR]
+  familiar install opencode [--project-dir DIR | --config-dir DIR]
 
 Options:
-  --project DIR      Install into DIR/.opencode
+  --project-dir DIR  Install into DIR/.opencode
   --config-dir DIR   Install into this exact config directory
 
 The two target options are mutually exclusive. With neither, installs globally.
 `;
 
-// Strict arg parsing. A flag with no value must NOT fall through to a default: `--project` with
+// Strict arg parsing. A flag with no value must NOT fall through to a default: `--project-dir` with
 // nothing after it once silently targeted the GLOBAL config, so a typo could mutate ~/.config.
 // Reject a missing value, an unknown flag, and mutually exclusive targets — all BEFORE any read.
+// `familiar install opencode` validates the same rows against its declared table before
+// forwarding; this parser is the guard for the binary invoked directly.
 function parseArgs(argv) {
   let project = null, configDir = null;
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--project' || a === '--config-dir') {
+    if (a === '--project-dir' || a === '--config-dir') {
       if (seen.has(a)) throw new Error(`duplicate ${a}`);
       seen.add(a);
       const v = argv[i + 1];
       // Reject undefined, empty, and flag-shaped values: an empty string is falsy and would
       // otherwise fall through to the GLOBAL config dir below — a typo silently mutating ~/.config.
       if (v === undefined || v === '' || v.startsWith('-')) throw new Error(`${a} requires a non-empty directory value`);
-      if (a === '--project') project = v; else configDir = v;
+      if (a === '--project-dir') project = v; else configDir = v;
       i++;
     } else {
       throw new Error(`unknown argument: ${a}`);
     }
   }
-  if (project && configDir) throw new Error('--project and --config-dir are mutually exclusive');
+  if (project && configDir) throw new Error('--project-dir and --config-dir are mutually exclusive');
   return { project, configDir };
 }
 
@@ -50,7 +52,7 @@ if (args[0] === '-h' || args[0] === '--help') {
   process.stdout.write(HELP);
 } else try {
   const { project, configDir: explicit } = parseArgs(args);
-  // Distribution target (spec §5). Default: the GLOBAL opencode config dir. `--project <dir>`
+  // Distribution target (spec §5). Default: the GLOBAL opencode config dir. `--project-dir <dir>`
   // writes the project-local `<dir>/.opencode/` fallback (the one opencode dependency-auto-installs
   // into). `--config-dir <dir>` overrides both (used by the tests).
   const configDir = explicit

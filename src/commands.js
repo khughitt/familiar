@@ -18,7 +18,7 @@ export const COMMANDS = [
   { path: ['scheme', 'set'], summary: 'Set the terminal colour scheme', args: [{ name: 'scheme', value: 'enum', values: ['dark', 'light'], required: true }], options: [{ names: ['--sat'], value: 'string' }] },
   { path: ['install'], summary: 'Install the active theme into a harness' },
   { path: ['install', 'pets'], summary: 'Install the active theme as Codex pets', options: [{ names: ['--out'], value: 'path' }, { names: ['--sync-projects'], value: 'none' }] },
-  { path: ['install', 'opencode'], summary: 'Install the OpenCode integration' },
+  { path: ['install', 'opencode'], summary: 'Install the OpenCode integration', options: [{ names: ['--project-dir'], value: 'path' }, { names: ['--config-dir'], value: 'path' }] },
   { path: ['setup'], summary: "Print a harness's integration settings" },
   { path: ['setup', 'claude-code'], summary: 'Print Claude Code integration settings' },
   { path: ['setup', 'codex'], summary: 'Print Codex integration settings' },

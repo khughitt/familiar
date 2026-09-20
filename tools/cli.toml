@@ -1504,6 +1504,10 @@ options = [
 [[cli.familiar.commands]]
 path = ["install", "opencode"]
 summary = "Install the OpenCode integration"
+options = [
+  { names = ["--project-dir"], value = "path" },
+  { names = ["--config-dir"], value = "path" },
+]
 
 [[cli.familiar.commands]]
 path = ["setup"]

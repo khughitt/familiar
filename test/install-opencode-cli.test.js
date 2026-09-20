@@ -41,17 +41,17 @@ test('familiar-opencode: a clean config writes both files and exits 0', () => {
   assert.ok(files.includes('opencode.json'));
 });
 
-test('familiar-opencode: --project with no value is rejected, writes nothing to the global dir', () => {
+test('familiar-opencode: --project-dir with no value is rejected, writes nothing to the global dir', () => {
   const sandbox = mkdir();
-  // `--project` last, no value: must NOT silently fall through to the global config.
-  const res = run([OPENCODE_BIN, '--project'], sandbox);
+  // `--project-dir` last, no value: must NOT silently fall through to the global config.
+  const res = run([OPENCODE_BIN, '--project-dir'], sandbox);
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /requires a non-empty directory/);
   assert.deepEqual(readdirSync(sandbox).sort(), []); // the global (sandboxed) dir is untouched
 });
 
 test('familiar-opencode: an empty flag value is rejected, writes nothing to the global dir', () => {
-  for (const flag of ['--project', '--config-dir']) {
+  for (const flag of ['--project-dir', '--config-dir']) {
     const sandbox = mkdir();
     const res = run([OPENCODE_BIN, flag, ''], sandbox);
     assert.notEqual(res.status, 0);
@@ -66,8 +66,8 @@ test('familiar-opencode: an unknown flag is rejected', () => {
   assert.match(res.stderr, /unknown argument/);
 });
 
-test('familiar-opencode: --project and --config-dir together are rejected', () => {
-  const res = run([OPENCODE_BIN, '--project', '/a', '--config-dir', '/b'], mkdir());
+test('familiar-opencode: --project-dir and --config-dir together are rejected', () => {
+  const res = run([OPENCODE_BIN, '--project-dir', '/a', '--config-dir', '/b'], mkdir());
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /mutually exclusive/);
 });
@@ -75,16 +75,16 @@ test('familiar-opencode: --project and --config-dir together are rejected', () =
 test('familiar-opencode: flag-shaped target values fail before installation', (t) => {
   const sandbox = mkdir();
   t.after(() => rmSync(sandbox, { recursive: true, force: true }));
-  const res = spawnSync('node', [OPENCODE_BIN, '--project', '-h'], {
+  const res = spawnSync('node', [OPENCODE_BIN, '--project-dir', '-h'], {
     cwd: sandbox, encoding: 'utf8', env: { ...process.env, XDG_CONFIG_HOME: sandbox },
   });
   assert.notEqual(res.status, 0);
-  assert.match(res.stderr, /--project requires a non-empty directory value/);
+  assert.match(res.stderr, /--project-dir requires a non-empty directory value/);
   assert.deepEqual(readdirSync(sandbox), []);
 });
 
 test('familiar-opencode: repeated target flags fail before installation', (t) => {
-  for (const flag of ['--project', '--config-dir']) {
+  for (const flag of ['--project-dir', '--config-dir']) {
     const sandbox = mkdir();
     t.after(() => rmSync(sandbox, { recursive: true, force: true }));
     const res = spawnSync('node', [OPENCODE_BIN, flag, 'first', flag, 'second'], {
@@ -104,12 +104,30 @@ test('familiar install opencode: dispatches to the wrapper and propagates its no
   assert.match(res.stderr, /must be an array/);
 });
 
+test('familiar install opencode: an undeclared option is a usage error before the wrapper runs', () => {
+  const sandbox = mkdir();
+  for (const args of [['--project', '/x'], ['--wat', '/x'], ['--config-dir']]) {
+    const res = run([FAMILIAR_BIN, 'install', 'opencode', ...args], sandbox);
+    assert.equal(res.status, 2, args.join(' '));          // this binary's usage error, not the child's exit 1
+    assert.equal(res.stdout, '');
+    assert.doesNotMatch(res.stderr, /opencode install failed/); // the child never ran
+    assert.deepEqual(readdirSync(sandbox), []);
+  }
+});
+
+test('familiar install opencode --project-dir writes into DIR/.opencode', () => {
+  const dir = mkdir();
+  const res = run([FAMILIAR_BIN, 'install', 'opencode', '--project-dir', dir], mkdir());
+  assert.equal(res.status, 0, res.stderr);
+  assert.deepEqual(readdirSync(join(dir, '.opencode')).sort(), ['opencode.json', 'tui.json']);
+});
+
 test('familiar install opencode --help is owned by the installer and writes nothing', () => {
   const sandbox = mkdir();
   const res = run([FAMILIAR_BIN, 'install', 'opencode', '--help'], sandbox);
   assert.equal(res.status, 0, res.stderr);
   assert.equal(res.stderr, '');
-  assert.match(res.stdout, /--project DIR/);
+  assert.match(res.stdout, /--project-dir DIR/);
   assert.match(res.stdout, /--config-dir DIR/);
   assert.match(res.stdout, /mutually exclusive/);
   assert.deepEqual(readdirSync(sandbox), []);

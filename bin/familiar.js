@@ -1164,10 +1164,18 @@ async function main({ command, args: rest, color, mode }) {
     // replaces), which is what lets a --json invocation repackage it below. `--help` and a
     // failing install still get the child's own text verbatim, on the same streams, with the
     // same exit code as before -- only a SUCCESSFUL, non-help, --json run is reshaped.
+    //
+    // The options are validated HERE against the declared row before anything is forwarded,
+    // the way every other leaf validates its own: an undeclared option is a usage error
+    // (exit 2) from this binary, not a child failure (exit 1) relayed verbatim. Only the
+    // declared options, in canonical `--name value` form, reach the child; its own parser
+    // keeps guarding direct `familiar-opencode` invocations and the mutual exclusion.
     const bin = fileURLToPath(new URL('familiar-opencode', import.meta.url));
-    const result = spawnSync(process.execPath, [bin, ...rest], { encoding: 'utf8' });
-    if (result.error) throw result.error;
     const isHelp = rest[0] === '-h' || rest[0] === '--help';
+    const forwarded = isHelp ? [rest[0]] : Object.entries(parseLeaf(rest, leafOptions).values)
+      .flatMap(([name, value]) => [`--${name}`, value]);
+    const result = spawnSync(process.execPath, [bin, ...forwarded], { encoding: 'utf8' });
+    if (result.error) throw result.error;
     if (result.status !== 0 || isHelp || mode !== 'json') {
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
