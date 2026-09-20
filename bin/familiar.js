@@ -1,7 +1,7 @@
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { adapterFor, AGENTS } from '../src/adapters/index.js';
@@ -1099,6 +1099,19 @@ async function main({ command, args: rest, color, mode }) {
 
     if (projectSync) applyCodexProjectSync(projectSync);
 
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        written, out,
+        sync: projectSync ? {
+          configs: projectSync.configs.length,
+          manual: projectSync.manual,
+          missing: projectSync.missing,
+          unpinnedSkip: projectSync.unpinnedSkip ?? null,
+        } : null,
+      })}\n`);
+      return;
+    }
+
     process.stdout.write(`wrote ${written} pets to ${out}\n`);
     if (!projectSync) {
       const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
@@ -1131,29 +1144,42 @@ async function main({ command, args: rest, color, mode }) {
       deps: { ...ctx, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
     });
     reportEvictions(evicted);
-    if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     const { removed } = await pruneLedgers({
       transmitDir: ctx.paths.transmitDir,
       agents: (await readJson(ctx.paths.agentsPath)) ?? {},
       ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
       startTimeOf: defaultProcessOps.startTimeOf,
     });
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({ reaped, pruned: removed.length })}\n`);
+      return;
+    }
+    if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     if (removed.length > 0) process.stdout.write(`pruned ${removed.length} transmission ledger(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
-    // portability seam forbids THIS file from naming the integration directory. Dispatch to it,
-    // inheriting stdio so its output and diagnostics reach the user directly.
-    //
-    // CATCH the child's failure HERE and exit with its status. bin/familiar's error boundary
-    // (below) deliberately swallows every throw and exits 0 — right for the cosmetic hook path,
-    // WRONG for a user-invoked mutating command: an install that failed must exit nonzero. So we
-    // must not let execFileSync's throw reach that boundary; we propagate the child's code instead.
+    // portability seam forbids THIS file from naming the integration directory. Its output is
+    // CAPTURED, not inherited: a synchronous spawnSync already has the child's complete stdout
+    // and stderr in memory by the time it returns (no draining race, unlike the execFileSync it
+    // replaces), which is what lets a --json invocation repackage it below. `--help` and a
+    // failing install still get the child's own text verbatim, on the same streams, with the
+    // same exit code as before -- only a SUCCESSFUL, non-help, --json run is reshaped.
     const bin = fileURLToPath(new URL('familiar-opencode', import.meta.url));
-    try {
-      execFileSync(process.execPath, [bin, ...rest], { stdio: 'inherit' });
-    } catch (err) {
-      process.exit(typeof err.status === 'number' ? err.status : 1);
+    const result = spawnSync(process.execPath, [bin, ...rest], { encoding: 'utf8' });
+    if (result.error) throw result.error;
+    const isHelp = rest[0] === '-h' || rest[0] === '--help';
+    if (result.status !== 0 || isHelp || mode !== 'json') {
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exitCode = result.status ?? 1;
+      return;
     }
+    // The wrapper's own two report lines ("wrote <path>", "left for you: <message>") become
+    // the JSON shape every other command's success path uses.
+    process.stdout.write(`${JSON.stringify({
+      written: [...result.stdout.matchAll(/^wrote (.+)$/gm)].map((m) => m[1]),
+      manual: [...result.stdout.matchAll(/^left for you: (.+)$/gm)].map((m) => m[1]),
+    })}\n`);
   } else if (command === 'scheme set') {
     const { positionals, values } = parseLeaf(rest, leafOptions);
     // Validated against the declared enum, not a hand-kept list: cmd is
@@ -1174,6 +1200,12 @@ async function main({ command, args: rest, color, mode }) {
       satScale: values.sat === undefined ? 1.0 : Number(values.sat),
     };
     await writeTone(paths, tone);
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        scheme: tone.mode, saturation: tone.satScale, path: paths.schemePath,
+      })}\n`);
+      return;
+    }
     process.stdout.write(
       `scheme ${tone.mode} · saturation ${tone.satScale}\n` +
       `wrote ${paths.schemePath}\n`,
@@ -1194,7 +1226,9 @@ async function main({ command, args: rest, color, mode }) {
       );
     }
     const pack = loadThemePackSync(row.dir);
-    const { mode } = await loadTone({ paths });
+    // schemeMode, not mode: the terminal colour scheme (dark|light), not the
+    // --json/--pretty output mode main() already destructured as `mode`.
+    const { mode: schemeMode } = await loadTone({ paths });
 
     if (values.state !== undefined && !STATES.includes(values.state)) {
       throw new Error(`unknown state "${values.state}" — one of: ${STATES.join(', ')}`);
@@ -1202,7 +1236,16 @@ async function main({ command, args: rest, color, mode }) {
     const states = values.state === undefined ? STATES : [values.state];
 
     const member = memberOrThrow(pack, memberId);
-    const assets = assetsFor(pack, memberId, mode);
+    const assets = assetsFor(pack, memberId, schemeMode);
+
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        theme: themeId,
+        member: { id: memberId, label: member.label, persona: member.persona, slots: member.slots },
+        states: states.map((state) => ({ state, pose: member.poses[state] })),
+      })}\n`);
+      return;
+    }
 
     const tmux = tmuxFacts(process.env);
     const capability = graphicsCapability(process.env, tmux);
@@ -1234,6 +1277,12 @@ async function main({ command, args: rest, color, mode }) {
     const paths = resolvePaths();
     const { themeId: activeId } = await loadConfig({ paths });
     const result = await addTheme({ paths, source: positionals[0] });
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        id: result.id, dir: result.dir, members: result.members, active: result.id === activeId,
+      })}\n`);
+      return;
+    }
     process.stdout.write(`installed theme '${result.id}' (${result.members} members) at ${result.dir}\n`);
     if (result.id !== activeId) {
       process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
@@ -1300,6 +1349,13 @@ async function main({ command, args: rest, color, mode }) {
     const { positionals } = parseLeaf(rest, leafOptions);
     const pack = await validateThemePack(resolve(positionals[0]));
     const covered = pack.bySlot.size;
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        id: pack.id, label: pack.label, members: pack.members.size,
+        slotsCovered: covered, slotCount: SLOT_COUNT, specVersion: pack.specVersion,
+      })}\n`);
+      return;
+    }
     process.stdout.write(
       `${pack.id} — ${pack.label}\n` +
       `  ${pack.members.size} member${pack.members.size === 1 ? '' : 's'}, ` +
@@ -1468,7 +1524,9 @@ async function main({ command, args: rest, color, mode }) {
     const wanted = themeArg ?? activeId;
     const pack = loadThemePackSync(themeDirFor(paths, wanted));
     const ctxTone = await loadTone({ paths });
-    const { mode } = ctxTone;
+    // schemeMode, not mode: the terminal colour scheme (dark|light), not the
+    // --json/--pretty output mode main() already destructured as `mode`.
+    const { mode: schemeMode } = ctxTone;
 
     // The same bounds and the same meaning as `theme --rows`: a VIEW control that never
     // touches pack.rows. Default is the theme's own height, so an unflagged contact
@@ -1484,6 +1542,14 @@ async function main({ command, args: rest, color, mode }) {
       ? [...Array(SLOT_COUNT).keys()].map((slot) => defaultMemberForSlot(pack, slot))
       : [memberOrThrow(pack, memberArg).id];
 
+    // json with no --out has no file to describe and nothing worth rendering (a
+    // sprite belongs in the terminal or in --out's PNG, never embedded in JSON) --
+    // metadata only, before any image decoding runs.
+    if (mode === 'json' && outArg === undefined) {
+      process.stdout.write(`${JSON.stringify({ theme: pack.id, label: pack.label, members: ids, states: STATES })}\n`);
+      return;
+    }
+
     // ONE BOX FOR THE WHOLE SHEET, computed before anything is drawn. Members have
     // different canvas sizes, so scaling each to the same HEIGHT still leaves them
     // different widths — and columns that do not line up defeat the point of reading
@@ -1493,7 +1559,7 @@ async function main({ command, args: rest, color, mode }) {
       id,
       member: memberOrThrow(pack, id),
       frames: STATES.map((state) => {
-        const assets = assetsFor(pack, id, mode);
+        const assets = assetsFor(pack, id, schemeMode);
         return {
           ...scaleTo(decodeRgba(readFileSync(assets[state].terminal)), { height: FRAME_H }),
           anchor: memberOrThrow(pack, id).anchor,
@@ -1509,6 +1575,12 @@ async function main({ command, args: rest, color, mode }) {
     if (outArg !== undefined) {
       const grid = composeGrid(boxed.map((row) => row.frames), { gap: 8, rowGap: 16 });
       writeFileSync(outArg, encodeRgba(grid));
+      if (mode === 'json') {
+        process.stdout.write(`${JSON.stringify({
+          theme: pack.id, members: ids, states: STATES, out: outArg, width: grid.w, height: grid.h,
+        })}\n`);
+        return;
+      }
       process.stdout.write(
         `\n  ${pack.id} — ${STATES.join(', ')}\n`
         + `  ${boxed.length} member${boxed.length === 1 ? '' : 's'} x ${STATES.length} states -> ${outArg} (${grid.w}x${grid.h})\n\n`

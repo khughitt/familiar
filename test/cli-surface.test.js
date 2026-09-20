@@ -36,6 +36,18 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'familiar-cli-'));
 const base = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, 'config'), XDG_STATE_HOME: path.join(home, 'state') };
 const run = (args, env = {}) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env: { ...base, ...env } });
 
+// An installed, active theme (src/bus/paths.js resolves familiar's config dir from
+// HOME, not the XDG_* vars above) so every leaf command below has something real to
+// report on -- the same committed placeholder pack test/fixtures/theme-pack, and the
+// same shadow-as-a-user-theme mechanism test/cli-help.test.js and test/theme-catalog
+// .test.js already use.
+const configDir = path.join(home, '.config', 'familiar');
+const themeFixture = path.join(ROOT, 'test', 'fixtures', 'theme-pack');
+fs.mkdirSync(path.join(configDir, 'themes'), { recursive: true });
+fs.cpSync(themeFixture, path.join(configDir, 'themes', 'fixture'), { recursive: true });
+fs.writeFileSync(path.join(configDir, 'config.yaml'), 'theme: fixture\nmotion: full\n');
+fs.writeFileSync(path.join(configDir, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+
 test('declared surface equals tools/cli.toml', () => {
   const live = liveRows(), table = tableRows();
   assert.deepEqual({ parserOnly: [...live].filter((r) => !table.has(r)), tableOnly: [...table].filter((r) => !live.has(r)) }, { parserOnly: [], tableOnly: [] });
@@ -106,4 +118,59 @@ test('completion callback and scripts', () => {
   assert.equal(execFileSync('zsh', ['-f', '-c', `autoload -Uz compinit; compinit -D -u; source ${zsh}; print -r -- \${_comps[familiar]}`], { encoding: 'utf8' }).trim(), '_familiar');
   const bash = path.join(home, 'familiar.bash'); fs.writeFileSync(bash, run([], { FAMILIAR_COMPLETE: 'bash' }).stdout);
   execFileSync('bash', ['-c', `source ${bash}; complete -p familiar`]);
+});
+
+// A command is a family (a grouping row, never invoked -- it always resolves to
+// help) when some other row's path has it as a proper prefix. Families and protocol
+// rows are outside the output-mode contract: a family is always help, and a protocol
+// command speaks its own protocol instead.
+const isFamily = (cmd) => COMMANDS.some((d) => d.path.length > cmd.path.length
+  && cmd.path.every((p, i) => d.path[i] === p));
+
+test('output mode is honoured by every non-protocol, non-family command', () => {
+  const scratch = () => fs.mkdtempSync(path.join(home, 'scratch-'));
+
+  // A fresh theme source, distinct id, so `theme add` has something new to install
+  // without colliding with the "fixture" theme every other invocation below reads.
+  const addSource = scratch();
+  fs.cpSync(themeFixture, addSource, { recursive: true });
+  fs.writeFileSync(
+    path.join(addSource, 'theme.yaml'),
+    fs.readFileSync(path.join(addSource, 'theme.yaml'), 'utf8')
+      .replace('id: fixture', 'id: fixture-added').replace('label: Fixture', 'label: Fixture Added'),
+  );
+
+  // One argv per leaf command that succeeds against the fixture set up above --
+  // derived from the table below (every non-family, non-protocol row must have one),
+  // not the other way around.
+  const invocations = {
+    whoami: () => ['whoami', scratch()],
+    projects: () => ['projects', scratch()],
+    'theme list': () => ['theme', 'list'],
+    'theme add': () => ['theme', 'add', addSource],
+    'theme validate': () => ['theme', 'validate', themeFixture],
+    'theme show': () => ['theme', 'show'],
+    'theme preview': () => ['theme', 'preview', 'pip'],
+    'theme sheet': () => ['theme', 'sheet', '--member', 'pip'],
+    'scheme set': () => ['scheme', 'set', 'dark'],
+    'install pets': () => ['install', 'pets', '--out', scratch()],
+    'install opencode': () => ['install', 'opencode', '--config-dir', scratch()],
+    'setup claude-code': () => ['setup', 'claude-code'],
+    'setup codex': () => ['setup', 'codex'],
+    reap: () => ['reap'],
+  };
+
+  const uncovered = [];
+  for (const cmd of COMMANDS) {
+    if (cmd.protocol || isFamily(cmd)) continue;
+    const key = cmd.path.join(' ');
+    const build = invocations[key];
+    if (!build) { uncovered.push(key); continue; }
+    const r = run(['--json', ...build()]);
+    assert.equal(r.status, 0, `${key}: ${r.stderr}`);
+    assert.doesNotThrow(() => JSON.parse(r.stdout), `${key} did not print exactly one JSON value: ${JSON.stringify(r.stdout)}`);
+  }
+  // Every non-family, non-protocol row must be named above -- silently sampling a
+  // subset would let a future command ship with no json branch unnoticed.
+  assert.deepEqual(uncovered, []);
 });
