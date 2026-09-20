@@ -29,8 +29,8 @@ test('theme validate on a broken pack prints the gate error and exits 1', (t) =>
   assert.match(r.stderr, /idle\.png/);
 });
 
-test('theme validate with no directory prints usage and exits 1', () => {
+test('theme validate with no directory prints usage and exits 2', () => {
   const r = run('theme', 'validate');
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 2);
   assert.match(r.stderr, /theme validate/);
 });

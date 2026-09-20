@@ -115,7 +115,7 @@ test('setup rejects extra arguments and unknown flags before work', () => {
     const result = spawnSync(process.execPath, [bin, ...args], {
       encoding: 'utf8', env: runEnv,
     });
-    assert.equal(result.status, 1);
+    assert.equal(result.status, 2);
     assert.equal(result.stdout, '');
     assert.match(result.stderr, /unexpected argument|unknown option/i);
     assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
@@ -352,18 +352,20 @@ test('the sheet caption takes its colour from the member\'s first slot, and the 
 // mode throws out of assertTone/writeTone (src/config.js), never touching
 // context() or the theme pack at all. Proves the boundary isn't tied to one
 // particular call site.
-test('scheme set with an invalid mode exits nonzero through the same boundary', () => {
+test('scheme set with an invalid mode is a usage error, not a runtime one', () => {
+  // Validated against the declared enum before writeTone ever runs -- an unknown
+  // value is an argv-shape problem (exit 2), not a failure of the write (exit 1).
   const result = spawnSync(process.execPath, [bin, 'scheme', 'set', 'neon'], {
     encoding: 'utf8',
     env: env(),
   });
 
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 2);
   assert.equal(result.stdout, '');
 
   const lines = result.stderr.split('\n').filter((line) => line !== '');
-  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${result.stderr}`);
-  assert.match(lines[0], /^familiar: SchemeTone\.mode must be "dark" or "light", got: neon$/);
+  assert.ok(lines.length <= 2, `expected at most two stderr lines, got:\n${result.stderr}`);
+  assert.match(lines[0], /scheme must be one of dark, light, got "neon"/);
 });
 
 // The portable escape hatch this seam exists for: a bare machine with no
@@ -714,7 +716,7 @@ test('pets refuses --sync-projects with --out before loading config or writing o
     [bin, 'install', 'pets', '--sync-projects', '--out', out],
     { encoding: 'utf8', env: env() },
   );
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 2);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /--sync-projects cannot be combined with --out/);
   assert.match(result.stderr, /familiar install pets --help/);

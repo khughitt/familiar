@@ -57,9 +57,9 @@ test('theme add rejects a non-https transport with the rule', () => {
   assert.match(r.stderr, /HTTPS URLs or local directories/);
 });
 
-test('theme add with no source prints usage and exits 1', () => {
+test('theme add with no source prints usage and exits 2', () => {
   const r = run(scratchEnv(), 'theme', 'add');
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 2);
   assert.match(r.stderr, /theme add/);
 });
 
@@ -69,7 +69,7 @@ test('theme add accepts one positional and no flags', () => {
     ['theme', 'add', '--force', writePack()],
   ]) {
     const r = run(scratchEnv(), ...args);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 2);
     assert.match(r.stderr, /theme add/);
   }
 });

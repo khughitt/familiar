@@ -373,8 +373,10 @@ test('a theme with one members sprite directory removed still renders the other 
 });
 
 test('each slot row carries a coloured hue swatch', () => {
+  // --color's own default is 'never'; FAMILIAR_COLOR=auto opts back into the
+  // TTY-sensing this test is about.
   const result = runTty(['theme', 'show'], {
-    encoding: 'utf8', env: cliEnv(GRAPHICAL), maxBuffer: THEME_MAX_BUFFER,
+    encoding: 'utf8', env: { ...cliEnv(GRAPHICAL), FAMILIAR_COLOR: 'auto' }, maxBuffer: THEME_MAX_BUFFER,
   });
   // sgr.fg() emits a 24-bit foreground sequence; the swatch is a block glyph in it.
   assert.match(result.stdout, /\x1b\[38;2;\d+;\d+;\d+m█/);
@@ -413,6 +415,7 @@ test('CLI color requires a TTY and honours NO_COLOR', () => {
 
 test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
   const env = cliEnv(GRAPHICAL);
+  env.FAMILIAR_COLOR = 'auto';   // opt into TTY/NO_COLOR sensing; the flag's own default is 'never'
   env.NO_COLOR = '1';
   delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
   const result = runTty(['theme', 'show'], { encoding: 'utf8', env, maxBuffer: THEME_MAX_BUFFER });

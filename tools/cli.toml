@@ -1,0 +1,1628 @@
+# The shared CLI vocabulary and the inventory of every in-scope CLI's commands.
+#
+# Design: docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
+# each project vendors it byte-identical as tools/cli.toml and has one conformance test
+# that builds its live parser surface and asserts set equality with its rows here. A new
+# option or command anywhere is an edit here first, then a re-copy (`just vendor-cli`).
+#
+# Row shapes (spec "The table"):
+#   option: names | shared (+ role), value, values, default, arity, repeatable, required
+#   arg:    name, value, values, required, variadic
+#   command: path, summary, verb, output, protocol, exception, args, options
+# --json, --pretty, -h/--help, -V/--version, and --color on typed CLIs are implied by the
+# CLI header and never rows; a protocol CLI implies only the help and version ones. The
+# root `help` command is implied by the Help rule the same way and is never a row.
+
+[vocabulary.values.when]
+grammar = "YYYY-MM-DD | <n>d | <n>w"
+meaning = "a calendar date, or a count of days or weeks back from today"
+
+[vocabulary.values.age]
+grammar = "<n>d | <n>w"
+meaning = "a duration; 0d disables an age check"
+
+[vocabulary.values.harness]
+set = ["claude-code", "codex", "opencode"]
+
+[vocabulary.values.color]
+set = ["auto", "always", "never"]
+
+[vocabulary.options.json]
+names = ["--json"]
+value = "none"
+meaning = "emit exactly one JSON value on stdout"
+
+[vocabulary.options.pretty]
+names = ["--pretty"]
+value = "none"
+meaning = "emit text for a person"
+
+[vocabulary.options.color]
+names = ["--color"]
+value = "enum"
+values = "color"
+default = "never"
+meaning = "color pretty output"
+
+[vocabulary.options.chdir]
+names = ["-C"]
+value = "path"
+meaning = "run as if started in that directory"
+
+[vocabulary.options.config]
+names = ["--config"]
+value = "path"
+meaning = "read this configuration file instead of the default"
+
+[vocabulary.options.limit]
+names = ["--limit", "-n"]
+value = "int"
+meaning = "at most this many results; the default is per command"
+
+[vocabulary.options.sort]
+names = ["--sort"]
+value = "enum"
+meaning = "order rows by that field; the first value is the default"
+
+[vocabulary.options.reverse]
+names = ["--reverse"]
+value = "none"
+meaning = "reverse the chosen order; present wherever sort is"
+
+[vocabulary.options.since]
+names = ["--since"]
+value = "when"
+meaning = "inclusive lower bound on the command's time field"
+
+[vocabulary.options.until]
+names = ["--until"]
+value = "when"
+meaning = "inclusive upper bound on the command's time field"
+
+[vocabulary.options.older_than]
+names = ["--older-than"]
+value = "age"
+meaning = "only things older than this"
+
+[vocabulary.options.newer_than]
+names = ["--newer-than"]
+value = "age"
+meaning = "only things newer than this"
+
+[vocabulary.options.seed]
+names = ["--seed"]
+value = "int"
+meaning = "fix a random draw so it can be reproduced"
+
+[vocabulary.options.status]
+names = ["--status"]
+value = "enum"
+meaning = "a record's lifecycle status: filter a listing, or set it on add/edit"
+
+[vocabulary.options.tag]
+names = ["--tag"]
+value = "string"
+meaning = "a tag: filter a listing, or attach one on add/edit"
+
+[vocabulary.options.project]
+names = ["--project"]
+value = "string"
+meaning = "one registered project, by prefix"
+
+[vocabulary.options.all_projects]
+names = ["--all-projects"]
+value = "none"
+meaning = "every reachable registered project"
+
+[vocabulary.options.harness]
+names = ["--harness"]
+value = "enum"
+values = "harness"
+meaning = "the agent harness a record belongs to; a command lists the subset it supports"
+
+[vocabulary.options.all]
+names = ["--all"]
+value = "none"
+meaning = "include what the default view hides"
+
+[vocabulary.options.force]
+names = ["--force"]
+value = "none"
+meaning = "override a refusal the command would otherwise make"
+
+[vocabulary.options.by]
+names = ["--by"]
+value = "string"
+meaning = "filter by author actor (mindful)"
+
+[vocabulary.options.as]
+names = ["--as"]
+value = "string"
+meaning = "the author actor of a write (mindful)"
+
+[vocabulary.options.via]
+names = ["--via"]
+value = "string"
+meaning = "the performer actor of a write (mindful)"
+
+[vocabulary.roles]
+set = ["filter", "set", "bound", "select"]
+roled = ["status", "tag", "since", "until", "older_than", "newer_than", "sort", "project", "harness", "by"]
+
+[vocabulary.verbs.list]
+meaning = "many rows, filterable, one line each in pretty mode"
+
+[vocabulary.verbs.show]
+meaning = "one thing in full"
+
+[vocabulary.verbs.add]
+meaning = "create one thing"
+
+[vocabulary.verbs.edit]
+meaning = "change one thing"
+
+[vocabulary.verbs.delete]
+meaning = "remove one thing"
+
+[vocabulary.verbs.check]
+meaning = "validate; prints nothing and exits 0 when clean, findings otherwise"
+
+[cli.tasks]
+project = "tasks"
+tier = "typed"
+default_output = "json"
+env = "TASKS"
+
+[cli.mindful]
+project = "mind6"
+tier = "typed"
+default_output = "pretty"
+env = "MINDFUL"
+
+[cli.walictl]
+project = "wali"
+tier = "typed"
+default_output = "pretty"
+env = "WALICTL"
+
+[cli.prism]
+project = "prism"
+tier = "typed"
+default_output = "pretty"
+env = "PRISM"
+
+[cli.familiar]
+project = "fam"
+tier = "typed"
+default_output = "pretty"
+env = "FAMILIAR"
+
+[cli.forge]
+project = "forge"
+tier = "automation"
+default_output = "pretty"
+env = "FORGE"
+
+[cli.relay]
+project = "relay"
+tier = "automation"
+default_output = "pretty"
+env = "RELAY"
+
+[cli.obs]
+project = "obs"
+tier = "automation"
+default_output = "pretty"
+env = "OBS"
+
+[cli.lit]
+project = "lit"
+tier = "automation"
+default_output = "pretty"
+env = "LIT"
+
+[cli.science]
+project = "sci"
+tier = "automation"
+default_output = "pretty"
+env = "SCIENCE"
+protocol = "science invocation envelope: an invocation_id line per command, exit-3 refusals"
+
+[cli.pilot]
+project = "ns"
+tier = "automation"
+default_output = "pretty"
+env = "PILOT"
+
+# ---- tasks
+
+[[cli.tasks.commands]]
+path = []
+options = [
+  { shared = "chdir", value = "path" },
+]
+
+[[cli.tasks.commands]]
+path = ["init"]
+summary = "Initialize tasks/ in this repository and register it"
+options = [
+  { names = ["--prefix"], value = "string" },
+  { shared = "force", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["rename"]
+summary = "Rename a registered project's prefix and retain its retired names as aliases"
+args = [{ name = "old", value = "ref", required = true }, { name = "new", value = "ref", required = true }]
+options = [
+  { names = ["--explain"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["unregister"]
+summary = "Remove a prefix from the registry. Project files are left untouched"
+args = [{ name = "prefix", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["projects"]
+summary = "The registry: every project, whether it is reachable, and its status counts"
+options = [
+  { shared = "sort", role = "select", value = "enum", values = ["prefix", "size", "activity"], default = "prefix" },
+  { shared = "reverse", value = "none" },
+  { names = ["--closed"], value = "none" },
+  { names = ["--paths"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["root"]
+summary = "The registered root of the project an id belongs to"
+args = [{ name = "id", value = "ref", required = true }]
+
+[[cli.tasks.commands]]
+path = ["add"]
+verb = "add"
+summary = "Create a task"
+args = [{ name = "title", value = "string", required = true }]
+options = [
+  { shared = "status", role = "set", value = "enum", values = ["idea", "todo"], default = "todo", repeatable = false },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { names = ["--body", "-b"], value = "string" },
+  { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--process"], value = "enum", values = ["direct", "planned"] },
+  { names = ["--parallel"], value = "none" },
+  { names = ["--every"], value = "age", role = "set" },
+  { names = ["--defer"], value = "when", role = "set" },
+  { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--spec"], value = "string" },
+  { names = ["--plan"], value = "string" },
+  { names = ["--step"], value = "string" },
+  { names = ["--parent"], value = "ref" },
+  { names = ["--source"], value = "string" },
+  { names = ["--agent"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["show"]
+verb = "show"
+summary = "Show one task with resolved links and dependencies"
+args = [{ name = "id", value = "ref", required = true }]
+
+[[cli.tasks.commands]]
+path = ["list"]
+verb = "list"
+summary = "List tasks (open by default)"
+options = [
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { shared = "tag", role = "filter", value = "string", repeatable = true },
+  { names = ["--owner"], value = "string" },
+  { names = ["--source"], value = "string" },
+  { names = ["--parent"], value = "ref" },
+  { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
+  { shared = "reverse", value = "none" },
+  { names = ["--parked"], value = "none" },
+  { names = ["--periodic"], value = "none" },
+  { names = ["--deferred"], value = "none" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["ready"]
+summary = "Actionable tasks: todo or due recurrences with all dependencies closed"
+options = [
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
+  { names = ["--parallel"], value = "none" },
+  { shared = "limit", value = "int" },
+  { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["next"]
+summary = "The first ready task, in the show shape; null when nothing is ready"
+options = [
+  { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["sample"]
+summary = "Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed; not updated within --older-than days. Rows are list rows"
+options = [
+  { shared = "limit", value = "int", default = "3" },
+  { shared = "older_than", role = "bound", value = "age", default = "7d", repeatable = false },
+  { shared = "seed", value = "int" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["edit"]
+verb = "edit"
+summary = "Edit fields, or open the task in $EDITOR when no field flags are given"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--title"], value = "string" },
+  { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped"], repeatable = false },
+  { shared = "force", value = "none" },
+  { names = ["--no-parent"], value = "none" },
+  { names = ["--no-parallel"], value = "none" },
+  { names = ["--no-every"], value = "none" },
+  { names = ["--no-defer"], value = "none" },
+  { names = ["--no-source"], value = "none" },
+  { names = ["--no-agent"], value = "none" },
+  { names = ["--no-complexity"], value = "none" },
+  { names = ["--no-process"], value = "none" },
+  { names = ["--model"], value = "string" },
+  { names = ["--no-model"], value = "none" },
+  { names = ["--rm-tag"], value = "string", repeatable = true },
+  { names = ["--no-tags"], value = "none" },
+  { names = ["--body", "-b"], value = "string" },
+  { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--process"], value = "enum", values = ["direct", "planned"] },
+  { names = ["--parallel"], value = "none" },
+  { names = ["--every"], value = "age", role = "set" },
+  { names = ["--defer"], value = "when", role = "set" },
+  { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--spec"], value = "string" },
+  { names = ["--plan"], value = "string" },
+  { names = ["--step"], value = "string" },
+  { names = ["--parent"], value = "ref" },
+  { names = ["--source"], value = "string" },
+  { names = ["--agent"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["note"]
+summary = "Append a timestamped note"
+args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["start"]
+summary = "Claim a task: status=doing, owner=you"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { shared = "force", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["park"]
+summary = "Set a task down: record the next step, who it waits on, and this session in the shared store. Status is untouched; `start` resumes it"
+args = [{ name = "id", value = "ref", required = true }, { name = "next-step", value = "string", required = true }]
+options = [
+  { names = ["--waiting-on"], value = "enum", values = ["agent", "user"], default = "agent" },
+  { names = ["--reason"], value = "enum", values = ["review", "decision", "approval", "environment", "dependency", "session", "capability", "quiet"] },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high"] },
+  { names = ["--needs"], value = "enum", values = ["idle", "headless"] },
+  { names = ["--minutes"], value = "int" },
+]
+
+[[cli.tasks.commands]]
+path = ["done"]
+summary = "Close a task as done"
+args = [{ name = "id", value = "ref", required = true }, { name = "message", value = "string", required = false }]
+options = [
+  { shared = "force", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["drop"]
+summary = "Close a task as dropped"
+args = [{ name = "id", value = "ref", required = true }, { name = "message", value = "string", required = false }]
+
+[[cli.tasks.commands]]
+path = ["block"]
+summary = "Mark a task blocked"
+args = [{ name = "id", value = "ref", required = true }, { name = "message", value = "string", required = false }]
+
+[[cli.tasks.commands]]
+path = ["unblock"]
+summary = "Return a blocked task to todo"
+args = [{ name = "id", value = "ref", required = true }]
+
+[[cli.tasks.commands]]
+path = ["shelve"]
+summary = "Put a task out of active work: status=shelved, hidden from the default views, open for dependencies. The wake condition is required and becomes the note"
+args = [{ name = "id", value = "ref", required = true }, { name = "wake", value = "string", required = true }]
+
+[[cli.tasks.commands]]
+path = ["unshelve"]
+summary = "Return a shelved task to idea"
+args = [{ name = "id", value = "ref", required = true }]
+
+[[cli.tasks.commands]]
+path = ["dep"]
+summary = "Add or remove dependencies"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--on"], value = "ref", arity = "1..", repeatable = true },
+  { names = ["--rm"], value = "ref", arity = "1..", repeatable = true },
+]
+
+[[cli.tasks.commands]]
+path = ["graph"]
+summary = "Dependency graph as mermaid or dot"
+options = [
+  { names = ["--format"], value = "enum", values = ["mermaid", "dot"], default = "mermaid" },
+  { shared = "all", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["check"]
+verb = "check"
+summary = "Validate every task file. Prints nothing when there is nothing to report"
+
+[[cli.tasks.commands]]
+path = ["prime"]
+summary = "Session context for agents"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+  { names = ["--closed"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["feedback"]
+summary = "File feedback about the tasks tool itself into the upstream tasks project"
+args = [{ name = "summary", value = "string", required = true }]
+options = [
+  { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"], required = true },
+  { names = ["--body", "-b"], value = "string" },
+  { names = ["--recur"], value = "ref" },
+  { names = ["--new"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["tree"]
+summary = "The task hierarchy as nested nodes (open work only unless --all)"
+args = [{ name = "id", value = "ref", required = false }]
+options = [
+  { shared = "all", value = "none" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["tags"]
+summary = "Tag frequencies (open tasks unless --status), per project"
+options = [
+  { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["quiet"]
+summary = "Work parked waiting for an idle host, as resume briefs"
+options = [
+  { shared = "limit", value = "int" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+# ---- walictl
+
+[[cli.walictl.commands]]
+path = ["current"]
+summary = "describe the default wallpaper"
+verb = "list"
+exception = "noun command on a wallpaper remote whose verbs are the navigation; see the design"
+
+[[cli.walictl.commands]]
+path = ["edit"]
+summary = "open the original (or the display file) in GIMP"
+
+[[cli.walictl.commands]]
+path = ["favorite"]
+summary = "toggle (or --add/--remove) a favorite"
+args = [{ name = "photo-id", value = "string", required = false }]
+options = [
+  { names = ["--add"], value = "none" },
+  { names = ["--remove"], value = "none" },
+]
+
+[[cli.walictl.commands]]
+path = ["favorites"]
+summary = "list favorites"
+verb = "list"
+exception = "noun command on a wallpaper remote whose verbs are the navigation; see the design"
+
+[[cli.walictl.commands]]
+path = ["hide"]
+summary = "hide a photo from sampling; replaces it when it is displayed"
+args = [{ name = "photo-id", value = "string", required = false }]
+options = [
+  { shared = "seed", value = "int" },
+]
+
+[[cli.walictl.commands]]
+path = ["unhide"]
+summary = "restore a hidden photo"
+args = [{ name = "photo-id", value = "string", required = true }]
+
+[[cli.walictl.commands]]
+path = ["hidden"]
+summary = "list hidden photos"
+verb = "list"
+exception = "noun command on a wallpaper remote whose verbs are the navigation; see the design"
+
+[[cli.walictl.commands]]
+path = ["import-favorites"]
+summary = "build favorites.json from the legacy favorites.txt"
+args = [{ name = "source", value = "string", required = true }]
+options = [
+  { shared = "force", value = "none" },
+]
+
+[[cli.walictl.commands]]
+path = ["neighbors"]
+summary = "capture-time neighbours of the current photo"
+verb = "list"
+exception = "noun command on a wallpaper remote whose verbs are the navigation; see the design"
+options = [
+  { shared = "limit", value = "int", default = "3" },
+]
+
+[[cli.walictl.commands]]
+path = ["variant"]
+summary = "per-photo adjustments rendered into a cached variant"
+
+[[cli.walictl.commands]]
+path = ["variant", "show"]
+verb = "show"
+summary = "the photo's effective recipe"
+args = [{ name = "photo-id", value = "string", required = false }]
+
+[[cli.walictl.commands]]
+path = ["variant", "preview"]
+summary = "render a 560px-wide preview of the given settings; print its path"
+args = [{ name = "photo-id", value = "string", required = false }]
+options = [
+  { names = ["--set"], value = "string", repeatable = true },
+]
+
+[[cli.walictl.commands]]
+path = ["variant", "apply"]
+summary = "replace the recipe with the given settings, render, and show it when displayed"
+args = [{ name = "photo-id", value = "string", required = false }]
+options = [
+  { names = ["--set"], value = "string", repeatable = true },
+]
+
+[[cli.walictl.commands]]
+path = ["variant", "reset"]
+summary = "remove the recipe and its cached render"
+args = [{ name = "photo-id", value = "string", required = false }]
+
+[[cli.walictl.commands]]
+path = ["next"]
+summary = "forward in history, else a weighted sample"
+options = [
+  { shared = "seed", value = "int" },
+]
+
+[[cli.walictl.commands]]
+path = ["random"]
+summary = "a weighted sample, discarding forward history"
+options = [
+  { shared = "seed", value = "int" },
+]
+
+[[cli.walictl.commands]]
+path = ["previous"]
+summary = "back one entry in history"
+
+[[cli.walictl.commands]]
+path = ["earlier"]
+summary = "previous photo by capture time, discarding forward history"
+
+[[cli.walictl.commands]]
+path = ["later"]
+summary = "next photo by capture time, discarding forward history"
+
+[[cli.walictl.commands]]
+path = ["observe"]
+summary = "record a wallpaper change made outside walictl (hook entry point)"
+
+[[cli.walictl.commands]]
+path = ["phone"]
+summary = "the phone's mirrored favorites"
+
+[[cli.walictl.commands]]
+path = ["phone", "sync"]
+summary = "mirror favorites into [phone] dir as phone-sized renders"
+options = [
+  { names = ["--dry-run"], value = "none" },
+  { shared = "force", value = "none" },
+]
+
+# ---- obs
+
+[[cli.obs.commands]]
+path = []
+options = [
+  { names = ["--state-dir"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["ingest"]
+protocol = "relay observer envelope on stdin"
+summary = "append one relay observer envelope from stdin"
+
+[[cli.obs.commands]]
+path = ["join"]
+output = "json"
+summary = "print one task's normalized session join"
+args = [{ name = "task-id", value = "string", required = true }]
+options = [
+  { names = ["--worktree"], value = "path" },
+  { names = ["--claims"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["index"]
+summary = "index local harness transcripts"
+options = [
+  { names = ["--full"], value = "none" },
+  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["sweep"]
+summary = "snapshot static harness context"
+
+[[cli.obs.commands]]
+path = ["report"]
+summary = "query context, growth, cache, calibration or skills"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills"], required = true }]
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["reconcile"]
+output = "json"
+summary = "consume new evidence and publish findings.json"
+
+[[cli.obs.commands]]
+path = ["findings"]
+summary = "print the published findings view"
+
+# ---- lit
+
+[[cli.lit.commands]]
+path = ["world"]
+summary = "The OpenAlex topic attention dataset"
+options = [
+  { shared = "config", value = "path", default = "lit.toml" },
+]
+
+[[cli.lit.commands]]
+path = ["world", "fetch"]
+summary = "Start or resume the column-projected extract of one release"
+options = [
+  { names = ["--release"], value = "string", required = true },
+  { names = ["--partition"], value = "string", repeatable = true },
+  { names = ["--workers"], value = "int", default = "4" },
+]
+
+[[cli.lit.commands]]
+path = ["world", "verify"]
+summary = "Check an extract's status, hashes, and row counts"
+options = [
+  { names = ["--release"], value = "string", required = true },
+]
+
+[[cli.lit.commands]]
+path = ["world", "build"]
+summary = "Build the tables from a complete extract. Writes no manifest; run enrich then finalize"
+options = [
+  { names = ["--release"], value = "string", required = true },
+  { names = ["--date"], value = "string", required = true },
+]
+
+[[cli.lit.commands]]
+path = ["world", "enrich"]
+summary = "Fetch exemplar titles through the API. Refused once finalized"
+options = [
+  { names = ["--date"], value = "string", required = true },
+]
+
+[[cli.lit.commands]]
+path = ["world", "describe"]
+summary = "Print the diagnostics report without writing into the build"
+options = [
+  { names = ["--release"], value = "string", required = true },
+  { names = ["--date"], value = "string", required = true },
+]
+
+[[cli.lit.commands]]
+path = ["world", "finalize"]
+summary = "Validate inventory and invariants, then write the manifest. The build is immutable afterwards"
+options = [
+  { names = ["--release"], value = "string", required = true },
+  { names = ["--date"], value = "string", required = true },
+  { names = ["--without-titles"], value = "none" },
+  { names = ["--builds-dir"], value = "path", default = "builds" },
+]
+
+[[cli.lit.commands]]
+path = ["world", "check"]
+verb = "check"
+summary = "Verify a finalized build's hashes, schemas, and table invariants"
+options = [
+  { names = ["--date"], value = "string", required = true },
+]
+
+[[cli.lit.commands]]
+path = ["world", "place"]
+summary = "Resolve identifiers to works and their topics in a finalized build"
+options = [
+  { names = ["--date"], value = "string", required = true },
+  { names = ["--doi"], value = "string", repeatable = true },
+  { names = ["--pmid"], value = "string", repeatable = true },
+  { names = ["--pmcid"], value = "string", repeatable = true },
+  { names = ["--verify", "--no-verify"], value = "none", default = "true" },
+]
+
+# ---- science
+
+[[cli.science.commands]]
+path = ["status"]
+summary = "Show the world: corpora and their lifecycle status, the current epoch, record counts by kind"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["build"]
+summary = "Build the world from its corpora"
+
+[[cli.science.commands]]
+path = ["serve"]
+summary = "Serve the world over HTTP"
+protocol = "server on stdio or a socket"
+options = [
+  { shared = "config", value = "path" },
+]
+
+[[cli.science.commands]]
+path = ["mcp"]
+summary = "Serve the world over MCP on stdio"
+protocol = "server on stdio or a socket"
+args = [{ name = "mode", value = "enum", values = ["serve"], required = true }]
+options = [
+  { shared = "config", value = "path" },
+]
+
+[[cli.science.commands]]
+path = ["adapters"]
+summary = "Build the corpus adapters"
+args = [{ name = "mode", value = "enum", values = ["build"], required = true }]
+options = [
+  { names = ["--out"], value = "path" },
+]
+
+# ---- pilot
+
+[[cli.pilot.commands]]
+path = ["freeze-manifest"]
+summary = "Freeze the run manifest"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+  { names = ["--successor-of"], value = "string" },
+]
+
+[[cli.pilot.commands]]
+path = ["check-manifest"]
+summary = "Check the run manifest against the frozen one"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["generate"]
+summary = "Generate one partition's systems"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+  { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
+]
+
+[[cli.pilot.commands]]
+path = ["compute"]
+summary = "Compute the measures for one partition"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+  { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
+]
+
+[[cli.pilot.commands]]
+path = ["fit-reduction"]
+summary = "Fit the dimensionality reduction"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["validate"]
+summary = "Validate the computed measures"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["coupling"]
+summary = "Run the coupling analysis"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["surrogate"]
+summary = "Run the surrogate analysis"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["report"]
+summary = "Render the run report"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+[[cli.pilot.commands]]
+path = ["prereg"]
+summary = "Render the preregistration document"
+options = [
+  { names = ["--run"], value = "string", default = "r1" },
+]
+
+# ---- mindful
+
+[[cli.mindful.commands]]
+path = ["add"]
+verb = "add"
+summary = "Capture a thought"
+args = [{ name = "title", value = "string", required = false }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+  { names = ["--body"], value = "string" },
+  { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--interactive", "-i"], value = "none" },
+]
+
+[[cli.mindful.commands]]
+path = ["check"]
+verb = "check"
+summary = "Check corpus integrity and derived-index freshness"
+
+[[cli.mindful.commands]]
+path = ["config"]
+summary = "Inspect or configure the self actor"
+
+[[cli.mindful.commands]]
+path = ["config", "self"]
+summary = "Show or persist the configured self actor"
+args = [{ name = "actor", value = "string", required = false }]
+
+[[cli.mindful.commands]]
+path = ["delete"]
+verb = "delete"
+summary = "Delete a thought"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+  { names = ["--detach"], value = "none" },
+]
+
+[[cli.mindful.commands]]
+path = ["edit"]
+verb = "edit"
+summary = "Edit a thought"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+  { names = ["--title"], value = "string" },
+  { names = ["--body"], value = "string" },
+  { names = ["--interactive", "-i"], value = "none" },
+]
+
+[[cli.mindful.commands]]
+path = ["history"]
+exception = "--version here selects a version number; the root --version prints the tool version and is root-only"
+summary = "List, read, and repair a node's version history"
+args = [{ name = "ref", value = "ref", required = false }]
+options = [
+  { names = ["--version"], value = "int" },
+  { names = ["--deleted"], value = "none" },
+  { shared = "limit", value = "int", default = "50" },
+]
+
+[[cli.mindful.commands]]
+path = ["history", "adopt"]
+summary = "Keep a hand-edited live file that conflicts with its recorded version as a new version"
+args = [{ name = "uid", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["history", "repair"]
+summary = "Truncate an incomplete final history record or finish a torn delete"
+args = [{ name = "uid", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["index"]
+summary = "Inspect or rebuild derived indexes and models"
+
+[[cli.mindful.commands]]
+path = ["index", "model"]
+summary = "Download the configured embedding model"
+
+[[cli.mindful.commands]]
+path = ["index", "rebuild"]
+summary = "Rebuild every derived index"
+
+[[cli.mindful.commands]]
+path = ["index", "semantic"]
+summary = "Rebuild the semantic index"
+
+[[cli.mindful.commands]]
+path = ["index", "status"]
+summary = "Report derived-index and model usability"
+
+[[cli.mindful.commands]]
+path = ["journal"]
+summary = "Show thoughts grouped by capture day"
+args = [{ name = "date", value = "string", required = false }]
+options = [
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+  { shared = "until", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.mindful.commands]]
+path = ["list"]
+verb = "list"
+summary = "List thought ids and titles"
+options = [
+  { shared = "by", role = "filter", value = "string", repeatable = false },
+]
+
+[[cli.mindful.commands]]
+path = ["migrate"]
+summary = "Migrate existing source nodes"
+
+[[cli.mindful.commands]]
+path = ["migrate", "authorship"]
+summary = "Assert an attributed version-1 baseline for unmigrated nodes"
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap"]
+summary = "Create, inspect, and edit mindmaps"
+
+[[cli.mindful.commands]]
+path = ["mindmap", "add"]
+verb = "add"
+summary = "Add thought members to a mindmap"
+args = [{ name = "map-ref", value = "ref", required = true }, { name = "thought-ref", value = "ref", required = true, variadic = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "create"]
+summary = "Create an empty mindmap"
+args = [{ name = "title", value = "string", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "delete"]
+verb = "delete"
+summary = "Delete a mindmap without deleting its thoughts"
+args = [{ name = "map-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "link"]
+summary = "Point the relatesTo edge between two members from one to the other"
+args = [{ name = "map-ref", value = "ref", required = true }, { name = "from-ref", value = "ref", required = true }, { name = "to-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "list"]
+verb = "list"
+summary = "List mindmaps"
+
+[[cli.mindful.commands]]
+path = ["mindmap", "prune"]
+summary = "Remove members that no longer resolve"
+args = [{ name = "map-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "remove"]
+summary = "Remove thought members from a mindmap"
+args = [{ name = "map-ref", value = "ref", required = true }, { name = "thought-ref", value = "ref", required = true, variadic = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "show"]
+verb = "show"
+summary = "Show a mindmap, its members, and its edges"
+args = [{ name = "map-ref", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "unlink"]
+summary = "Remove a directed edge between two members"
+args = [{ name = "map-ref", value = "ref", required = true }, { name = "from-ref", value = "ref", required = true }, { name = "to-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["mindmap", "view"]
+summary = "Render a mindmap as terminal sprites and edges"
+args = [{ name = "map-ref", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["restore"]
+summary = "Write an earlier version as a new version; a deleted version deletes, and a deleted node comes back"
+args = [{ name = "ref", value = "ref", required = true }, { name = "version", value = "string", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["scheme"]
+summary = "Inspect or configure terminal color schemes"
+
+[[cli.mindful.commands]]
+path = ["scheme", "list"]
+verb = "list"
+summary = "List built-in color schemes and mark the active one"
+
+[[cli.mindful.commands]]
+path = ["scheme", "set"]
+summary = "Persist the configured color scheme"
+args = [{ name = "name", value = "string", required = true }]
+
+[[cli.mindful.commands]]
+path = ["scheme", "show"]
+verb = "show"
+summary = "Show the active color scheme and its source"
+
+[[cli.mindful.commands]]
+path = ["search"]
+summary = "Search thoughts with #tag filters, quoted phrases, and free terms"
+args = [{ name = "query", value = "string", required = true, variadic = true }]
+options = [
+  { shared = "by", role = "filter", value = "string", repeatable = false },
+  { names = ["--mode"], value = "enum", values = ["lexical", "semantic", "fused"], default = "lexical" },
+  { shared = "limit", value = "int", default = "50" },
+]
+
+[[cli.mindful.commands]]
+path = ["shell"]
+protocol = "interactive session"
+summary = "Start the resident interactive shell"
+
+[[cli.mindful.commands]]
+path = ["show"]
+verb = "show"
+summary = "Show one thought and related references"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { names = ["--viz"], value = "enum", values = ["sprite", "text"], default = "sprite" },
+]
+
+[[cli.mindful.commands]]
+path = ["similar"]
+summary = "Find semantically similar thoughts"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "limit", value = "int" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure"]
+summary = "Create, inspect, and edit sets, journals, and mindmaps"
+
+[[cli.mindful.commands]]
+path = ["structure", "add"]
+verb = "add"
+summary = "Add thought members to a structure; a journal appends them to its order"
+args = [{ name = "ref", value = "ref", required = true }, { name = "thought-ref", value = "ref", required = true, variadic = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "create"]
+summary = "Create a structure, optionally with initial members; nothing is written if one does not resolve"
+args = [{ name = "title", value = "string", required = true }, { name = "thought-ref", value = "ref", required = false, variadic = true }]
+options = [
+  { names = ["--kind"], value = "enum", values = ["set", "journal", "mindmap"] },
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "delete"]
+verb = "delete"
+summary = "Delete a structure without deleting its thoughts"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "edit"]
+verb = "edit"
+summary = "Rename a structure"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { names = ["--title"], value = "string" },
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "link"]
+summary = "Point the relatesTo edge between two mindmap members from one to the other: created if absent, redirected if it exists, unchanged if it already points that way"
+args = [{ name = "ref", value = "ref", required = true }, { name = "from-ref", value = "ref", required = true }, { name = "to-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "list"]
+verb = "list"
+summary = "List structures, optionally of one kind"
+options = [
+  { names = ["--kind"], value = "enum", values = ["set", "journal", "mindmap"] },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "remove"]
+summary = "Remove thought members from a structure, with their order entries and edges"
+args = [{ name = "ref", value = "ref", required = true }, { name = "thought-ref", value = "ref", required = true, variadic = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "reorder"]
+summary = "Put a journal's members in the given order; every member exactly once"
+args = [{ name = "ref", value = "ref", required = true }, { name = "thought-ref", value = "ref", required = true, variadic = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["structure", "show"]
+verb = "show"
+summary = "Show a structure, its members, and its order (journal) or edges (mindmap)"
+args = [{ name = "ref", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["structure", "unlink"]
+summary = "Remove the directed edge between two mindmap members"
+args = [{ name = "ref", value = "ref", required = true }, { name = "from-ref", value = "ref", required = true }, { name = "to-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["tag"]
+summary = "Attach a tag to a thought"
+args = [{ name = "ref", value = "ref", required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["undo"]
+summary = "Restore the previous version"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
+
+# ---- prism
+
+[[cli.prism.commands]]
+path = ["set"]
+summary = "Set a parameter in the active profile, or the base layer with --base"
+args = [{ name = "key", value = "string", required = true }, { name = "value", value = "string", required = true }]
+options = [
+  { names = ["--base"], value = "none" },
+]
+
+[[cli.prism.commands]]
+path = ["unset"]
+summary = "Remove a parameter from the active profile, or the base layer with --base"
+args = [{ name = "key", value = "string", required = true }]
+options = [
+  { names = ["--base"], value = "none" },
+]
+
+[[cli.prism.commands]]
+path = ["reset"]
+summary = "Reset parameters to defaults, symmetric, or neutral values"
+args = [{ name = "mode", value = "enum", values = ["defaults", "symmetric", "neutral"], required = true }]
+options = [
+  { names = ["--base"], value = "none" },
+  { names = ["--group"], value = "string" },
+]
+
+[[cli.prism.commands]]
+path = ["get"]
+verb = "show"
+summary = "Print one resolved parameter"
+args = [{ name = "key", value = "string", required = true }]
+exception = "get, not show: the argument is a parameter key, not a record reference, and set/get is the pair every consumer types"
+
+[[cli.prism.commands]]
+path = ["list"]
+verb = "list"
+summary = "List every resolved parameter"
+
+[[cli.prism.commands]]
+path = ["describe"]
+summary = "The whole resolved state: active wallpaper and profile, profiles, parameters"
+exception = "describe is the whole state as one document, neither a list nor one item; see the design"
+
+[[cli.prism.commands]]
+path = ["apply"]
+summary = "Render the resolved state into every sink, or the named sinks"
+args = [{ name = "sink", value = "string", required = false, variadic = true }]
+
+[[cli.prism.commands]]
+path = ["requirements"]
+summary = "What each sink needs installed"
+
+[[cli.prism.commands]]
+path = ["doctor"]
+summary = "Check the installation and the sinks"
+
+[[cli.prism.commands]]
+path = ["migrate"]
+summary = "Migrate the store to the current layout"
+
+[[cli.prism.commands]]
+path = ["context"]
+summary = "Context slots: the wallpaper and profile the resolved state follows"
+
+[[cli.prism.commands]]
+path = ["context", "list"]
+verb = "list"
+summary = "List every saved context and the active slots"
+
+[[cli.prism.commands]]
+path = ["context", "show"]
+verb = "show"
+summary = "Show one saved context"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "save"]
+summary = "Save the active profile layer under a name"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "activate"]
+summary = "Make a saved context the active one for its kind"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "deactivate"]
+summary = "Clear the active slot of one kind"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "delete"]
+verb = "delete"
+summary = "Delete a saved context"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "rename"]
+summary = "Rename a saved context"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "old", value = "string", required = true }, { name = "new", value = "string", required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "pin"]
+summary = "Pin the wallpaper slot so wallpaper changes do not move it"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "unpin"]
+summary = "Unpin the wallpaper slot"
+args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }]
+
+[[cli.prism.commands]]
+path = ["context", "wallpaper"]
+summary = "Follow this wallpaper: set the wallpaper slot from a path"
+args = [{ name = "path", value = "path", required = true }]
+
+# ---- familiar
+
+[[cli.familiar.commands]]
+path = ["whoami"]
+summary = "Show this project's familiar identity"
+args = [{ name = "path", value = "path", required = false }]
+
+[[cli.familiar.commands]]
+path = ["projects"]
+summary = "Show every project's familiar, pinned or hashed"
+args = [{ name = "dir", value = "path", required = false, variadic = true }]
+options = [
+  { names = ["--rows"], value = "int" },
+  { names = ["--state"], value = "string" },
+]
+
+[[cli.familiar.commands]]
+path = ["theme"]
+summary = "Themes: list, add, validate, show, preview, sheet"
+
+[[cli.familiar.commands]]
+path = ["theme", "list"]
+verb = "list"
+summary = "List installed themes"
+
+[[cli.familiar.commands]]
+path = ["theme", "add"]
+verb = "add"
+summary = "Install a theme from an HTTPS URL or local directory"
+args = [{ name = "source", value = "string", required = true }]
+
+[[cli.familiar.commands]]
+path = ["theme", "validate"]
+summary = "Prove a theme directory conforms"
+args = [{ name = "dir", value = "path", required = true }]
+
+[[cli.familiar.commands]]
+path = ["theme", "show"]
+verb = "show"
+summary = "Show a theme's twelve members"
+args = [{ name = "id", value = "string", required = false }]
+options = [
+  { names = ["--rows"], value = "int" },
+]
+
+[[cli.familiar.commands]]
+path = ["theme", "preview"]
+summary = "Preview one member and its states"
+args = [{ name = "member", value = "string", required = true }]
+options = [
+  { names = ["--theme"], value = "string" },
+  { names = ["--state"], value = "string" },
+]
+
+[[cli.familiar.commands]]
+path = ["theme", "sheet"]
+summary = "Show every member across every state"
+options = [
+  { names = ["--rows"], value = "int" },
+  { names = ["--theme"], value = "string" },
+  { names = ["--member"], value = "string" },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.familiar.commands]]
+path = ["scheme"]
+summary = "The terminal colour scheme"
+
+[[cli.familiar.commands]]
+path = ["scheme", "set"]
+summary = "Set the terminal colour scheme"
+args = [{ name = "scheme", value = "enum", values = ["dark", "light"], required = true }]
+options = [
+  { names = ["--sat"], value = "string" },
+]
+
+[[cli.familiar.commands]]
+path = ["install"]
+summary = "Install the active theme into a harness"
+
+[[cli.familiar.commands]]
+path = ["install", "pets"]
+summary = "Install the active theme as Codex pets"
+options = [
+  { names = ["--out"], value = "path" },
+  { names = ["--sync-projects"], value = "none" },
+]
+
+[[cli.familiar.commands]]
+path = ["install", "opencode"]
+summary = "Install the OpenCode integration"
+
+[[cli.familiar.commands]]
+path = ["setup"]
+summary = "Print a harness's integration settings"
+
+[[cli.familiar.commands]]
+path = ["setup", "claude-code"]
+summary = "Print Claude Code integration settings"
+
+[[cli.familiar.commands]]
+path = ["setup", "codex"]
+summary = "Print Codex integration settings"
+
+[[cli.familiar.commands]]
+path = ["hook"]
+protocol = "harness hook: reads the harness payload on stdin"
+summary = "Record an agent lifecycle event"
+args = [{ name = "event", value = "string", required = true }]
+options = [
+  { names = ["--agent"], value = "string" },
+  { names = ["--trace"], value = "path" },
+]
+
+[[cli.familiar.commands]]
+path = ["statusline"]
+protocol = "Claude Code status line: stdout is the rendered line"
+summary = "Render the Claude Code status line"
+options = [
+  { names = ["--with"], value = "string" },
+]
+
+[[cli.familiar.commands]]
+path = ["reap"]
+summary = "Remove sessions whose agent has exited"
+
+# ---- forge
+
+[[cli.forge.commands]]
+path = ["graph"]
+summary = "Project the graph, or check committed records"
+options = [
+  { names = ["--check"], value = "none" },
+  { names = ["--partition"], value = "string", default = "all" },
+  { names = ["--theme-graph"], value = "path" },
+  { names = ["--sync-theme"], value = "none" },
+]
+exception = "check is a flag on the projection command rather than a verb, because the check re-derives the same graph"
+
+[[cli.forge.commands]]
+path = ["show"]
+verb = "show"
+summary = "Show one committed graph node"
+args = [{ name = "node", value = "ref", required = true }]
+options = [
+  { names = ["--theme-graph"], value = "path" },
+]
+
+[[cli.forge.commands]]
+path = ["seed"]
+summary = "Seed a new exploration flow from a committed node"
+args = [{ name = "dest-flow-dir", value = "path", required = true }]
+options = [
+  { names = ["--from"], value = "ref", required = true },
+  { names = ["--member"], value = "string", required = true },
+  { names = ["--goal"], value = "string", required = true },
+  { names = ["--family"], value = "string", required = true },
+  { names = ["--riff"], value = "string", required = true },
+  { names = ["--namespace"], value = "string", required = true },
+  { names = ["--model"], value = "string", default = "gpt-image" },
+  { names = ["--floor-rows"], value = "int", default = "12" },
+  { names = ["--body-plan"], value = "string", default = "cat" },
+  { names = ["--reason"], value = "string" },
+  { names = ["--theme-graph"], value = "path" },
+]
+
+# ---- relay
+
+[[cli.relay.commands]]
+path = ["list"]
+verb = "list"
+summary = "The live-agent registry"
+
+[[cli.relay.commands]]
+path = ["reap"]
+summary = "Reconcile the registry against live processes"
+options = [
+  { names = ["--outer-ms"], value = "int" },
+]
+
+[[cli.relay.commands]]
+path = ["hook"]
+protocol = "harness hook: stdout is the reply, exit code is the guard's"
+summary = "Dispatch one harness hook event to the subscribers and guards"
+args = [{ name = "event", value = "string", required = true }]
+options = [
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode"], required = true, repeatable = false },
+  { names = ["--outer-ms"], value = "int" },
+  { names = ["--subscribers"], value = "path" },
+]
+
+[[cli.relay.commands]]
+path = ["install"]
+output = "json"
+summary = "Plan, and with --apply write, a harness's hook installation"
+options = [
+  { shared = "harness", role = "select", value = "enum", values = ["claude-code", "codex", "opencode"], required = true, repeatable = false },
+  { names = ["--subscribers"], value = "path", required = true },
+  { names = ["--target"], value = "path" },
+  { names = ["--config-dir"], value = "path" },
+  { names = ["--evidence"], value = "path" },
+  { names = ["--retire"], value = "enum", values = ["familiar"] },
+  { names = ["--artifact"], value = "path" },
+  { names = ["--apply"], value = "none" },
+]
+
+[[cli.relay.commands]]
+path = ["rollback"]
+output = "none"
+summary = "Undo an applied installation from its artifact"
+options = [
+  { names = ["--artifact"], value = "path", required = true },
+]

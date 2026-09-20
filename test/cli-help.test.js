@@ -129,12 +129,19 @@ test('help color changes headings only and honours NO_COLOR', (t) => {
   const f = fixture(t);
   const env = { ...f.env };
   delete env.NO_COLOR;
-  const interactive = spawnSync(process.execPath, [ttyBin, '--help'], { encoding: 'utf8', env });
+  // --color's own default is 'never' (the shared vocabulary's default for every
+  // typed CLI); FAMILIAR_COLOR=auto opts back into the TTY/NO_COLOR sensing this
+  // test is about.
+  const interactive = spawnSync(process.execPath, [ttyBin, '--help'], {
+    encoding: 'utf8', env: { ...env, FAMILIAR_COLOR: 'auto' },
+  });
   assert.equal(interactive.status, 0, interactive.stderr);
   assert.match(interactive.stdout, /familiar — your coding agent gets a face/);
   assert.match(interactive.stdout, /\x1b\[/);
 
-  const uncolored = spawnSync(process.execPath, [ttyBin, '--help'], { encoding: 'utf8', env: noColor(env) });
+  const uncolored = spawnSync(process.execPath, [ttyBin, '--help'], {
+    encoding: 'utf8', env: { ...noColor(env), FAMILIAR_COLOR: 'auto' },
+  });
   assert.equal(uncolored.status, 0, uncolored.stderr);
   assert.match(uncolored.stdout, /familiar — your coding agent gets a face/);
   assert.doesNotMatch(uncolored.stdout, /\x1b\[/);
@@ -143,7 +150,7 @@ test('help color changes headings only and honours NO_COLOR', (t) => {
 test('misplaced help flags reach strict parsing and point to the leaf', (t) => {
   const f = fixture(t);
   const result = run(['theme', 'preview', '--state', '--help'], f.env);
-  assert.equal(result.status, 1);
+  assert.equal(result.status, 2);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /--state requires a value/i);
   assert.match(result.stderr, /familiar theme preview --help/);
@@ -153,8 +160,8 @@ test('misplaced help flags reach strict parsing and point to the leaf', (t) => {
 test('empty and flag-shaped inline option values fail before work', (t) => {
   const f = fixture(t);
   for (const [args, status, option, help] of [
-    [['theme', 'preview', 'ginger', '--state=--help'], 1, '--state', 'theme preview'],
-    [['install', 'pets', '--out='], 1, '--out', 'install pets'],
+    [['theme', 'preview', 'ginger', '--state=--help'], 2, '--state', 'theme preview'],
+    [['install', 'pets', '--out='], 2, '--out', 'install pets'],
     [['statusline', '--with='], 0, '--with', 'statusline'],
   ]) {
     const result = run(args, f.env);
@@ -170,7 +177,7 @@ test('unknown commands point to the nearest help scope', (t) => {
   const f = fixture(t);
   for (const args of [['themes'], ['preview', 'ginger'], ['contact'], ['pets']]) {
     const root = run(args, f.env);
-    assert.equal(root.status, 1, args.join(' '));
+    assert.equal(root.status, 2, args.join(' '));
     assert.match(root.stderr, /unknown command/i);
     assert.match(root.stderr, new RegExp(args[0]));
     assert.match(root.stderr, /familiar --help/);
@@ -178,7 +185,7 @@ test('unknown commands point to the nearest help scope', (t) => {
 
   for (const [args, help] of [[['theme', 'cats'], 'theme'], [['setup', 'cursor'], 'setup']]) {
     const family = run(args, f.env);
-    assert.equal(family.status, 1);
+    assert.equal(family.status, 2);
     assert.match(family.stderr, new RegExp(`unknown ${args[0]} command.*${args[1]}`, 'i'));
     assert.match(family.stderr, new RegExp(`familiar ${help} --help`));
   }

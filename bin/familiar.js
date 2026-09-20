@@ -44,8 +44,13 @@ import {
   loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
   assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
 } from 'familiar-theme';
+import {
+  FAMILIES, ROOT_LEAVES, commandAt, parseArgsOptions, stripGlobals, candidates, completionScript,
+} from '../src/commands.js';
 
-export function cliColor({ stream = process.stdout, env = process.env } = {}) {
+export function cliColor({ stream = process.stdout, env = process.env, color = 'auto' } = {}) {
+  if (color === 'never') return false;
+  if (color === 'always') return true;
   return stream.isTTY === true && (env.NO_COLOR === undefined || env.NO_COLOR === '');
 }
 
@@ -54,16 +59,20 @@ export function cliSwatch(hex, { color = cliColor() } = {}) {
 }
 
 const HELP_FLAGS = new Set(['-h', '--help']);
-const FAMILIES = new Map([
-  ['theme', new Set(['list', 'show', 'preview', 'sheet', 'validate', 'add'])],
-  ['install', new Set(['pets', 'opencode'])],
-  ['scheme', new Set(['set'])],
-  ['setup', new Set(['claude-code', 'codex'])],
-]);
-const ROOT_LEAVES = new Set(['whoami', 'projects', 'hook', 'statusline', 'reap']);
 
 function usageError(message, help) {
   return Object.assign(new Error(message), { help });
+}
+
+// minPositionals/maxPositionals for a declared command's args: required ones set the
+// floor, a variadic arg lifts the ceiling to unbounded, and an argless command is 0/0
+// -- the same defaults parseLeaf already had.
+function positionalBounds(cmd) {
+  const args = cmd?.args ?? [];
+  return {
+    minPositionals: args.filter((a) => a.required).length,
+    maxPositionals: args.some((a) => a.variadic) ? Infinity : args.length,
+  };
 }
 
 export function resolveCommand(argv) {
@@ -721,22 +730,34 @@ async function identityResolver() {
   };
 }
 
-async function main({ command, args: rest }) {
+async function main({ command, args: rest, color, mode }) {
+  // Every leaf's options and positional bounds come from the same declared row
+  // completion and the conformance test read -- one source, not a hand-kept mirror.
+  const cmd = commandAt(command.split(' '));
+  const leafOptions = { options: parseArgsOptions(cmd), ...positionalBounds(cmd), help: command };
   if (command === 'setup claude-code' || command === 'setup codex') {
-    parseLeaf(rest, { help: command });
+    parseLeaf(rest, leafOptions);
     // The launcher, not this file: what setup writes into a config must be what the
     // agent invokes, and the launcher is the one that checks dependencies first.
     const binPath = realpathSync(fileURLToPath(new URL('familiar', import.meta.url)));
     const agent = command.slice('setup '.length);
     process.stdout.write(`${JSON.stringify(setupDocument(agent, binPath), null, 2)}\n`);
   } else if (command === 'whoami') {
-    const { positionals } = parseLeaf(rest, {
-      minPositionals: 0, maxPositionals: 1, help: 'whoami',
-    });
+    const { positionals } = parseLeaf(rest, leafOptions);
     const cwd = positionals[0] ?? process.cwd();
     const resolver = await identityResolver();
     const { identity } = await resolver.resolve(cwd);
     const { hue } = slotSpec(identity.slot);
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        project: identity.project,
+        theme: resolver.themeId,
+        slot: identity.slot,
+        hue,
+        member: { id: identity.member, label: identity.label },
+      })}\n`);
+      return;
+    }
     process.stdout.write(
       `${identity.project}\n` +
       `  theme   ${resolver.themeId}\n` +
@@ -744,10 +765,7 @@ async function main({ command, args: rest }) {
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'projects') {
-    const { positionals, values } = parseLeaf(rest, {
-      options: { rows: { type: 'string' }, state: { type: 'string' } },
-      minPositionals: 0, maxPositionals: Infinity, help: 'projects',
-    });
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const resolver = await identityResolver();
     // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
     // names no directory, so only `path:` pins can be walked.
@@ -779,6 +797,19 @@ async function main({ command, args: rest }) {
     if (!STATES.includes(state)) {
       throw new Error(`unknown state "${state}" — one of: ${STATES.join(', ')}`);
     }
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify({
+        theme: resolver.pack.id,
+        projects: resolved.map(({ identity, pin }) => ({
+          project: identity.project,
+          member: identity.member,
+          label: identity.label,
+          slot: identity.slot,
+          source: pin ? 'pin' : 'auto',
+        })),
+      })}\n`);
+      return;
+    }
     const interactive = process.stdout.isTTY === true;
     const tmux = tmuxFacts(process.env);
     const capability = graphicsCapability(process.env, tmux);
@@ -793,10 +824,10 @@ async function main({ command, args: rest }) {
       );
     }
 
-    const color = cliColor();
+    const useColor = cliColor({ color });
     const cells = resolved.map(({ identity, pin }) => {
-      const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color });
-      const name = color ? `${BOLD}${identity.project}${RESET}` : identity.project;
+      const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color: useColor });
+      const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
       // resolve() proved the member's assets exist. Idle is what a roster shows,
       // as it is for `theme show`; --state asks for another pose.
       const png = graphical
@@ -836,10 +867,7 @@ async function main({ command, args: rest }) {
       process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
     }
   } else if (command === 'hook') {
-    const { positionals, values } = parseLeaf(rest, {
-      options: { agent: { type: 'string' }, trace: { type: 'string' } },
-      minPositionals: 1, maxPositionals: 1, help: 'hook',
-    });
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const name = values.agent ?? 'claude-code';
     const adapter = adapterFor(name);          // throws on an unknown agent, before any work
     const ctx = await context();
@@ -913,9 +941,7 @@ async function main({ command, args: rest }) {
       }
     }
   } else if (command === 'statusline') {
-    const { values } = parseLeaf(rest, {
-      options: { with: { type: 'string' } }, help: 'statusline',
-    });
+    const { values } = parseLeaf(rest, leafOptions);
     // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
     // an id derived from the session). This prints the CELLS it lands in -- ordinary characters,
     // which claude-code's own layout engine places, wraps and scrolls. That is the whole reason
@@ -993,13 +1019,7 @@ async function main({ command, args: rest }) {
     const lines = composeForIntent({ intent, sessionId, rawOutput: text });
     process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
   } else if (command === 'install pets') {
-    const { values } = parseLeaf(rest, {
-      options: {
-        out: { type: 'string' },
-        'sync-projects': { type: 'boolean' },
-      },
-      help: 'install pets',
-    });
+    const { values } = parseLeaf(rest, leafOptions);
     if (values.out !== undefined && values['sync-projects']) {
       throw usageError('--sync-projects cannot be combined with --out', 'install pets');
     }
@@ -1105,7 +1125,7 @@ async function main({ command, args: rest }) {
       }
     }
   } else if (command === 'reap') {
-    parseLeaf(rest, { help: 'reap' });
+    parseLeaf(rest, leafOptions);
     const ctx = await context();
     const { reaped, evicted } = await reap({
       deps: { ...ctx, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
@@ -1135,10 +1155,16 @@ async function main({ command, args: rest }) {
       process.exit(typeof err.status === 'number' ? err.status : 1);
     }
   } else if (command === 'scheme set') {
-    const { positionals, values } = parseLeaf(rest, {
-      options: { sat: { type: 'string' } },
-      minPositionals: 1, maxPositionals: 1, help: 'scheme set',
-    });
+    const { positionals, values } = parseLeaf(rest, leafOptions);
+    // Validated against the declared enum, not a hand-kept list: cmd is
+    // commandAt(['scheme', 'set']), the same row completion offers dark/light from.
+    const [{ name: schemeArgName, values: schemeValues }] = cmd.args;
+    if (!schemeValues.includes(positionals[0])) {
+      throw usageError(
+        `${schemeArgName} must be one of ${schemeValues.join(', ')}, got ${JSON.stringify(positionals[0])}`,
+        'scheme set',
+      );
+    }
     // The portable escape hatch. Without it, a machine with no bar cannot produce
     // a scheme.json at all, and `familiar` refuses to run — which would make the
     // "no compositor, no bar" promise false.
@@ -1153,10 +1179,7 @@ async function main({ command, args: rest }) {
       `wrote ${paths.schemePath}\n`,
     );
   } else if (command === 'theme preview') {
-    const { positionals, values } = parseLeaf(rest, {
-      options: { theme: { type: 'string' }, state: { type: 'string' } },
-      minPositionals: 1, maxPositionals: 1, help: 'theme preview',
-    });
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const memberId = positionals[0];
 
     const paths = resolvePaths();
@@ -1207,9 +1230,7 @@ async function main({ command, args: rest }) {
       process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
     }
   } else if (command === 'theme add') {
-    const { positionals } = parseLeaf(rest, {
-      minPositionals: 1, maxPositionals: 1, help: 'theme add',
-    });
+    const { positionals } = parseLeaf(rest, leafOptions);
     const paths = resolvePaths();
     const { themeId: activeId } = await loadConfig({ paths });
     const result = await addTheme({ paths, source: positionals[0] });
@@ -1218,13 +1239,30 @@ async function main({ command, args: rest }) {
       process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
     }
   } else if (command === 'theme list') {
-    parseLeaf(rest, { help: 'theme list' });
+    parseLeaf(rest, leafOptions);
     // Deliberately NOT context(): a broken theme on disk must not stop you
     // LISTING what is on disk — that is exactly when you need the list. Each
     // pack is loaded independently and a failure is reported on its own row.
     const paths = resolvePaths();
     const { themeId: activeId } = await loadConfig({ paths });
     const rows = listThemes(paths);
+
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify(rows.map((row) => {
+        let pack = null, error = null;
+        try { pack = loadThemePackSync(row.dir); } catch (err) { error = err.message; }
+        return {
+          id: row.id,
+          active: row.id === activeId,
+          source: row.shadowed ? 'user (shadows shipped)' : row.source,
+          label: pack?.label ?? null,
+          members: pack ? pack.members.size : null,
+          description: pack?.description ?? null,
+          error,
+        };
+      }))}\n`);
+      return;
+    }
 
     process.stdout.write('\n');
     for (const row of rows) {
@@ -1259,9 +1297,7 @@ async function main({ command, args: rest }) {
     }
     process.stdout.write('\n');
   } else if (command === 'theme validate') {
-    const { positionals } = parseLeaf(rest, {
-      minPositionals: 1, maxPositionals: 1, help: 'theme validate',
-    });
+    const { positionals } = parseLeaf(rest, leafOptions);
     const pack = await validateThemePack(resolve(positionals[0]));
     const covered = pack.bySlot.size;
     process.stdout.write(
@@ -1271,10 +1307,7 @@ async function main({ command, args: rest }) {
       `  conforms to spec-version ${pack.specVersion}\n`,
     );
   } else if (command === 'theme show') {
-    const { positionals, values } = parseLeaf(rest, {
-      options: { rows: { type: 'string' } },
-      minPositionals: 0, maxPositionals: 1, help: 'theme show',
-    });
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const paths = resolvePaths();
     const { themeId: activeId } = await loadConfig({ paths });
     const rows = listThemes(paths);
@@ -1295,7 +1328,27 @@ async function main({ command, args: rest }) {
 
     const pack = loadThemePackSync(row.dir);
     const ctxTone = await loadTone({ paths });
-    const { mode } = ctxTone;
+    // schemeMode, not mode: this is the terminal colour scheme (dark|light), not
+    // the --json/--pretty output mode main() already destructured as `mode`.
+    const { mode: schemeMode } = ctxTone;
+
+    if (mode === 'json') {
+      const slots = [];
+      for (let slot = 0; slot < SLOT_COUNT; slot++) {
+        let member = null, fault = null;
+        try {
+          member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+        } catch (error) {
+          fault = error.message;
+        }
+        slots.push({ slot, member: member ? { id: member.id, label: member.label } : null, fault });
+      }
+      process.stdout.write(`${JSON.stringify({
+        id: row.id, label: pack.label, source: row.source, shadowed: row.shadowed ?? false, slots,
+      })}\n`);
+      return;
+    }
+
     const interactive = process.stdout.isTTY === true;
     const tmux = tmuxFacts(process.env);
     const capability = graphicsCapability(process.env, tmux);
@@ -1339,13 +1392,14 @@ async function main({ command, args: rest }) {
     // SLOT ORDER, not member order. The slot is the stable identity a project
     // hashes to; a theme is that identity's inhabitants. Walking the slots is
     // also what surfaces a gap as a gap rather than a shorter list.
+    const useColor = cliColor({ color });
     for (let slot = 0; slot < SLOT_COUNT; slot++) {
       // A REAL SWATCH, not the text "hue 22/62". identityColors(slot, tone) is
       // the same ramp every other surface paints this slot with, so the strip
       // shows the colour the bar and the border actually use rather than a
       // second opinion computed here. sgr.js exports fg(hex) and no background
       // setter, hence a block glyph rather than a filled cell.
-      const swatch = cliSwatch(identityColors(slot, ctxTone).base);
+      const swatch = cliSwatch(identityColors(slot, ctxTone).base, { color: useColor });
 
       // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
       // precisely when this view earns its keep — so the gap is caught, labelled,
@@ -1365,7 +1419,7 @@ async function main({ command, args: rest }) {
       try {
         member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
         if (graphical) {
-          const assets = assetsFor(pack, member.id, mode);
+          const assets = assetsFor(pack, member.id, schemeMode);
           // A STRIP, NOT A GRID, and that is a property of transmit(): it sends
           // C=1 (the image does not move the cursor) and then advances by hand
           // with exactly `rows` newlines, so consecutive images always stack
@@ -1395,13 +1449,7 @@ async function main({ command, args: rest }) {
     }
     process.stdout.write('\n');
   } else if (command === 'theme sheet') {
-    const { values } = parseLeaf(rest, {
-      options: {
-        rows: { type: 'string' }, theme: { type: 'string' },
-        member: { type: 'string' }, out: { type: 'string' },
-      },
-      help: 'theme sheet',
-    });
+    const { values } = parseLeaf(rest, leafOptions);
     // THE WHOLE THEME AT A GLANCE: one row per member, six poses across it, at whatever
     // height fits your screen. `theme` shows twelve members in ONE state and `preview`
     // shows one member in six — the sheet neither of them can draw is the one that puts
@@ -1509,28 +1557,77 @@ async function main({ command, args: rest }) {
 // worth exactly one catch, and this is it.
 //
 const COSMETIC_COMMANDS = new Set(['hook', 'statusline']);
+// A usage error (bad argv shape) always exits 2, plain text -- reportCosmeticError's
+// one line plus, where the error names a help scope, the "Run ... --help" line, same
+// as before this command table existed. A RUNTIME failure (parsing succeeded, the
+// work did not) exits 1, and under --json on a non-protocol command it is the error
+// object on stderr instead of the plain line -- the general contract's json-failure
+// shape. Protocol commands (hook, statusline) keep exiting 0 either way: a cosmetic
+// layer must never be able to degrade the tool it decorates.
 export function reportCommandError(error, resolved, {
   write = (line) => process.stderr.write(line),
+  mode = 'pretty',
 } = {}) {
-  reportCosmeticError(error, { write });
-  if (error.help) {
-    const target = error.help === 'root' ? 'familiar --help' : `familiar ${error.help} --help`;
-    write(`Run \`${target}\` for help.\n`);
+  const cosmetic = COSMETIC_COMMANDS.has(resolved?.command);
+  if (!cosmetic && error.help === undefined && mode === 'json') {
+    write(`${JSON.stringify({ error: { kind: 'familiar', detail: error.message } })}\n`);
+    return 1;
   }
-  return COSMETIC_COMMANDS.has(resolved?.command) ? 0 : 1;
+  reportCosmeticError(error, { write });
+  if (error.help !== undefined) {
+    const target = error.help === 'root' ? 'familiar --help' : `familiar ${error.help} --help`;
+    write(`Run '${target}' for help.\n`);
+  }
+  return cosmetic ? 0 : (error.help !== undefined ? 2 : 1);
+}
+
+function printCompletion(argv) {
+  const shell = process.env.FAMILIAR_COMPLETE;
+  if (argv[0] !== '--') {
+    process.stdout.write(completionScript(shell));
+    return;
+  }
+  const words = argv.slice(1);
+  const index = Number(process.env.FAMILIAR_COMPLETE_INDEX);
+  for (const [value, description] of candidates(words, index)) {
+    process.stdout.write(`${value}\t${description ?? ''}\n`);
+  }
 }
 
 // Called by the bin/familiar launcher. It is an export rather than an
 // invoked-as-main guard because the launcher imports this file, so argv[1] names
 // the launcher and never this path.
 export async function run(argv = process.argv.slice(2)) {
+  // Completion never touches config or the bus, and it is checked before globals are
+  // stripped: the words it is asked to complete are the raw shell words, `--` and all.
+  if (process.env.FAMILIAR_COMPLETE) return printCompletion(argv);
+
   let resolved = null;
+  let mode = 'pretty';
   try {
-    resolved = resolveCommand(argv);
-    if (resolved.help) process.stdout.write(renderHelp(resolved.help, { color: cliColor() }));
-    else await main(resolved);
+    const stripped = stripGlobals(argv, process.env, usageError);
+    mode = stripped.mode;
+    const color = stripped.color;
+    let rest = stripped.argv;
+
+    // -V/--version is a root concept only: it is checked before resolving a
+    // command, so `-V` after a family name reaches resolveCommand and fails as
+    // an ordinary unknown option instead of printing the version.
+    if (rest[0] === '-V' || rest[0] === '--version') {
+      const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'));
+      process.stdout.write(`familiar ${pkg.version}\n`);
+      return;
+    }
+
+    // `help <words…>` routes to the same help resolveCommand gives `<words…> --help`;
+    // with no words, `familiar help` is `familiar --help`.
+    if (rest[0] === 'help') rest = [...rest.slice(1), '--help'];
+
+    resolved = resolveCommand(rest);
+    if (resolved.help) process.stdout.write(renderHelp(resolved.help, { color: cliColor({ color }) }));
+    else await main({ ...resolved, color, mode });
   } catch (error) {
-    process.exitCode = reportCommandError(error, resolved);
+    process.exitCode = reportCommandError(error, resolved, { mode });
   }
 }
 
