@@ -808,6 +808,35 @@ options = [
   { names = ["--verify", "--no-verify"], value = "none", default = "true" },
 ]
 
+[[cli.lit.commands]]
+path = ["corpus"]
+summary = "The personal library as nodes in the world's coordinates"
+options = [
+  { shared = "config", value = "path", default = "lit.toml" },
+]
+
+[[cli.lit.commands]]
+path = ["corpus", "build"]
+summary = "Derive the tree from a Paperpile export placed in one world build"
+options = [
+  { names = ["--export"], value = "path", required = true },
+  { names = ["--date"], value = "string", required = true },
+  { names = ["--verify", "--no-verify"], value = "none", default = "true" },
+  { names = ["--corpus-dir"], value = "path", default = "corpus" },
+]
+
+[[cli.lit.commands]]
+path = ["corpus", "check"]
+verb = "check"
+summary = "Verify a published tree's manifest, hashes, and nodes validity"
+
+[[cli.lit.commands]]
+path = ["corpus", "describe"]
+summary = "Print counts and the topic footprint of a published tree"
+options = [
+  { names = ["--top"], value = "int", default = "20" },
+]
+
 # ---- science
 
 [[cli.science.commands]]
