@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# cli_surface 2: the conformance half of docs/specs/2026-09-20-cli-conventions-design.md.
+# cli_surface 3: the conformance half of docs/specs/2026-09-20-cli-conventions-design.md.
 """Build a CLI's parser surface and compare it with its rows in cli.toml.
 
 Vendored from ops as tools/cli_surface.py beside tools/cli.toml; never edited in a project.
@@ -85,13 +85,13 @@ def _argparse_kind(action):
     return "string"
 
 
-def argparse_rows(parser, path=()):
-    """The live surface of an argparse parser tree. Subparser help is the summary; a
-    `type=` callable named ref, when, or age declares that value kind; Path and int map."""
+def argparse_rows(parser, path=(), summary=None):
+    """The live surface of an argparse parser tree. A subparser's help is its summary,
+    its own description when it has no help; a `type=` callable named ref, when, or
+    age declares that value kind; Path and int map. The parser is never modified."""
     rows = set()
-    summary = parser.description or ""
     if path:
-        rows.add(("command", tuple(path), summary.rstrip(".")))
+        rows.add(("command", tuple(path), (summary or parser.description or "").rstrip(".")))
     index = 0
     for action in parser._actions:
         if isinstance(action, argparse._HelpAction):
@@ -107,8 +107,7 @@ def argparse_rows(parser, path=()):
                 seen.add(id(sub))
                 if not path and name == "help":
                     continue
-                sub.description = sub.description or helps.get(name) or ""
-                rows |= argparse_rows(sub, path + (name,))
+                rows |= argparse_rows(sub, path + (name,), helps.get(name) or sub.description)
             continue
         kind = _argparse_kind(action)
         values = tuple(action.choices) if action.choices is not None else ()
@@ -130,6 +129,31 @@ def argparse_rows(parser, path=()):
     return rows
 
 
+def _click_kind(param):
+    """(value kind, values) for a click parameter's type."""
+    import click
+    if isinstance(param.type, click.Choice):
+        return "enum", tuple(param.type.choices)
+    if isinstance(param.type, click.Path):
+        return "path", ()
+    if param.type.name == "integer":
+        return "int", ()
+    name = getattr(param.type, "name", "string")
+    return (name if name in VALUE_KINDS else "string"), ()
+
+
+def _click_default(param, kind):
+    """The row's default: "true" for a flag that defaults on, else the default as a string,
+    None when click records none (None, or the UNSET sentinel of click 8.3+)."""
+    import click.core
+    unset = (None, getattr(click.core, "UNSET", None))
+    if kind == "none":
+        return "true" if param.default is True else None
+    if any(param.default is u for u in unset):
+        return None
+    return str(param.default)
+
+
 def click_rows(group, path=()):
     """The live surface of a click group tree."""
     import click
@@ -142,26 +166,11 @@ def click_rows(group, path=()):
             names = tuple(param.opts) + tuple(param.secondary_opts)
             if implied(names, path) or set(names) & {"--help"}:
                 continue
-            if param.is_flag:
-                kind, values = "none", ()
-            elif isinstance(param.type, click.Choice):
-                kind, values = "enum", tuple(param.type.choices)
-            elif isinstance(param.type, click.Path):
-                kind, values = "path", ()
-            elif param.type.name == "integer":
-                kind, values = "int", ()
-            else:
-                kind, values = getattr(param.type, "name", "string"), ()
-                if kind not in VALUE_KINDS:
-                    kind = "string"
-            default = None
-            if kind == "none":
-                default = param.default is True
-            elif param.default is not None and "UNSET" not in repr(param.default):
-                default = str(param.default)
-            rows.add(_opt_row(path, names, kind, values, default, "1", param.multiple, param.required))
+            kind, values = ("none", ()) if param.is_flag else _click_kind(param)
+            rows.add(_opt_row(path, names, kind, values, _click_default(param, kind), "1", param.multiple, param.required))
         else:
-            rows.add(("arg", tuple(path), index, param.name.replace("_", "-"), "string", (), bool(param.required), param.nargs == -1))
+            kind, values = _click_kind(param)
+            rows.add(("arg", tuple(path), index, param.name.replace("_", "-"), kind, values, bool(param.required), param.nargs == -1))
             index += 1
     if isinstance(group, click.Group):
         for name, cmd in group.commands.items():
@@ -171,24 +180,31 @@ def click_rows(group, path=()):
     return rows
 
 
-GLOBAL_FLAGS = {"--json", "--pretty", "-h", "--help", "-V", "--version"}
-GLOBAL_VALUED = {"--color", "-C", "--config"}
+def _global_options(parser):
+    """The root parser's own options as (flags, valued): what may precede the command."""
+    flags, valued = set(), set()
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction) or not action.option_strings:
+            continue
+        (flags if action.nargs == 0 else valued).update(action.option_strings)
+    return flags, valued
 
 
 def argparse_candidates(parser, words, index):
     """Completion candidates for words[index] as (value, description) pairs, from the
     argparse tree: commands at a command position, the current command's options for a
-    word starting with '-', an enum option's or positional's values otherwise. Global
-    options before the command are skipped, and candidates are filtered by the word's
-    prefix so the shell need not."""
+    word starting with '-', an enum option's or positional's values otherwise. The root
+    parser's own options before the command are skipped (a valued one with its value),
+    and candidates are filtered by the word's prefix so the shell need not."""
+    global_flags, global_valued = _global_options(parser)
     current = parser
     consumed = 1
     while consumed < index:
         token = words[consumed]
-        if token in GLOBAL_FLAGS:
+        if token in global_flags:
             consumed += 1
             continue
-        if token in GLOBAL_VALUED:
+        if token in global_valued:
             consumed += 2
             continue
         subs = next((a for a in current._actions if isinstance(a, argparse._SubParsersAction)), None)
