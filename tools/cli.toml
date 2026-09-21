@@ -355,7 +355,7 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["sample"]
-summary = "Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed; not updated within --older-than days. Rows are list rows"
+summary = "Random open tasks for a curation pass: idea, todo, or blocked; not live-claimed; not updated within the --older-than age. Rows are list rows"
 options = [
   { shared = "limit", value = "int", default = "3" },
   { shared = "older_than", role = "bound", value = "age", default = "7d", repeatable = false },
@@ -868,6 +868,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["generate"]
 summary = "Generate one partition's systems"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
   { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
@@ -876,6 +877,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["compute"]
 summary = "Compute the measures for one partition"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
   { names = ["--partition"], value = "enum", values = ["development", "fresh", "new", "new-burn2"], required = true },
@@ -891,6 +893,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["validate"]
 summary = "Validate the computed measures"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -898,6 +901,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["coupling"]
 summary = "Run the coupling analysis"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -905,6 +909,7 @@ options = [
 [[cli.pilot.commands]]
 path = ["surrogate"]
 summary = "Run the surrogate analysis"
+output = "none"
 options = [
   { names = ["--run"], value = "string", default = "r1" },
 ]
@@ -1539,10 +1544,12 @@ summary = "Print a harness's integration settings"
 
 [[cli.familiar.commands]]
 path = ["setup", "claude-code"]
+protocol = "harness settings document: stdout is the JSON settings file in any mode"
 summary = "Print Claude Code integration settings"
 
 [[cli.familiar.commands]]
 path = ["setup", "codex"]
+protocol = "harness settings document: stdout is the JSON settings file in any mode"
 summary = "Print Codex integration settings"
 
 [[cli.familiar.commands]]

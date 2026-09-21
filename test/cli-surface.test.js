@@ -155,8 +155,6 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
     'scheme set': () => ['scheme', 'set', 'dark'],
     'install pets': () => ['install', 'pets', '--out', scratch()],
     'install opencode': () => ['install', 'opencode', '--config-dir', scratch()],
-    'setup claude-code': () => ['setup', 'claude-code'],
-    'setup codex': () => ['setup', 'codex'],
     reap: () => ['reap'],
   };
 
@@ -173,4 +171,18 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
   // Every non-family, non-protocol row must be named above -- silently sampling a
   // subset would let a future command ship with no json branch unnoticed.
   assert.deepEqual(uncovered, []);
+});
+
+// setup claude-code|codex are protocol rows: the harness settings document is the
+// whole point, so stdout is that JSON file whichever output mode is asked for.
+test('setup prints the settings document in every mode', () => {
+  for (const agent of ['claude-code', 'codex']) {
+    const docs = [[], ['--json'], ['--pretty']].map((flags) => {
+      const r = run([...flags, 'setup', agent]);
+      assert.equal(r.status, 0, `${agent} ${flags}: ${r.stderr}`);
+      return JSON.parse(r.stdout);
+    });
+    assert.deepEqual(docs[1], docs[0]);
+    assert.deepEqual(docs[2], docs[0]);
+  }
 });
