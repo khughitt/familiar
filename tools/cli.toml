@@ -1358,7 +1358,7 @@ options = [
 
 [[cli.prism.commands]]
 path = ["set"]
-summary = "Set a parameter in the active profile, or the base layer with --base"
+summary = "Edit a parameter in scratch, or set it in the base layer with --base"
 args = [{ name = "key", value = "string", required = true }, { name = "value", value = "string", required = true }]
 options = [
   { names = ["--base"], value = "none" },
@@ -1366,7 +1366,7 @@ options = [
 
 [[cli.prism.commands]]
 path = ["unset"]
-summary = "Remove a parameter from the active profile, or the base layer with --base"
+summary = "Drop a pending edit from scratch, or a parameter from the base layer with --base"
 args = [{ name = "key", value = "string", required = true }]
 options = [
   { names = ["--base"], value = "none" },
@@ -1374,8 +1374,8 @@ options = [
 
 [[cli.prism.commands]]
 path = ["reset"]
-summary = "Reset parameters to defaults, symmetric, or neutral values"
-args = [{ name = "mode", value = "enum", values = ["defaults", "symmetric", "neutral"], required = true }]
+summary = "Revert pending edits, or move parameters to symmetric or neutral values"
+args = [{ name = "mode", value = "enum", values = ["revert", "symmetric", "neutral"], required = true }]
 options = [
   { names = ["--base"], value = "none" },
   { names = ["--group"], value = "string" },
@@ -1413,7 +1413,17 @@ summary = "Check the installation and the sinks"
 
 [[cli.prism.commands]]
 path = ["migrate"]
-summary = "Migrate the store to the current layout"
+summary = "Migrate the store to the current definitions, or its pairs to the current layout"
+args = [{ name = "target", value = "enum", values = ["pairs"], required = false }]
+
+[[cli.prism.commands]]
+path = ["commit"]
+summary = "Save the pending edits into base, the loaded profile (or a new one by name), or the on-screen wallpaper pair"
+args = [{ name = "destination", value = "enum", values = ["base", "profile", "wallpaper"], required = true }, { name = "name", value = "string", required = false }]
+options = [
+  { names = ["--expect-look"], value = "string" },
+  { names = ["--expect-wallpaper"], value = "string" },
+]
 
 [[cli.prism.commands]]
 path = ["context"]
@@ -1427,13 +1437,11 @@ summary = "List every saved context and the active slots"
 [[cli.prism.commands]]
 path = ["context", "show"]
 verb = "show"
-summary = "Show one saved context"
+summary = "Show one saved context: a profile with its wallpaper pairs, or one pair under the loaded look"
 args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
-
-[[cli.prism.commands]]
-path = ["context", "save"]
-summary = "Save the active profile layer under a name"
-args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { names = ["--look"], value = "string" },
+]
 
 [[cli.prism.commands]]
 path = ["context", "activate"]
@@ -1448,23 +1456,30 @@ args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], requ
 [[cli.prism.commands]]
 path = ["context", "delete"]
 verb = "delete"
-summary = "Delete a saved context"
+summary = "Delete a saved profile, or the on-screen wallpaper pair under the loaded look"
 args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { names = ["--expect-look"], value = "string" },
+  { names = ["--expect-wallpaper"], value = "string" },
+]
+
+[[cli.prism.commands]]
+path = ["context", "clear"]
+summary = "Remove the on-screen wallpaper pair and keep the slot: active and untuned"
+args = [{ name = "kind", value = "enum", values = ["wallpaper"], required = true }, { name = "id", value = "string", required = true }]
+options = [
+  { names = ["--expect-look"], value = "string" },
+  { names = ["--expect-wallpaper"], value = "string" },
+]
 
 [[cli.prism.commands]]
 path = ["context", "rename"]
-summary = "Rename a saved context"
+summary = "Rename a saved profile; its pairs follow it"
 args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }, { name = "old", value = "string", required = true }, { name = "new", value = "string", required = true }]
-
-[[cli.prism.commands]]
-path = ["context", "pin"]
-summary = "Pin the wallpaper slot so wallpaper changes do not move it"
-args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }]
-
-[[cli.prism.commands]]
-path = ["context", "unpin"]
-summary = "Unpin the wallpaper slot"
-args = [{ name = "kind", value = "enum", values = ["profile", "wallpaper"], required = true }]
+options = [
+  { names = ["--expect-look"], value = "string" },
+  { names = ["--expect-wallpaper"], value = "string" },
+]
 
 [[cli.prism.commands]]
 path = ["context", "wallpaper"]
