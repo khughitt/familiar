@@ -711,6 +711,15 @@ options = [
 ]
 
 [[cli.obs.commands]]
+path = ["baseline"]
+summary = "count the pre-flow status-question proxy"
+options = [
+  { names = ["--input"], value = "path", required = true },
+  { names = ["--summary"], value = "path" },
+  { names = ["--window-minutes"], value = "int", default = "10" },
+]
+
+[[cli.obs.commands]]
 path = ["reconcile"]
 output = "json"
 summary = "consume new evidence and publish findings.json"
