@@ -1296,6 +1296,19 @@ options = [
   { shared = "via", value = "string" },
 ]
 
+[[cli.mindful.commands]]
+path = ["walk"]
+summary = "Walk the corpus under a lens: a seeded, self-avoiding, biased random walk"
+exception = "--seed takes a string, not the vocabulary's integer: the review walk's seed is the calendar day and the web shares its seeds with the walk URL"
+options = [
+  { names = ["--lens"], value = "string" },
+  { names = ["--noise"], value = "string" },
+  { shared = "seed", value = "string" },
+  { names = ["--from"], value = "ref" },
+  { names = ["--steps"], value = "int" },
+  { names = ["--no-semantic"], value = "none" },
+]
+
 # ---- prism
 
 [[cli.prism.commands]]
