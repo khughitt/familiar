@@ -837,6 +837,45 @@ options = [
   { names = ["--top"], value = "int", default = "20" },
 ]
 
+[[cli.lit.commands]]
+path = ["walk"]
+summary = "A biased walk over the world's topics, steered by the library"
+options = [
+  { shared = "config", value = "path", default = "lit.toml" },
+]
+
+[[cli.lit.commands]]
+path = ["walk", "region"]
+summary = "One topic's outgoing citation neighbourhood against the library's coverage"
+options = [
+  { names = ["--from"], value = "string", required = true },
+  { names = ["--lens"], value = "string" },
+  { names = ["--noise"], value = "string" },
+  { names = ["--years"], value = "string" },
+  { names = ["--span"], value = "int", default = "10" },
+  { names = ["--exemplars"], value = "none" },
+  { names = ["--top-exemplars"], value = "int", default = "3" },
+  { names = ["--allow-dirty"], value = "none" },
+  { names = ["--verify", "--no-verify"], value = "none", default = "true" },
+]
+
+[[cli.lit.commands]]
+path = ["walk", "trail"]
+summary = "A seeded, self-avoiding, biased walk from one topic; the JSON form is the walk's record"
+options = [
+  { names = ["--from"], value = "string", required = true },
+  { names = ["--lens"], value = "string", default = "gap" },
+  { names = ["--noise"], value = "string" },
+  { shared = "seed", value = "string", exception = "a string, not the vocabulary's integer: hashed as mindful hashes its walk seed, so a lit walk and a mindful walk with the same seed share step draws; the default is the calendar day" },
+  { names = ["--steps"], value = "int", default = "12" },
+  { names = ["--years"], value = "string" },
+  { names = ["--span"], value = "int", default = "10" },
+  { names = ["--top-papers"], value = "int", default = "5" },
+  { names = ["--top-exemplars"], value = "int", default = "3" },
+  { names = ["--allow-dirty"], value = "none" },
+  { names = ["--verify", "--no-verify"], value = "none", default = "true" },
+]
+
 # ---- science
 
 [[cli.science.commands]]

@@ -136,7 +136,7 @@ def _click_kind(param):
         return "enum", tuple(param.type.choices)
     if isinstance(param.type, click.Path):
         return "path", ()
-    if param.type.name == "integer":
+    if param.type.name in ("integer", "integer range"):  # click.INT and click.IntRange
         return "int", ()
     name = getattr(param.type, "name", "string")
     return (name if name in VALUE_KINDS else "string"), ()
