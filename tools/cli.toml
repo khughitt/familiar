@@ -890,6 +890,44 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["dataset"]
+summary = "Hold a local file in the store and mint the dataset record under its content address"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--path"], value = "string", required = true },
+  { names = ["--title"], value = "string", required = true },
+  { names = ["--locator"], value = "string" },
+  { names = ["--facets"], value = "string", repeatable = true },
+]
+
+[[cli.science.commands]]
+path = ["claim"]
+summary = "Type a proposition under the profile and mint its record"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--subject"], value = "string", required = true },
+  { names = ["--predicate"], value = "string", required = true },
+  { names = ["--object"], value = "string", required = true },
+  { names = ["--layer"], value = "string", required = true },
+  { names = ["--polarity"], value = "string", required = true },
+  { names = ["--slug"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["belief"]
+summary = "Evaluate the shipped belief policy over one proposition and render the answer"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--proposition"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
 path = ["build"]
 summary = "Build the world from its corpora"
 
