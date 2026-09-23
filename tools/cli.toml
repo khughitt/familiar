@@ -1052,6 +1052,16 @@ options = [
 ]
 
 [[cli.mindful.commands]]
+path = ["archive"]
+summary = "Archive a thought or structure; with --members, also a structure's thoughts"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+  { names = ["--members"], value = "none" },
+]
+
+[[cli.mindful.commands]]
 path = ["check"]
 verb = "check"
 summary = "Check corpus integrity and derived-index freshness"
@@ -1141,6 +1151,8 @@ args = [{ name = "date", value = "string", required = false }]
 options = [
   { shared = "since", role = "bound", value = "when", repeatable = false },
   { shared = "until", role = "bound", value = "when", repeatable = false },
+  { shared = "all", value = "none" },
+  { names = ["--archived"], value = "none" },
 ]
 
 [[cli.mindful.commands]]
@@ -1149,6 +1161,8 @@ verb = "list"
 summary = "List thought ids and titles"
 options = [
   { shared = "by", role = "filter", value = "string", repeatable = false },
+  { shared = "all", value = "none" },
+  { names = ["--archived"], value = "none" },
 ]
 
 [[cli.mindful.commands]]
@@ -1209,6 +1223,10 @@ options = [
 path = ["mindmap", "list"]
 verb = "list"
 summary = "List mindmaps"
+options = [
+  { shared = "all", value = "none" },
+  { names = ["--archived"], value = "none" },
+]
 
 [[cli.mindful.commands]]
 path = ["mindmap", "prune"]
@@ -1284,6 +1302,8 @@ options = [
   { shared = "by", role = "filter", value = "string", repeatable = false },
   { names = ["--mode"], value = "enum", values = ["lexical", "semantic", "fused"], default = "lexical" },
   { shared = "limit", value = "int", default = "50" },
+  { shared = "all", value = "none" },
+  { names = ["--archived"], value = "none" },
 ]
 
 [[cli.mindful.commands]]
@@ -1368,6 +1388,8 @@ verb = "list"
 summary = "List structures, optionally of one kind"
 options = [
   { names = ["--kind"], value = "enum", values = ["set", "journal", "mindmap"] },
+  { shared = "all", value = "none" },
+  { names = ["--archived"], value = "none" },
 ]
 
 [[cli.mindful.commands]]
@@ -1410,6 +1432,16 @@ args = [{ name = "ref", value = "ref", required = true }, { name = "name", value
 options = [
   { shared = "as", value = "string" },
   { shared = "via", value = "string" },
+]
+
+[[cli.mindful.commands]]
+path = ["unarchive"]
+summary = "Unarchive a thought or structure; with --members, also a structure's thoughts"
+args = [{ name = "ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+  { names = ["--members"], value = "none" },
 ]
 
 [[cli.mindful.commands]]
