@@ -928,6 +928,84 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["spec"]
+summary = "Freeze an analysis spec against the kernel's reference rules and mint its record"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--applicability"], value = "string", repeatable = true },
+  { names = ["--assumptions"], value = "string", required = true },
+  { names = ["--baseline"], value = "string" },
+  { names = ["--comparison"], value = "string" },
+  { names = ["--conditioning"], value = "string", repeatable = true },
+  { names = ["--contrast"], value = "enum", values = ["levels", "continuous"], required = true },
+  { names = ["--dataset"], value = "string", required = true },
+  { names = ["--equivalence-rule"], value = "string", required = true },
+  { names = ["--falsification"], value = "string", required = true },
+  { names = ["--identification"], value = "string", required = true },
+  { names = ["--increment"], value = "string" },
+  { names = ["--interpretation-rule"], value = "string", required = true },
+  { names = ["--measure"], value = "string", required = true },
+  { names = ["--method"], value = "string", required = true },
+  { names = ["--parameters"], value = "string", repeatable = true },
+  { names = ["--quantity"], value = "string" },
+  { names = ["--reference"], value = "string", required = true },
+  { names = ["--scale"], value = "enum", values = ["additive", "multiplicative"], required = true },
+  { names = ["--slot"], value = "int", required = true },
+  { names = ["--supersedes"], value = "string" },
+  { names = ["--target"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["run"]
+summary = "Execute the analysis for a spec once, under confinement, and mint the run record"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--code"], value = "string", required = true },
+  { names = ["--cores"], value = "int" },
+  { names = ["--dataset"], value = "string", required = true },
+  { names = ["--entrypoint"], value = "string", required = true },
+  { names = ["--spec"], value = "string", required = true },
+  { names = ["--targets"], value = "string", repeatable = true, required = true },
+]
+
+[[cli.science.commands]]
+path = ["assess"]
+summary = "Derive the assessment a run's outputs support under its spec's rule, and mint it"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--run"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["verify"]
+summary = "Replay an assessment's run, derive scope and verdict, and mint the verification"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--assessment"], value = "string", required = true },
+  { names = ["--code"], value = "string", required = true },
+  { names = ["--cores"], value = "int" },
+  { names = ["--entrypoint"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["next"]
+summary = "Rank the propositions this world can act on, from the current view"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { shared = "limit", value = "int" },
+]
+
+[[cli.science.commands]]
 path = ["build"]
 summary = "Build the world from its corpora"
 
