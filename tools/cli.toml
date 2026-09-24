@@ -735,6 +735,21 @@ summary = "consume new evidence and publish findings.json"
 path = ["findings"]
 summary = "print the published findings view"
 
+[[cli.obs.commands]]
+path = ["drift"]
+summary = "evaluate metric drift and publish drift.json"
+
+[[cli.obs.commands]]
+path = ["drift", "replay"]
+summary = "derive drift episodes from scratch without writing state"
+options = [
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["drift", "catalog"]
+summary = "list the series the metric catalog produces"
+
 # ---- lit
 
 [[cli.lit.commands]]
@@ -1007,6 +1022,93 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { shared = "limit", value = "int" },
+]
+
+[[cli.science.commands]]
+path = ["project"]
+summary = "Start a project: a name and a query over the world"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--query"], value = "string", required = true },
+  { names = ["--body"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["question"]
+summary = "Ask a question in the current project: a name and a query over the world"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--query"], value = "string", required = true },
+  { names = ["--body"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["hypothesis"]
+summary = "Ask a hypothesis in the current project: a name and a query over the world"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--query"], value = "string", required = true },
+  { names = ["--body"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["task"]
+summary = "Add an open task to the current project"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string" },
+  { names = ["--depends"], value = "string", repeatable = true },
+]
+
+[[cli.science.commands]]
+path = ["decide"]
+summary = "Record a decision in the current project, with its reasoning"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--name"], value = "string", required = true },
+  { names = ["--body"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["revise"]
+summary = "Revise a project, question, hypothesis, task or decision"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--address"], value = "string", required = true },
+  { names = ["--name"], value = "string" },
+  { names = ["--body"], value = "string" },
+  { names = ["--query"], value = "string" },
+  { shared = "status", role = "set", value = "enum", values = ["open", "done", "dropped"], repeatable = false },
+  { names = ["--depends"], value = "string", repeatable = true },
+  { names = ["--clear-depends", "--no-clear-depends"], value = "none" },
+  { names = ["--repair", "--no-repair"], value = "none" },
+]
+
+[[cli.science.commands]]
+path = ["reuse"]
+summary = "Copy a question or hypothesis into the current project with the same query"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--source"], value = "string", required = true },
+  { names = ["--name"], value = "string" },
 ]
 
 [[cli.science.commands]]
