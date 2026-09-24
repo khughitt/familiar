@@ -6,7 +6,9 @@ import { basename } from 'node:path';
 import { createInterface } from 'node:readline';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { readJson, writeJsonAtomic } from '../src/bus/store.js';
+import { loadConfig } from '../src/config.js';
 import { mapSessionsToWindows, niriWindowsPath, shouldResync } from '../integrations/niri/window.js';
+import { niriHasSignals, planWindowSignals } from '../integrations/niri/signal.js';
 
 const exec = promisify(execFile);
 const [command, ...rest] = process.argv.slice(2);
@@ -20,20 +22,52 @@ const paths = resolvePaths();
 const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not name niri
 
 let lastWritten = null;
+// What this process last told niri, per window and per session. See planWindowSignals.
+let sent = new Map();
+let states = new Map();
+let signalsUnsupportedSaid = false;
 
 async function sync() {
   const { stdout } = await exec('niri', ['msg', '-j', 'windows']);
+  const windows = JSON.parse(stdout);
   const agents = (await readJson(paths.agentsPath)) ?? {};
-  const map = mapSessionsToWindows(agents, JSON.parse(stdout));
+  const map = mapSessionsToWindows(agents, windows);
 
   // WindowFocusChanged fires on every focus change — constantly. Writing an
   // identical map each time would wake workspace-awareness readers for nothing. Compare
   // before writing.
   const serialized = JSON.stringify(map);
-  if (serialized === lastWritten) return;
-  lastWritten = serialized;
+  if (serialized !== lastWritten) {
+    lastWritten = serialized;
+    await writeJsonAtomic(windowsPath, map);
+  }
 
-  await writeJsonAtomic(windowsPath, map);
+  // The same join feeds niri's material signals: each window hosting a session
+  // carries one `familiar` slot, lit in that session's identity hue.
+  if (!niriHasSignals(windows)) {
+    if (!signalsUnsupportedSaid) {
+      signalsUnsupportedSaid = true;
+      process.stderr.write('this niri has no window signals; windows get no familiar hue\n');
+    }
+    return;
+  }
+  const intent = (await readJson(paths.intentPath)) ?? {};
+  const { themeId } = await loadConfig({ paths });
+  const plan = planWindowSignals({
+    intent, agents, sessionWindows: map, windows, sent, states, themeId, now: Date.now(),
+  });
+  sent = plan.sent;
+  states = plan.states;
+  for (const { windowId, args } of plan.commands) {
+    try {
+      await exec('niri', ['msg', ...args]);
+    } catch (error) {
+      // One window refusing must not starve the others. Forget what was "sent" to
+      // it, so the next resync tries again rather than trusting a write that failed.
+      sent.delete(windowId);
+      process.stderr.write(`niri msg ${args[0]} --id ${windowId}: ${error.stderr?.trim() || error.message}\n`);
+    }
+  }
 }
 
 if (command === 'sync') {
@@ -47,10 +81,15 @@ if (command === 'sync') {
   // So: resync on every niri event that could move a window, and on every
   // change to the bus (a new session needs placing). There is no hook-driven
   // sync anywhere else — this is the single writer of niri-windows.json.
+  // Resyncs run one at a time. A resync now spends several `niri msg` round trips,
+  // and two overlapping ones would each plan against the other's half-sent state.
   let pending = null;
+  let running = Promise.resolve();
   const resync = () => {
     clearTimeout(pending);
-    pending = setTimeout(() => sync().catch((e) => process.stderr.write(`${e.message}\n`)), 100);
+    pending = setTimeout(() => {
+      running = running.then(sync).catch((e) => process.stderr.write(`${e.message}\n`));
+    }, 100);
   };
 
   // WATCH THE DIRECTORY, NOT THE FILE. writeJsonAtomic replaces agents.json via
@@ -63,11 +102,15 @@ if (command === 'sync') {
   // The mkdir also matters: fs.watch on a nonexistent path throws ENOENT, and
   // this process is spawned at compositor startup, long before any agent exists.
   mkdirSync(paths.stateDir, { recursive: true });
+  //
+  // intent.json is renamed in right after agents.json, and it is the file that
+  // carries a state change (a `done`, a decay) to the signals.
+  const watched = new Set([basename(paths.agentsPath), basename(paths.intentPath)]);
   watch(paths.stateDir, (_event, file) => {
-    if (file === basename(paths.agentsPath)) resync();
+    if (watched.has(file)) resync();
   });
 
-  await sync();
+  await (running = running.then(sync));
 
   const stream = spawn('niri', ['msg', '-j', 'event-stream'], { stdio: ['ignore', 'pipe', 'inherit'] });
   for await (const line of createInterface({ input: stream.stdout })) {

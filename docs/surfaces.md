@@ -22,6 +22,7 @@ have since been fixed but not yet re-tested on hardware.
 | Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
 | OpenCode | Familiar server and TUI plugins | The plugins render the full-colour graphic and publish intent for desktop moments. |
 | Niri desktop moments | `intent.json` | `integrations/niri-desktop` plays click-through `done` and `error` moments on the focused output. |
+| Niri window signals | `intent.json` | `familiar-niri watch` lights each terminal's niri-material glass in its session's identity hue. |
 
 The sprite contract is six full-colour state images plus `rows`. The same contract is
 used by terminal, status-line, Codex, OpenCode, and desktop surfaces.
@@ -121,6 +122,16 @@ command writes both registrations and leaves unrelated plugin entries intact.
 `niri-windows.json`. The watcher is the sole writer because a window can move after
 its session begins. The retained feed is workspace awareness for external consumers;
 the desktop-moments renderer does not depend on it.
+
+On niri-material, the same watcher also writes each terminal's `familiar` signal slot
+(`niri msg set-window-signal`), so the glass ring takes that window's identity hue.
+Identity sets the accent; state sets the level (`working` is `active`, other `none`
+urgency is `quiet`) and the motion, under `motion: full | reduced | off`. Several
+sessions in one terminal share one slot, won by the highest level and then the most
+recent session. A transient `done` or `error` hands niri its successor and time left,
+and a transition into either sends a matching pulse. Windows that no longer host a
+session are cleared, by niri's own record, so a restarted watcher leaves no stale hue.
+On a niri without window signals the watcher says so once and writes only the map.
 
 `integrations/niri-desktop` watches `intent.json` directly. On `done` or `error`, it
 uses Niri to find the focused output and presents a short click-through moment. The

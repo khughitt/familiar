@@ -1,16 +1,20 @@
 ---
 id: fam-e7fa72
 title: Push familiar intent to niri as per-window signals from familiar-niri watch
-status: todo
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
+owner: fam-e7fa72
 created: 2026-09-24T18:15:30Z
-updated: 2026-09-24T18:15:30Z
+updated: 2026-09-24T18:21:35Z
+started: 2026-09-24T18:16:11Z
+completed: 2026-09-24T18:21:35Z
 depends: []
 tags: [integration, hue]
 source: material-930c55
+model: "claude-opus-5-5[1m]"
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -32,3 +36,12 @@ Constraints: no compositor knowledge under src/ (the mapping lives in integratio
 Done when: (1) unit tests in test/niri-window.test.js (or a sibling) cover the level/motion mapping, motionPolicy, aggregation, ttl/after, pulse-on-transition, clear-on-leave, and startup reconcile, with the niri call injected; (2) a live check shows two familiar sessions in two kitty windows with different ring hues via `niri msg -j windows` (signal.accent and sources include familiar), and a done transition pulses. Then note the result on material-930c55.
 
 Where to look: bin/familiar-niri, integrations/niri/window.js, src/protocol/intent.js (displayedIntent, presentation table), src/config.js (themeId, motionPolicy), test/niri-window.test.js; niri side: `niri msg set-window-signal --help`.
+
+## Notes
+
+- 2026-09-24T18:16:11Z (fam-e7fa72): started
+  provenance: {"harness_session":"claude-code:043fdd81-3649-4354-a9c1-0d8726289ef8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T18:21:35Z (fam-e7fa72): done
+  provenance: {"harness_session":"claude-code:043fdd81-3649-4354-a9c1-0d8726289ef8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-24T18:21:35Z (fam-e7fa72): familiar-niri watch now writes one familiar signal slot per niri window (identity hue accent, urgency level, policy-adjusted motion, ttl decay, done/error pulses, clears by niri's record); 16 planner tests; live sync on niri-material showed three terminals in three distinct hues, then cleared
+  provenance: {"harness_session":"claude-code:043fdd81-3649-4354-a9c1-0d8726289ef8","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

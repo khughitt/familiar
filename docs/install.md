@@ -215,6 +215,8 @@ spawn-sh-at-startup "familiar-niri watch"
 
 It is the sole writer of `niri-windows.json`. It resynchronizes after both agent
 and Niri events, so moving a terminal between workspaces keeps the feed current.
+On niri-material it also sets each terminal's `familiar` window signal, which a
+glass ring whose color source is `familiar` draws in that session's hue.
 
 Optionally start focused-output completion and error moments:
 
