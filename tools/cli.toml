@@ -497,9 +497,10 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["feedback"]
-summary = "File feedback about the tasks tool itself into the upstream tasks project"
+summary = "File feedback about a project's tooling into that project"
 args = [{ name = "summary", value = "string", required = true }]
 options = [
+  { shared = "project", role = "select", value = "string", required = true, repeatable = false },
   { names = ["--category"], value = "enum", values = ["friction", "gap", "idea", "positive"], required = true },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--recur"], value = "ref" },
@@ -531,6 +532,13 @@ summary = "Work parked waiting for an idle host, as resume briefs"
 options = [
   { shared = "limit", value = "int" },
   { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "all_projects", value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["claims"]
+summary = "Every claim in the registry's claim stores, with liveness; opens no checkout"
+options = [
   { shared = "all_projects", value = "none" },
 ]
 
