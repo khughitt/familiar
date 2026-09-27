@@ -26,7 +26,7 @@ import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.j
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
-import { emit } from '../src/render/term/emit.js';
+import { emit, settle } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
 import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js';
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
@@ -688,6 +688,38 @@ export async function emitHookTransition({
   });
 }
 
+// The status line's half of a provisional SessionStart transmission (see settle() in
+// src/render/term/emit.js). The unlocked read is the common path: every refresh of every
+// session pays one small file read, and only provisional evidence goes on to probe the
+// terminal, which may spawn tmux, and take the lock.
+export async function settleStatusline({
+  record, intent, paths,
+  processOps = defaultProcessOps,
+  platform = process.platform,
+  hookEnv = process.env,
+  probe = tmuxFacts,
+  lockWith = withLock,
+}) {
+  const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
+  const ledger = fileLedger(entryPath);
+  if (!(await ledger.read()).held?.provisional) return { kind: 'noop' };
+  const terminal = terminalTarget(record.pid, {
+    platform,
+    record: processOps.recordOf(record.pid),
+    hookEnv,
+    probe,
+  });
+  const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
+  return settle({
+    owner: record,
+    intent,
+    terminal,
+    ledger,
+    lock: (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf })),
+    ownerAlive,
+  });
+}
+
 // The `theme sheet` caption row. Exported and pure because it now makes a
 // choice: a member holds several slots but the swatch takes one colour.
 export function sheetRowCaptions(rows, tone) {
@@ -951,8 +983,10 @@ async function main({ command, args: rest, color, mode }) {
     // which claude-code's own layout engine places, wraps and scrolls. That is the whole reason
     // the cat stopped being an overlay: it is text now, and text cannot obscure text.
     //
-    // It TRANSMITS NOTHING. See src/render/term/statusline.js -- two processes chunking graphics
-    // escapes into one fd is a corrupt escape stream. One writer, and it is the hook.
+    // It transmits nothing of its own. See src/render/term/statusline.js -- two processes
+    // chunking graphics escapes into one fd is a corrupt escape stream. The one exception is
+    // settling a provisional SessionStart image, which it does inside the hooks' own
+    // per-session transmit lock (settleStatusline below).
     const stdin = await readStdin();
     const payload = JSON.parse(stdin || '{}');
     const sessionId = payload.session_id;
@@ -1022,6 +1056,12 @@ async function main({ command, args: rest, color, mode }) {
 
     const lines = composeForIntent({ intent, sessionId, rawOutput: text });
     process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+
+    // After the line is written, so a failure here cannot blank it. The cells just printed
+    // name an image a SessionStart hook may have sent to a screen the TUI is not showing.
+    if (intent.motionPolicy !== 'off') {
+      await settleStatusline({ record, intent, paths: ctx.paths });
+    }
   } else if (command === 'install pets') {
     const { values } = parseLeaf(rest, leafOptions);
     if (values.out !== undefined && values['sync-projects']) {

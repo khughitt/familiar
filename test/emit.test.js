@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openSync, writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { renderTransition, emit } from '../src/render/term/emit.js';
+import { renderTransition, emit, settle } from '../src/render/term/emit.js';
 import { memoryLedger, stamp, EMPTY_ENTRY } from '../src/render/term/ledger.js';
 import { GRAPHICS_CAPABILITY } from '../src/render/term/capability.js';
 import { identityColors } from '../src/theme/ramp.js';
@@ -843,17 +843,17 @@ test('with no ledger entry a consistent prev/intent is still a CREATE — the bu
   assert.doesNotMatch(bytes.toString('latin1'), /a=a,i=\d+,s=1/);
 });
 
-test('a provisional transmission paints but holds no evidence, so the next event creates again', async () => {
+test('a provisional transmission paints and marks its evidence provisional, so the next event creates again', async () => {
   const ledger = memoryLedger();
   const first = await captureEmission({ prev: null, next: agentAt('idle'), intent: clipsIntent('idle'), provisional: true, ...section({ seq: 1, ledger }) });
   assert.equal(first.result.kind, 'transmitted');
   assert.match(first.bytes.toString('latin1'), /a=T,|a=t,/, 'the cat is still sent: it shows whenever the screen was already up');
-  assert.equal(ledger.entry.held, null, 'nothing proves the agent UI\'s screen holds the image');
+  assert.equal(ledger.entry.held.provisional, true, 'nothing proves the agent UI\'s screen holds the image');
   assert.equal(ledger.entry.presented, 'idle');
 
   const second = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
   assert.equal(second.result.lifecycle, 'create');
-  assert.ok(ledger.entry.held, 'an ordinary event holds evidence again');
+  assert.equal(ledger.entry.held.provisional, undefined, 'an ordinary event holds ordinary evidence');
 });
 
 test('a provisional event in an unchanged binding still transmits — held evidence is not trusted', async () => {
@@ -861,7 +861,78 @@ test('a provisional event in an unchanged binding still transmits — held evide
   const { result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('idle'), intent: clipsIntent('idle'), provisional: true, ...section({ seq: 2, ledger }) });
   assert.equal(result.kind, 'transmitted');
   assert.equal(result.lifecycle, 'create');
-  assert.equal(ledger.entry.held, null);
+  assert.equal(ledger.entry.held.provisional, true);
+});
+
+// --- settle(): the status line finishes a provisional transmission ---------
+
+async function captureSettle(overrides = {}) {
+  const writes = [];
+  const opens = [];
+  const result = await settle({
+    owner: agentAt('idle'),
+    intent: clipsIntent('idle'),
+    terminal: KITTY_TERMINAL,
+    loadAnimation: () => clipsSet,
+    readFrame: () => FAKE_PNG,
+    open: (path) => { opens.push(path); return 7; },
+    write: (fd, bytes, offset, length) => {
+      writes.push(Buffer.from(bytes.subarray(offset, offset + length)));
+      return length;
+    },
+    close: () => {},
+    checkTty: () => true,
+    lock: (fn) => fn(),
+    ownerAlive: () => true,
+    ...overrides,
+  });
+  return { result, opens, bytes: Buffer.concat(writes) };
+}
+
+const provisionalEntry = () => stamp({ held: { ...directHeld('idle'), provisional: true }, presented: 'idle' }, { seq: 3, owner: OWNER });
+
+test('settle re-creates a provisional image and publishes ordinary evidence without advancing the order', async () => {
+  const ledger = memoryLedger(provisionalEntry());
+  const { result, opens, bytes } = await captureSettle({ ledger });
+  assert.equal(result.kind, 'settled');
+  assert.deepEqual(opens, ['/proc/4242/fd/1']);
+  assert.match(bytes.toString('latin1'), /a=T,|a=t,/);
+  assert.doesNotMatch(bytes.toString('latin1'), /a=a,i=\d+,s=1/, 'a create, never an update of an image the screen may lack');
+  assert.equal(ledger.entry.seq, 3);
+  assert.equal(ledger.entry.presented, 'idle');
+  assert.equal(ledger.entry.held.provisional, undefined);
+  assert.equal(ledger.entry.held.id, imageIdFor('s1'));
+});
+
+test('settle touches nothing when the evidence is ordinary, absent, ended, or another owner\'s', async () => {
+  for (const [entry, label] of [
+    [stamp({ held: directHeld('idle') }, { seq: 3, owner: OWNER }), 'ordinary evidence'],
+    [null, 'no entry'],
+    [stamp({ held: null }, { seq: 3, owner: OWNER }), 'nothing held'],
+    [{ ...provisionalEntry(), ended: true }, 'ended'],
+    [stamp({ held: { ...directHeld('idle'), provisional: true } }, { seq: 3, owner: { pid: 4242, starttime: 1 } }), 'another process'],
+    [stamp({ held: { ...directHeld('idle'), provisional: true, transport: 'tmux:/dev/pts/5:1:1' } }, { seq: 3, owner: OWNER }), 'another transport'],
+  ]) {
+    const ledger = memoryLedger(entry);
+    const { result, opens } = await captureSettle({ ledger });
+    assert.equal(result.kind, 'noop', label);
+    assert.deepEqual(opens, [], label);
+    assert.equal(ledger.writes.length, 0, label);
+  }
+});
+
+test('settle leaves a dead owner\'s provisional evidence alone', async () => {
+  const ledger = memoryLedger(provisionalEntry());
+  const { result, opens } = await captureSettle({ ledger, ownerAlive: () => false });
+  assert.equal(result.kind, 'noop');
+  assert.deepEqual(opens, []);
+});
+
+test('settle on a non-tty fd keeps the evidence provisional', async () => {
+  const ledger = memoryLedger(provisionalEntry());
+  const { result } = await captureSettle({ ledger, checkTty: () => false });
+  assert.equal(result.kind, 'suppressed');
+  assert.equal(ledger.entry.held.provisional, true);
 });
 
 test('a same-transport, same-owner entry with a changed intent is an UPDATE under Kitty', async () => {

@@ -24,7 +24,7 @@ import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import {
-  appendHookTrace, emitHookTransition, makePrepareSprites, reportCommandError,
+  appendHookTrace, emitHookTransition, makePrepareSprites, settleStatusline, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar.js';
 
@@ -291,6 +291,29 @@ test('emitHookTransition passes provisional through: the ledger keeps no held ev
   });
   assert.equal(result.kind, 'suppressed');
   assert.equal(JSON.parse(readFileSync(entryPath, 'utf8')).held, null);
+});
+
+test('settleStatusline probes the terminal only for provisional evidence', async () => {
+  const p = paths(env());
+  const sessionId = 's-settle';
+  const record = { sessionId, pid: process.pid, starttime: 1 };
+  const { entryPath } = ledgerPaths(p.transmitDir, sessionId);
+  mkdirSync(dirname(entryPath), { recursive: true });
+  const held = { transport: 'direct', capability: 'kitty-animation', id: 1, intent: { state: 'idle' } };
+  let probed = 0;
+  const run = () => settleStatusline({
+    record, intent: {}, paths: p,
+    processOps: { recordOf: () => { probed += 1; return { pid: process.pid, tty: 'ttys999' }; }, ownerAlive: () => false, startTimeOf: () => 1 },
+    platform: 'darwin', hookEnv: { TERM: 'xterm-kitty' }, probe: () => null,
+  });
+
+  writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: 1, presented: 'idle', ended: false, held }));
+  assert.equal((await run()).kind, 'noop');
+  assert.equal(probed, 0, 'ordinary evidence costs one file read and nothing else');
+
+  writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: 1, presented: 'idle', ended: false, held: { ...held, provisional: true } }));
+  assert.equal((await run()).kind, 'noop', 'a dead owner is left alone');
+  assert.equal(probed, 1, 'provisional evidence reaches the terminal target and the lock');
 });
 
 test('hook rejects unknown flags before state work but remains cosmetic', () => {

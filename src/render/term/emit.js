@@ -111,9 +111,10 @@ const sameBinding = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // (?1049h), and kitty keeps one image store per screen: when the hook wins -- measured
 // 2026-09-27, 119ms ahead -- the image lands in the main screen's store, and the placeholder
 // cells the TUI draws on the alternate screen name an image that screen never received. So a
-// provisional section always transmits (the cat shows whenever the screen was already up)
-// and publishes no `held`: nothing proves the TUI's screen holds the image, and the next
-// event creates rather than updating an image that may not be there.
+// provisional section ignores held evidence, always transmits (the cat shows whenever the
+// screen was already up), and publishes its evidence marked `provisional`: nothing proves the
+// TUI's screen holds the image. settle() below, run by the status line once the TUI is up,
+// re-creates it; the next event creates rather than updating it, whichever comes first.
 export async function emit({
   prev, next, intent, seq,
   readSprite = (p) => readFileSync(p), transmitSprite = true, provisional = false,
@@ -194,7 +195,7 @@ export async function emit({
     //    commands — Ghostty does not, so STATIC is always a fresh create.
     const capability = env === undefined ? GRAPHICS_CAPABILITY.NONE : graphicsCapability(env, tmux);
     const transport = transportFor(tmux);
-    const evidence = held !== null && held.transport === transport;
+    const evidence = held !== null && !held.provisional && held.transport === transport;
     const lifecycle = evidence && capability === GRAPHICS_CAPABILITY.ANIMATION ? 'update' : 'create';
     const graphical = transmitSprite
       && capability !== GRAPHICS_CAPABILITY.NONE
@@ -221,27 +222,9 @@ export async function emit({
 
     // 6. Graphics. The byte plan is complete before the fd is opened, so planning,
     //    encoding and limit checks cannot strand a partial program on the terminal.
-    const set = loadAnimation(intent.animation);
-    const program = plan({
-      set, root: intent.sprite.terminal, state: intent.state, sessionId: intent.sessionId,
-      policy: intent.motionPolicy, capability,
+    const { id, bytes: graphics } = encodeGraphics({
+      intent, capability, lifecycle, tmux, loadAnimation, plan, encode, readFrame,
     });
-    if (program.kind === 'none') {
-      throw new Error('terminal animation: graphical capability produced no program');
-    }
-    const frameCache = new Map();
-    const readCachedFrame = (path) => {
-      if (!frameCache.has(path)) frameCache.set(path, Buffer.from(readFrame(path)));
-      return frameCache.get(path);
-    };
-    const id = imageIdFor(intent.sessionId);
-    const graphics = encode(program, {
-      id,
-      placement: { kind: 'virtual', ...boxFor(readCachedFrame(intent.sprite.terminal), intent.sprite.rows) },
-      lifecycle,
-      readFrame: readCachedFrame,
-      frame: tmux?.ok ? wrapForTmux : (command) => command,
-    }).bytes;
     const bytes = Buffer.concat([graphics, Buffer.from(presentation)]);
 
     let fd;
@@ -260,10 +243,94 @@ export async function emit({
       await ledger.write(stampWith({ held: null }));
       writeAllSync(bytes, { fd, write });
       await ledger.write(stampWith({
-        held: provisional ? null : { transport, capability, id, intent: bindingFields(intent) },
+        held: { transport, capability, id, intent: bindingFields(intent), ...(provisional ? { provisional: true } : {}) },
         presented: next.state,
       }));
       return { kind: 'transmitted', lifecycle, bytes: bytes.length };
+    } finally {
+      close(fd);
+    }
+  });
+}
+
+// The complete graphics program for one intent, as bytes: planned and encoded before any
+// fd is opened.
+function encodeGraphics({ intent, capability, lifecycle, tmux, loadAnimation, plan, encode, readFrame }) {
+  const set = loadAnimation(intent.animation);
+  const program = plan({
+    set, root: intent.sprite.terminal, state: intent.state, sessionId: intent.sessionId,
+    policy: intent.motionPolicy, capability,
+  });
+  if (program.kind === 'none') {
+    throw new Error('terminal animation: graphical capability produced no program');
+  }
+  const frameCache = new Map();
+  const readCachedFrame = (path) => {
+    if (!frameCache.has(path)) frameCache.set(path, Buffer.from(readFrame(path)));
+    return frameCache.get(path);
+  };
+  const id = imageIdFor(intent.sessionId);
+  const bytes = encode(program, {
+    id,
+    placement: { kind: 'virtual', ...boxFor(readCachedFrame(intent.sprite.terminal), intent.sprite.rows) },
+    lifecycle,
+    readFrame: readCachedFrame,
+    frame: tmux?.ok ? wrapForTmux : (command) => command,
+  }).bytes;
+  return { id, bytes };
+}
+
+// FINISH A PROVISIONAL TRANSMISSION. The status line calls this on every refresh; it only
+// runs when the TUI is up, so the screen it is drawn on is the screen the TUI shows -- the
+// one fact a SessionStart hook cannot know (see emit()'s `provisional`). The common case
+// is one ledger read and nothing else.
+//
+// Inside the same lock as emit(), and it neither reads nor advances the bus order: it
+// re-sends the image the ledger already names, as a create, and publishes the same
+// evidence without the mark. An event that runs first has already replaced the mark, and
+// this finds nothing to do.
+export async function settle({
+  owner, intent, terminal,
+  ledger, lock, ownerAlive,
+  loadAnimation = loadAnimationRefSync,
+  plan = planAnimation,
+  encode = encodeKittyProgram,
+  readFrame = (p) => readFileSync(p),
+  open = openSync, write = writeSync, close = closeSync, checkTty = isatty,
+}) {
+  if (!terminal || typeof terminal.path !== 'string') {
+    throw new Error('settle requires terminal { path, env, tmux }');
+  }
+  if (!ledger) throw new Error('settle requires ledger — the transmission ledger for this session');
+  if (typeof lock !== 'function') throw new Error('settle requires lock — the per-session transmission lock');
+  if (typeof ownerAlive !== 'function') throw new Error('settle requires ownerAlive — the fresh liveness predicate');
+
+  return lock(async () => {
+    const entry = await ledger.read();
+    const held = inherit(entry, owner);
+    if (entry.ended || held === null || !held.provisional) return { kind: 'noop' };
+    // Another tmux client, or tmux gone: not the terminal the evidence names. The next event
+    // creates for the terminal that is there.
+    if (held.transport !== transportFor(terminal.tmux)) return { kind: 'noop' };
+    if (!ownerAlive(owner.pid, { starttime: owner.starttime })) return { kind: 'noop' };
+
+    const { id, bytes } = encodeGraphics({
+      intent, capability: held.capability, lifecycle: 'create', tmux: terminal.tmux,
+      loadAnimation, plan, encode, readFrame,
+    });
+    let fd;
+    try { fd = open(terminal.path, 'a'); } catch { return { kind: 'suppressed', reason: 'open' }; }
+    try {
+      if (!checkTty(fd)) return { kind: 'suppressed', reason: 'not-a-tty' };
+      // The same write-ahead as emit(): a partial write leaves nothing held, and the next
+      // event creates.
+      await ledger.write({ ...entry, held: null });
+      writeAllSync(bytes, { fd, write });
+      await ledger.write({
+        ...entry,
+        held: { transport: held.transport, capability: held.capability, id, intent: bindingFields(intent) },
+      });
+      return { kind: 'settled', bytes: bytes.length };
     } finally {
       close(fd);
     }

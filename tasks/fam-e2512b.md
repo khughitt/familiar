@@ -1,18 +1,20 @@
 ---
 id: fam-e2512b
 title: The status line settles a provisional SessionStart cat so it shows at init
-status: doing
+status: done
 priority: 1
 size: s
 complexity: mid
 process: direct
 owner: main
 created: 2026-09-27T18:51:10Z
-updated: 2026-09-27T18:51:10Z
+updated: 2026-09-27T18:53:29Z
 started: 2026-09-27T18:51:10Z
+completed: 2026-09-27T18:53:29Z
 depends: []
 tags: [render, bug]
 source: fam-a2a392
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -21,4 +23,8 @@ fam-a2a392 left the cat missing until the first event whenever the SessionStart 
 ## Notes
 
 - 2026-09-27T18:51:10Z (main): started
+  provenance: {"harness_session":"claude-code:f9f4c628-5230-4e31-9879-b4cd71eedac7","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-27T18:53:29Z (fix/statusline-settles): done
+  provenance: {"harness_session":"claude-code:f9f4c628-5230-4e31-9879-b4cd71eedac7","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-09-27T18:53:29Z (fix/statusline-settles): SessionStart marks its image provisional and the status line re-creates it once under the transmit lock, so the cat shows at init
   provenance: {"harness_session":"claude-code:f9f4c628-5230-4e31-9879-b4cd71eedac7","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
