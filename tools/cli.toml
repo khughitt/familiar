@@ -758,6 +758,25 @@ options = [
 path = ["drift", "catalog"]
 summary = "list the series the metric catalog produces"
 
+[[cli.obs.commands]]
+path = ["dashboard"]
+summary = "build or summarize the dashboard page"
+
+[[cli.obs.commands]]
+path = ["dashboard", "build"]
+summary = "write the dashboard snapshot and page from the index"
+options = [
+  { names = ["--days"], value = "int", default = "30" },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "summary"]
+summary = "print live attention and the snapshot's headline numbers"
+options = [
+  { names = ["--out"], value = "path" },
+]
+
 # ---- lit
 
 [[cli.lit.commands]]
