@@ -105,9 +105,18 @@ const sameBinding = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // and `ownerAlive` are REQUIRED, like `terminal`: the section cannot run without its
 // evidence, its serialization, and its liveness check, and a caller that forgets one gets
 // told rather than getting a section that silently runs unprotected.
+//
+// `provisional` marks an event whose bytes may land on a screen the agent's UI is not showing.
+// Claude Code's SessionStart hook races its fullscreen TUI's switch to the alternate screen
+// (?1049h), and kitty keeps one image store per screen: when the hook wins -- measured
+// 2026-09-27, 119ms ahead -- the image lands in the main screen's store, and the placeholder
+// cells the TUI draws on the alternate screen name an image that screen never received. So a
+// provisional section always transmits (the cat shows whenever the screen was already up)
+// and publishes no `held`: nothing proves the TUI's screen holds the image, and the next
+// event creates rather than updating an image that may not be there.
 export async function emit({
   prev, next, intent, seq,
-  readSprite = (p) => readFileSync(p), transmitSprite = true,
+  readSprite = (p) => readFileSync(p), transmitSprite = true, provisional = false,
   terminal,
   ledger, lock, ownerAlive,
   loadAnimation = loadAnimationRefSync,
@@ -174,7 +183,7 @@ export async function emit({
       return { kind: 'ended' };
     }
 
-    const held = inherit(entry, owner);
+    const held = provisional ? null : inherit(entry, owner);
     if (!alive) {
       await ledger.write(stampWith({ held }));
       return { kind: 'suppressed', reason: 'owner-dead' };
@@ -250,7 +259,10 @@ export async function emit({
       // creates. A failed write-ahead throws before any terminal byte.
       await ledger.write(stampWith({ held: null }));
       writeAllSync(bytes, { fd, write });
-      await ledger.write(stampWith({ held: { transport, capability, id, intent: bindingFields(intent) }, presented: next.state }));
+      await ledger.write(stampWith({
+        held: provisional ? null : { transport, capability, id, intent: bindingFields(intent) },
+        presented: next.state,
+      }));
       return { kind: 'transmitted', lifecycle, bytes: bytes.length };
     } finally {
       close(fd);

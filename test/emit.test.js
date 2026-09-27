@@ -843,6 +843,27 @@ test('with no ledger entry a consistent prev/intent is still a CREATE — the bu
   assert.doesNotMatch(bytes.toString('latin1'), /a=a,i=\d+,s=1/);
 });
 
+test('a provisional transmission paints but holds no evidence, so the next event creates again', async () => {
+  const ledger = memoryLedger();
+  const first = await captureEmission({ prev: null, next: agentAt('idle'), intent: clipsIntent('idle'), provisional: true, ...section({ seq: 1, ledger }) });
+  assert.equal(first.result.kind, 'transmitted');
+  assert.match(first.bytes.toString('latin1'), /a=T,|a=t,/, 'the cat is still sent: it shows whenever the screen was already up');
+  assert.equal(ledger.entry.held, null, 'nothing proves the agent UI\'s screen holds the image');
+  assert.equal(ledger.entry.presented, 'idle');
+
+  const second = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });
+  assert.equal(second.result.lifecycle, 'create');
+  assert.ok(ledger.entry.held, 'an ordinary event holds evidence again');
+});
+
+test('a provisional event in an unchanged binding still transmits — held evidence is not trusted', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }));
+  const { result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('idle'), intent: clipsIntent('idle'), provisional: true, ...section({ seq: 2, ledger }) });
+  assert.equal(result.kind, 'transmitted');
+  assert.equal(result.lifecycle, 'create');
+  assert.equal(ledger.entry.held, null);
+});
+
 test('a same-transport, same-owner entry with a changed intent is an UPDATE under Kitty', async () => {
   const ledger = memoryLedger(stamp({ held: directHeld('idle') }, { seq: 1, owner: OWNER }));
   const { bytes, result } = await captureEmission({ prev: agentAt('idle'), next: agentAt('working'), ...section({ seq: 2, ledger }) });

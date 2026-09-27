@@ -652,7 +652,7 @@ export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, ne
 // Probe before taking the transmission lock: tmux and Darwin process queries spawn.
 // Await the whole emission section so its failures reach the hook's error boundary.
 export async function emitHookTransition({
-  prev, next, intent, seq, transmitSprite,
+  prev, next, intent, seq, transmitSprite, provisional = false,
   paths,
   processOps = defaultProcessOps,
   platform = process.platform,
@@ -676,6 +676,7 @@ export async function emitHookTransition({
     next,
     seq,
     transmitSprite,
+    provisional,
     terminal,
     ledger: fileLedger(entryPath),
     lock,
@@ -893,6 +894,9 @@ async function main({ command, args: rest, color, mode }) {
     await emitHookTransition({
       prev, next, intent, seq,
       transmitSprite: adapter.printsPlaceholderCells,
+      // SessionStart fires before the agent's UI is up: a fullscreen TUI may not yet be on the
+      // screen it will draw the placeholder cells on (see emit()'s `provisional`).
+      provisional: positionals[0] === 'SessionStart',
       paths: ctx.paths,
       processOps: defaultProcessOps,
     });

@@ -267,6 +267,32 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
   assert.deepEqual([tomb.seq, tomb.ended, tomb.held], [2, true, null], 'the tombstone is ordering evidence and is written for a dead owner too');
 });
 
+// A provisional (SessionStart) section publishes no held evidence even where the previous
+// entry had some, so the first event after the agent's UI is up creates the image again.
+test('emitHookTransition passes provisional through: the ledger keeps no held evidence', async () => {
+  const p = paths(env());
+  const sessionId = 's-provisional';
+  const agent = { sessionId, state: 'idle', pid: process.pid, starttime: 1, project: 'api' };
+  const { entryPath } = ledgerPaths(p.transmitDir, sessionId);
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(entryPath, JSON.stringify({
+    seq: 1, pid: process.pid, starttime: 1, presented: 'idle', ended: false,
+    held: { transport: 'direct', capability: 'kitty-animation', id: 1, intent: { state: 'idle' } },
+  }));
+  const intent = { [sessionId]: { current: {
+    sessionId, pid: process.pid, identity: { project: 'api' }, state: 'idle', motionPolicy: 'full',
+    animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
+  } } };
+  const result = await emitHookTransition({
+    prev: agent, next: agent, intent, seq: 2, transmitSprite: true, provisional: true,
+    paths: p,
+    processOps: { recordOf: () => ({ pid: process.pid, tty: 'ttys999' }), ownerAlive: () => false, startTimeOf: () => 1 },
+    platform: 'darwin', hookEnv: { TERM: 'xterm-kitty' }, probe: () => null,
+  });
+  assert.equal(result.kind, 'suppressed');
+  assert.equal(JSON.parse(readFileSync(entryPath, 'utf8')).held, null);
+});
+
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
   const e = env();
   const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart', '--bogus'], {
