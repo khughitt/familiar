@@ -258,6 +258,7 @@ path = ["rename"]
 summary = "Rename a registered project's prefix and retain its retired names as aliases"
 args = [{ name = "old", value = "ref", required = true }, { name = "new", value = "ref", required = true }]
 options = [
+  { names = ["--adopt"], value = "none" },
   { names = ["--explain"], value = "none" },
 ]
 
@@ -716,8 +717,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills or cost"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost or quiet"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
