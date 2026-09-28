@@ -413,6 +413,21 @@ summary = "Append a timestamped note"
 args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = true }]
 
 [[cli.tasks.commands]]
+path = ["attach"]
+summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note"
+args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false }]
+options = [
+  { names = ["--caption"], value = "string" },
+  { names = ["--clipboard"], value = "none" },
+  { names = ["--name"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["detach"]
+summary = "Remove one attachment and record why. Git history keeps committed bytes; an uncommitted file is gone for good"
+args = [{ name = "id", value = "ref", required = true }, { name = "name", value = "string", required = true }, { name = "why", value = "string", required = true }]
+
+[[cli.tasks.commands]]
 path = ["start"]
 summary = "Claim a task: status=doing, owner=you"
 args = [{ name = "id", value = "ref", required = true }]
