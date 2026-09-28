@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: test-ci-audit
 created: 2026-09-04T21:44:54Z
-updated: 2026-09-28T08:34:43Z
+updated: 2026-09-28T10:26:53Z
 depends: [ops-31f038]
 tags: [testing]
 ---
@@ -23,3 +23,4 @@ Piece of ops-65837b (the cross-project audit in the ops hub). 1. Measure: full-s
 - 2026-09-17T00:51:35Z (main): Tracker check during relay scheduling found the missing process field. Set direct from the existing 2026-09-12 assessment: remaining bounded baseline/after measurements and hygiene follow the already adopted ops audit design; no new design decision or implementation performed here.
 - 2026-09-28T08:34:21Z (main): baseline 2026-09-28 (tt-report --project fam --since 2026-09-05 --until 2026-09-24; 15 active days, before step 3): test 32 runs median 14.4s p90 19.5s fail 0.19, 7 min total; test-fast 7 runs median 14.1s p90 16.1s fail 0.00, 2 min total; check 35 runs median 0.1s p90 0.1s fail 0.00, 0 min total; hook-pre-commit 112 runs median 0.1s p90 0.2s fail 0.00, 0 min total; hook-pre-push 7 runs median 10.4s p90 14.4s fail 0.14, 1 min total; front-door total 0.17 h (1 min per active day), ad-hoc targets 0 min; fast/full by agents 0.19; bypasses 50
 - 2026-09-28T08:34:43Z (main): Baseline window 2026-09-05..09-24 closes the day before ops host-budget worker sizing (09-25), the first timing change after step 1; no step-3 change had landed. Front-door total counts wrapper seconds of test, test-fast, check and both hooks. Next: step 3 (gates to ops design §4.6, the AGENTS.md inner-loop line, hygiene the numbers point at), then an after-window read with tt-report --since/--until.
+- 2026-09-28T10:26:53Z (main): Step 3 now follows ops docs/specs/2026-09-28-test-ci-act-design.md: copy templates/justfile's test-one, docs_paths/docs_check_cmd/hook-pre-commit-docs, ci_suite_refs/ci_remote/push_fast_cmd/hook-pre-push-fast and both templates/githooks; set ci_suite_refs from the refs CI actually runs the full suite for (say which in a note); add the AGENTS.md Gates line (templates/AGENTS.md). Then the after-window against this piece's baseline note.
