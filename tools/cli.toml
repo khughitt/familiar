@@ -1337,7 +1337,10 @@ options = [
   { shared = "as", value = "string" },
   { shared = "via", value = "string" },
   { names = ["--body"], value = "string" },
+  { names = ["--body-file"], value = "path" },
   { shared = "tag", role = "set", value = "string", repeatable = true },
+  { names = ["--alias"], value = "string" },
+  { names = ["--link-to"], value = "ref" },
   { names = ["--interactive", "-i"], value = "none" },
 ]
 
@@ -1555,6 +1558,15 @@ options = [
 path = ["mindmap", "view"]
 summary = "Render a mindmap as terminal sprites and edges"
 args = [{ name = "map-ref", value = "ref", required = true }]
+
+[[cli.mindful.commands]]
+path = ["relate"]
+summary = "Link a thought to another existing thought"
+args = [{ name = "ref", value = "ref", required = true }, { name = "target-ref", value = "ref", required = true }]
+options = [
+  { shared = "as", value = "string" },
+  { shared = "via", value = "string" },
+]
 
 [[cli.mindful.commands]]
 path = ["restore"]
