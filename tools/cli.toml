@@ -320,10 +320,15 @@ verb = "list"
 summary = "List tasks (open by default)"
 options = [
   { shared = "status", role = "filter", value = "enum", values = ["idea", "todo", "doing", "blocked", "shelved", "done", "dropped"], repeatable = true },
+  { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"], repeatable = true },
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
+  { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { shared = "tag", role = "filter", value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--parent"], value = "ref" },
+  { names = ["--parallel"], value = "none" },
   { shared = "sort", role = "select", value = "enum", values = ["priority", "updated", "created"], default = "priority" },
   { shared = "reverse", value = "none" },
   { names = ["--parked"], value = "none" },
@@ -337,7 +342,14 @@ options = [
 path = ["ready"]
 summary = "Actionable tasks: todo or due recurrences with all dependencies closed"
 options = [
-  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
+  { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"], repeatable = true },
+  { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl", "none"], repeatable = true },
+  { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
+  { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
+  { shared = "tag", role = "filter", value = "string", repeatable = true },
+  { names = ["--owner"], value = "string" },
+  { names = ["--source"], value = "string" },
+  { names = ["--parent"], value = "ref" },
   { names = ["--parallel"], value = "none" },
   { shared = "limit", value = "int" },
   { names = ["--max-complexity"], value = "enum", values = ["low", "mid", "high"] },
