@@ -433,6 +433,7 @@ summary = "Claim a task: status=doing, owner=you"
 args = [{ name = "id", value = "ref", required = true }]
 options = [
   { shared = "force", value = "none" },
+  { names = ["--reason"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -793,6 +794,35 @@ options = [
   { names = ["--out"], value = "path" },
 ]
 
+[[cli.obs.commands]]
+path = ["outcomes"]
+summary = "report outcome measures and manage follow-up judgments"
+
+[[cli.obs.commands]]
+path = ["outcomes", "report"]
+output = "json"
+summary = "print review-round and after-close measures with their coverage"
+options = [
+  { shared = "project", role = "select", value = "string", repeatable = false },
+  { shared = "since", role = "bound", value = "when", repeatable = false },
+]
+
+[[cli.obs.commands]]
+path = ["outcomes", "candidates"]
+output = "json"
+summary = "write follow-up link candidates with their task text for a judge"
+options = [
+  { names = ["--out"], value = "path", required = true },
+]
+
+[[cli.obs.commands]]
+path = ["outcomes", "judge"]
+output = "json"
+summary = "record follow-up link judgments from a JSONL file"
+options = [
+  { names = ["--input"], value = "path", required = true },
+]
+
 # ---- lit
 
 [[cli.lit.commands]]
@@ -1065,6 +1095,7 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { shared = "limit", value = "int" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
 [[cli.science.commands]]
@@ -1155,6 +1186,36 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["project-select"]
+summary = "Select the current project for this session, or clear it"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--target"], value = "string" },
+  { names = ["--clear", "--no-clear"], value = "none" },
+]
+
+[[cli.science.commands]]
+path = ["projects"]
+summary = "List every project in the world, marking the selected one"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["project-show"]
+summary = "Show one project: its query and its questions, hypotheses, tasks and decisions"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.science.commands]]
 path = ["build"]
 summary = "Build the world from its corpora"
 
@@ -1164,6 +1225,7 @@ summary = "Serve the world over HTTP"
 protocol = "server on stdio or a socket"
 options = [
   { shared = "config", value = "path" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
 [[cli.science.commands]]
@@ -1173,6 +1235,7 @@ protocol = "server on stdio or a socket"
 args = [{ name = "mode", value = "enum", values = ["serve"], required = true }]
 options = [
   { shared = "config", value = "path" },
+  { shared = "project", role = "select", value = "string", repeatable = false },
 ]
 
 [[cli.science.commands]]
