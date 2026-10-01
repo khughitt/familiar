@@ -69,7 +69,14 @@ export function candidates(words, index) {
   if (word.startsWith('-')) return matching((cmd?.options ?? []).flatMap((o) => o.names.map((n) => [n, ''])));
   const children = COMMANDS.filter((c) => c.path.length === depth + 1 && (cmd ? cmd.path : []).every((p, i) => c.path[i] === p));
   if (children.length) return matching([...children.map((c) => [c.path.at(-1), c.summary]), ...(depth === 0 ? [['help', "Print a command's help"]] : [])]);
-  const positional = (cmd?.args ?? [])[before.length - depth];
+  const names = new Set((cmd?.options ?? []).flatMap((o) => o.names));
+  const valued = new Set((cmd?.options ?? []).filter((o) => o.value !== 'none').flatMap((o) => o.names));
+  let filled = 0;
+  for (let i = 0; i < before.length; i++) {
+    if (names.has(before[i])) { if (valued.has(before[i])) i++; continue; }
+    filled++;
+  }
+  const positional = (cmd?.args ?? [])[filled - depth];
   return matching(positional?.values ? positional.values.map((v) => [v, '']) : []);
 }
 

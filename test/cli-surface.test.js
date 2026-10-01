@@ -114,6 +114,8 @@ test('completion callback and scripts', () => {
   assert.deepEqual(candidates(['familiar', 'scheme', 'set', ''], 3).sort(), ['dark', 'light']);
   assert.deepEqual(candidates(['familiar', 'th'], 1), ['theme']);
   assert.deepEqual(candidates(['familiar', '--json', 'scheme', 'set', 'd'], 4), ['dark']);
+  assert.deepEqual(candidates(['familiar', 'scheme', 'set', '--sat', '1.2', ''], 5).sort(), ['dark', 'light']);
+  assert.deepEqual(candidates(['familiar', 'hook', '--trace', '/tmp/t', 'ev'], 4), []);
   const zsh = path.join(home, '_familiar'); fs.writeFileSync(zsh, run([], { FAMILIAR_COMPLETE: 'zsh' }).stdout);
   assert.equal(execFileSync('zsh', ['-f', '-c', `autoload -Uz compinit; compinit -D -u; source ${zsh}; print -r -- \${_comps[familiar]}`], { encoding: 'utf8' }).trim(), '_familiar');
   const bash = path.join(home, 'familiar.bash'); fs.writeFileSync(bash, run([], { FAMILIAR_COMPLETE: 'bash' }).stdout);
