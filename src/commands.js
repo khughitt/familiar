@@ -71,6 +71,7 @@ export function candidates(words, index) {
   if (children.length) return matching([...children.map((c) => [c.path.at(-1), c.summary]), ...(depth === 0 ? [['help', "Print a command's help"]] : [])]);
   const names = new Set((cmd?.options ?? []).flatMap((o) => o.names));
   const valued = new Set((cmd?.options ?? []).filter((o) => o.value !== 'none').flatMap((o) => o.names));
+  if (before.length && valued.has(before.at(-1))) return [];
   let filled = 0;
   for (let i = 0; i < before.length; i++) {
     if (names.has(before[i])) { if (valued.has(before[i])) i++; continue; }
