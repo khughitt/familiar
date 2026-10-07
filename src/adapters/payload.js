@@ -16,5 +16,21 @@ export function parsePayload(stdin) {
   if (typeof data?.session_id !== 'string' || data.session_id === '') {
     throw new Error('hook payload has no session_id');
   }
-  return { sessionId: data.session_id, cwd: data.cwd ?? process.cwd() };
+  return {
+    sessionId: data.session_id,
+    cwd: data.cwd ?? process.cwd(),
+    backgroundTasks: runningBackgroundTasks(data.background_tasks),
+  };
+}
+
+// claude-code's Stop and SubagentStop list the session's background work (measured on 2.1.292:
+// `[{ id, type: 'shell', status: 'running', ... }]`, and `[]` once it has finished). Every other
+// event omits the field, so `undefined` means "not reported", never "none running" -- the
+// transaction carries the last reported count forward rather than reading absence as zero.
+function runningBackgroundTasks(tasks) {
+  if (tasks === undefined) return undefined;
+  if (!Array.isArray(tasks)) {
+    throw new Error(`hook payload background_tasks must be a list (found ${typeof tasks})`);
+  }
+  return tasks.filter((task) => task?.status === 'running').length;
 }
