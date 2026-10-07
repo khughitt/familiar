@@ -53,7 +53,7 @@ Linux behavior and its Node 22/26 CI remain supported unchanged.
    `claude` that fires a level-bearing hook, and `claude -p` does not — `SessionEnd`
    carries `level === null` and skips the resolver entirely.
 
-   **Parked, not scheduled.** This needs a physical Mac and no further Mac-hosted
+   **Shelved as fam-36619e, not scheduled.** This needs a physical Mac and no further Mac-hosted
    experiments are planned. The runbook, its corrections, the offline checker and the
    tester's scripts are on `main` so that someone with the hardware can pick it up; §11.7
    describes the shape of the run.
