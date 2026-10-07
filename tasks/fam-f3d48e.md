@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-07T15:11:42Z
-updated: 2026-10-07T15:11:42Z
+updated: 2026-10-07T16:52:04Z
 depends: [fam-9ab24c, fam-449468]
 parent: fam-169e3f
 tags: []
@@ -17,4 +17,4 @@ plan: docs/plans/2026-10-07-worktree-pin-inheritance.md
 step: "Task 4: Verify shared surfaces and accept hook latency"
 ---
 
-Execute Task 4 of the reviewed plan. Verify real-worktree CLI/bus/Codex parity, per-checkout pet targets plus shared idempotent exclusions, and supplied-member convergence. Capture after hook latency against Task 1 baseline; preserve raw evidence and investigate unexplained regressions. Update current docs and historical addendum, run final fresh branch review/corrective rounds, then close execution work and integrate locally when settled. No external publication or live host wiring.
+Execute Task 4 of the reviewed plan. Verify real-worktree CLI/bus/Codex parity and shared idempotent exclusions. Create a separately hydrated detached baseline checkout at Task 1 commit and measure it against current code by explicit bin paths in one same-sitting, counterbalanced paired run. Current wrapper patches proc relative to each measured bin. Attach raw evidence immediately; record an evidence-backed timing disposition without a historical-baseline threshold. Update docs, run final fresh review/corrective rounds and integrate locally when settled. No external publication or live host wiring.

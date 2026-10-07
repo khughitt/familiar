@@ -243,3 +243,10 @@ searches and source checks found no matching correction in the searched
 surfaces; `docs/notes/2026-10-07-git-main-worktree-report.md` is a prepared,
 unpublished report following Git's mailing-list guidance. Publishing it needs
 separate approval and does not block reviewing the Familiar design.
+
+Plan revision after benchmark review: Task 1 now supplies a tested tool and
+immediately attached pilot, not saved performance timings. Task 4 runs a
+hydrated detached Task 1 code checkout and the candidate in a fresh, same-sitting
+paired comparison. The wrapper resolves proc.js from each measured bin. Ubuntu
+CI installs just for the actual recipe smoke; cleanup stays in memory, and the
+new fast-test cost is measured. Plan review still gates execution.
