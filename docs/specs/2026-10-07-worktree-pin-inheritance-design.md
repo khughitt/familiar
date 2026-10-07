@@ -1,8 +1,8 @@
 # Worktree pin inheritance
 
-Draft for user review, 2026-10-07. Task: `fam-9ab24c`; source:
+Approved by the user at revision `842c20d`, 2026-10-07. Task: `fam-9ab24c`; source:
 `docs/notes/2026-10-07-project-identity-brief.md`. Engine baseline: `1bc3d3e`.
-No implementation plan or behavior change has been approved yet.
+The implementation plan still requires review; no product behavior is implemented yet.
 
 ## Intent and scope
 
