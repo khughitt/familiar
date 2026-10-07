@@ -219,3 +219,17 @@ of this result.
 The blanket state relocation suggested by `fam-a877b3` should be reconsidered
 using this finding. The worktree design can proceed independently with the
 existing single-catalog contract.
+
+## Worktree design handoff — fam-9ab24c
+
+The draft `docs/specs/2026-10-07-worktree-pin-inheritance-design.md` defines
+the Git anchor, pin tiers, remote-less keys, current-worktree labels,
+per-worktree Codex targets and runtime-record transition. It awaits user
+review; this is not an agreed or implemented contract. The written plan
+will follow that review.
+
+Git fixtures uncovered a separate-directory main-path limitation. Upstream
+searches and source checks found no matching correction in the searched
+surfaces; `docs/notes/2026-10-07-git-main-worktree-report.md` is a prepared,
+unpublished report following Git's mailing-list guidance. Publishing it needs
+separate approval and does not block reviewing the Familiar design.
