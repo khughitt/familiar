@@ -141,6 +141,22 @@ test('no codex process among the ancestors is a named failure with the whole cha
   );
 });
 
+// Measured 2026-10-07 on Codex 0.160.1: the TUI hands turns to a shared `codex app-server`
+// daemon, and hooks run under it. Every codex above the hook owns no terminal, so the generic
+// "could not find" would hide the one fix the user has -- launching with --no-daemon.
+test('a hook under the terminal-less app-server daemon names --no-daemon', () => {
+  const chain = [
+    { pid: 2975576, ppid: 2084866, comm: 'node-MainThread', tty: null },
+    { pid: 2084866, ppid: 575318, comm: 'codex', tty: null },
+    { pid: 575318, ppid: 1688, comm: 'codex', tty: null },
+    { pid: 1688, ppid: 1, comm: 'systemd', tty: null },
+  ];
+  assert.throws(
+    () => resolveAgentPid({ startPid: 2975576, ancestors: () => chain }),
+    /codex process 2084866 owns no terminal.*codex --no-daemon/s,
+  );
+});
+
 // Measured 2026-08-23 (docs/ref/2026-08-23-macos-agent-process-spike.md). The process directly
 // above the agent is codex's own npm launcher, `node` running .../bin/codex: same TTY, different
 // basename, so the first-match walk stays unambiguous without an extra rule.
