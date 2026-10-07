@@ -1,15 +1,16 @@
 ---
 id: fam-9ab24c
 title: Design worktree pin inheritance from the brief
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: design/worktree-identity
 created: 2026-10-07T13:05:48Z
-updated: 2026-10-07T17:00:05Z
+updated: 2026-10-07T17:34:18Z
 started: 2026-10-07T13:21:16Z
+completed: 2026-10-07T17:34:18Z
 depends: []
 parent: fam-74f6e9
 tags: []
@@ -65,4 +66,13 @@ On completion, run tasks note on fam-a940d1 with the agreed contract in the same
 - 2026-10-07T17:00:02Z (design/worktree-identity): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
 - 2026-10-07T17:00:02Z (design/worktree-identity): Ruling: self-review checked corrected comparison/CI/evidence/cleanup contracts, unchanged product steps, mapped headings and code snippet syntax. Distinct temporary source checkouts proved measured-bin-relative proc module mutation reaches the imported bin; fixture removed. setup-just v4 SHA and just 1.58.0 release verified from upstream. just check/tasks check/whitespace checks clean. No actual workflow installation, product code, dependency setup or benchmark run; revised plan still needs user approval.
 - 2026-10-07T17:00:03Z (design/worktree-identity): parked (waiting on user, review): User reviews revised docs/plans/2026-10-07-worktree-pin-inheritance.md in .worktrees/worktree-identity; after approval, agent closes the reviewed design/plan task, hydrates and verifies execution tree, then starts fam-4f90f3 inline. Task 1 supplies paired tool/CI/pilot only; Task 4 measures baseline code and candidate together in a fresh sitting. All six findings addressed; no product work or measurement started.
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T17:30:42Z (design/worktree-identity): resumed
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T17:30:42Z (design/worktree-identity): review: plan round 4 — verdict: revise; findings: Minor 2; reviewer: human
+- 2026-10-07T17:32:50Z (design/worktree-identity): Ruling: addressed both final Minor findings: just install/check limited to Ubuntu test job; Task 4 explicitly reconciles spec Latency acceptance with paired same-sitting protocol. User directed acceptance after these fixes and requested pause before execution. No minor (deferred) findings.
+- 2026-10-07T17:32:50Z (design/worktree-identity): review: plan round 5 — verdict: accept; findings: none; reviewer: human
+- 2026-10-07T17:34:18Z (design/worktree-identity): done
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T17:34:18Z (design/worktree-identity): User approved Git-based worktree identity spec and corrected implementation plan; finding recorded on fam-a940d1. Execution goal fam-169e3f is paused before implementation at user request.
   provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
