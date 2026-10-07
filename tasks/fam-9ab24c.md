@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/worktree-identity
 created: 2026-10-07T13:05:48Z
-updated: 2026-10-07T13:39:44Z
+updated: 2026-10-07T14:20:32Z
 started: 2026-10-07T13:21:16Z
 depends: []
 parent: fam-74f6e9
@@ -39,4 +39,13 @@ On completion, run tasks note on fam-a940d1 with the agreed contract in the same
 - 2026-10-07T13:39:42Z (design/worktree-identity): review: spec round 2 — verdict: accept; findings: none; reviewer: codex
 - 2026-10-07T13:39:42Z (design/worktree-identity): Ruling: fresh scoped re-review accepts the support-boundary correction with no findings. Self-review checked placeholders, consistency, scope, existing file paths and acceptance coverage. Product implementation and suite readiness remain outside the draft; no minor (deferred) findings. Git report reproduction and trap cleanup passed; report remains unpublished.
 - 2026-10-07T13:39:42Z (design/worktree-identity): parked (waiting on user, review): User reviews docs/specs/2026-10-07-worktree-pin-inheritance-design.md in .worktrees/worktree-identity; after approval, agent resumes here and writes the implementation plan for its separate review. Storage investigation is merged; no product code or host wiring changed.
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T14:09:33Z (design/worktree-identity): resumed
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T14:09:34Z (design/worktree-identity): review: spec round 3 — verdict: revise; findings: Important 4, Minor 4; reviewer: claude-code/opus-5.5
+- 2026-10-07T14:17:36Z (design/worktree-identity): Ruling: accept findings 1–4 and address 5–8 in the draft. Require new Object.hasOwn guard; distinguish worktree pet config from shared idempotent info/exclude write; use combined rev-parse context and one bare/root verification probe (2 main/3 linked spawns), newline-triggered per-option queries and shared deadline; add real-Git before/after hook-wall-time measurements through tt. Omit inherited .git alias, retain other suffixes verbatim rather than add name normalization; document remote pin dominance and repeated discovery errors for formerly working undeclared separated-linked layouts; mark repositoryRoot new. No minor (deferred) findings from this review.
+- 2026-10-07T14:19:46Z (design/worktree-identity): evidence: complete revised discovery pilot on temporary Git 2.56.0 repos passed: 2 spawns main/separated-main, 3 ordinary/declared-separated/bare-linked, 5 main/6 linked for newline-framing recovery; moved sibling did not affect discovery. Separate fixture confirmed shared info/exclude. All fixtures removed. Source check confirms own-property fault trigger must be new. These probes do not implement or measure hook latency, record transition or shared-deadline enforcement.
+- 2026-10-07T14:20:30Z (design/worktree-identity): review: spec round 4 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-07T14:20:31Z (design/worktree-identity): Ruling: fresh scoped review accepts all eight revisions with no findings. Unwritten implementation/tests, actual latency results, independent fixture reproduction and broader upstream-search completeness remain outside this draft review; source/probe evidence and limitations are recorded in the spec. No minor (deferred) findings. User spec approval still gates writing the plan.
+- 2026-10-07T14:20:31Z (design/worktree-identity): parked (waiting on user, review): User reviews the revised docs/specs/2026-10-07-worktree-pin-inheritance-design.md in .worktrees/worktree-identity; after approval, agent resumes here and writes the implementation plan for its separate review. All eight requested revisions addressed and fresh scoped review accepted; no product implementation or latency measurements yet.
   provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
