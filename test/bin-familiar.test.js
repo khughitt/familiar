@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
-  symlinkSync,
+  symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -367,6 +367,24 @@ test('reap prunes a dead transmission owner absent from the bus and reports only
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stderr, '');
   assert.equal(second.stdout, '');
+});
+
+test('reap sweeps an orphaned atomic-write temp from the state dir and reports it', () => {
+  const e = env();
+  const p = paths(e);
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  mkdirSync(p.stateDir, { recursive: true });
+  // Our own pid is alive, so only the age bound can call this one an orphan.
+  const temp = `${p.lockPath}.tmp.${process.pid}.0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44`;
+  writeFileSync(temp, '');
+  const old = (Date.now() - 10 * 60_000) / 1000;
+  utimesSync(temp, old, old);
+
+  const result = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, 'swept 1 orphaned temp file(s)\n');
+  assert.equal(existsSync(temp), false);
 });
 
 test('an animation asset fault is one concise cosmetic line at the CLI boundary', () => {
