@@ -66,7 +66,7 @@ Use subagent-driven execution instead if the user requests it.
 
 | Step | Task record | Must follow |
 | --- | --- | --- |
-| 1 — Benchmark and baseline | `fam-4f90f3` | Design/plan review completion (`fam-9ab24c`) |
+| 1 — Benchmark tool and pilot | `fam-4f90f3` | Design/plan review completion (`fam-9ab24c`) |
 | 2 — Anchor discovery and propagation | `fam-d07bb3` | Step 1 and review completion |
 | 3 — Inherited pin precedence | `fam-449468` | Step 2 and review completion |
 | 4 — Integration and latency acceptance | `fam-f3d48e` | Step 3 and review completion |
@@ -101,143 +101,161 @@ cd .worktrees/worktree-identity
 
 ---
 
-### Task 1: Add a tested hook latency benchmark and record baseline
+### Task 1: Add a tested paired hook benchmark and run a pilot
 
 **Files:**
 
-- Modify: `justfile` (one permanent benchmark recipe).
-- Create: `tools/bench-hook.mjs` (fixture orchestration, worker, statistics and
-  before/after report).
-- Create: `test/fixtures/hook-bench-preload.mjs` (test-only process selection and
-  real-Git instrumentation, loaded explicitly by benchmark hook children).
-- Create: `test/fixtures/git-worktree.mjs` (Git fixture shared with later tests).
-- Create: `test/bench-hook.test.js` (lasting recipe/tool checks).
+- Modify: `justfile` (one lasting recipe), `.github/workflows/test.yml`
+  (install just in both Ubuntu jobs).
+- Create: `tools/bench-hook.mjs` (controller, worker, paired reports).
+- Create: `test/fixtures/bench-hook-cli.mjs` (CLI wrapper following
+  `test/fixtures/tty-familiar.mjs`, with measured-checkout process/Git instrumentation).
+- Create: `test/fixtures/git-worktree.mjs` (shared real-Git fixture helper).
+- Create: `test/bench-hook.test.js` (statistics, validation, recipe and CI prerequisites).
 
 **Interfaces:**
 
-- `git(root, args)` synchronously executes real Git with argv, UTF-8 output,
-  a five-second fixture-command timeout and `core.hooksPath=/dev/null`; it
-  throws on any unexpected exit. It returns stdout with exactly one final LF
-  removed. Callers needing a known nonzero result use `spawnSync` directly.
-- `fixtureGitEnv(over = {})` copies the supplied process environment, removes
-  inherited `GIT_*` bindings, and sets `GIT_CONFIG_NOSYSTEM=1` and
-  `GIT_CONFIG_GLOBAL=/dev/null`. Use it only in fixture commands/benchmark
-  workers, never to change production Git configuration semantics.
-- `seedRepo(root, { gitDir = null } = {})` initializes `main`, optionally with
-  `--separate-git-dir`, and makes an empty fixture commit using command-local
-  identity. `addWorktree(main, target)` adds a detached checkout. Helpers do not
-  register projects, install hooks or mutate global Git configuration.
-- `just bench-hook PHASE FIXTURE SAMPLES WARMUPS BATCHES` with defaults
-  `SAMPLES=30`, `WARMUPS=5`, `BATCHES=2`. PHASE is `before` or `after`;
-  FIXTURE is an explicit directory outside live state. No default HOME location.
-- `summarize(samples)` returns `{ medianMs, p95Ms }` using sorted numeric values
-  and nearest-rank p95. Empty/nonfinite samples are errors.
-- `proveHook(result, agents, intents, sessionId, workerPid, checkout)` throws
-  for a spawn failure, nonzero exit, stdout/stderr, wrong working state,
-  missing session, wrong owner PID or wrong checkout root. Return nothing on
-  success. The worker uses this exported testable check for every warm-up and
-  measured hook; test exit zero plus a diagnostic directly against it.
-- `compare(before, after)` returns `{ verdict, reasons, contexts }`. Contexts
-  contain main/linked medians, p95, absolute/percentage deltas, baseline batch
-  variation and verification-probe duration. Wrong after counts or unexplained
-  slowdown yields `needs-investigation`, not a silently passing report.
+- `git(root, args)`, `seedRepo(root, { gitDir = null } = {})`,
+  `addWorktree(main, target)` and `fixtureGitEnv(over = {})` provide real-Git
+  fixtures. Commands use argv, a five-second timeout, SIGKILL and command-local
+  `core.hooksPath=/dev/null`. Preserve paths by removing only the final LF.
+  The environment helper removes inherited `GIT_*` bindings and sets
+  `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`; it never mutates the
+  caller's environment or production Git semantics.
+- `just bench-hook MODE BASELINE CANDIDATE FIXTURE SAMPLES WARMUPS PAIRS`,
+  defaults 30/5/4. MODE is `pilot` or `compare`. Both checkout paths are explicit;
+  resolve their actual `bin/familiar`, verify dependencies, record revisions,
+  source hashes and package-lock hashes. `pilot` permits identical checkouts;
+  `compare` requires distinct source revisions and identical measurement settings.
+- The same benchmark driver and wrapper measure both versions. The worker
+  chooses source by the measured bin path, not the benchmark's own checkout.
+- `batchOrder(i)` returns `['baseline', 'candidate']` for even pairs and the
+  reverse for odd pairs. Each context gets both source batches adjacent in
+  time within the same controller invocation. Default four pairs balances order.
+- `summarize(samples)` returns median/p95 milliseconds; reject empty/nonfinite
+  input. `pairedComparison(pairs, context)` returns source summaries, each
+  adjacent pair's median difference, median/p95 of those differences, order
+  breakdown and measured candidate probe cost. It does not infer a timing pass
+  from an old baseline or a max-minus-min threshold.
+- `proveHook(result, agents, intents, id, workerPid, checkout)` rejects spawn/
+  exit/signal failures, stdout/stderr, absent working records, wrong PID or
+  wrong project checkout. A cosmetic exit zero is insufficient.
 
-- [ ] **Step 1: Add failing tests for the permanent deliverable.**
+The report is schema 1: mode, run id, start/end times, measurement settings,
+source paths/revisions/hashes/versions, boundary, paired raw batches, structural
+count checks and paired summaries. Timing status is `pilot-only` or
+`review-required`; it is never an automatic statistical acceptance claim.
+A comparison run enforces baseline counts 2/main and 2/linked, candidate counts
+2/main and 3/linked. Pilot validates actual hooks without imposing counts for
+an unimplemented version. Append completed samples incrementally so interrupted
+runs retain evidence. Start a fresh fixture/run, not a resumed comparison hours
+or days later. No fixture is retained as a days-old baseline input.
 
-Start with pure statistics/validation and an actual just recipe smoke test:
+- [ ] **Step 1: Write failing tests for comparison, recipe and sample proof.**
+
+Use the regular node:test suite. Pure statistics/proof tests stay portable;
+only the real CLI recipe smoke is Linux-only because its no-TTY boundary uses
+`/proc`. Do not import global wrapper patches into the suite process.
 
 ```js
-import { summarize, compare, proveHook } from '../tools/bench-hook.mjs';
+import { summarize, batchOrder, pairedComparison, proveHook } from '../tools/bench-hook.mjs';
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 
-test('benchmark statistics preserve measured milliseconds', () => {
+test('paired ordering counterbalances the two measured sources', () => {
+  assert.deepEqual(batchOrder(0), ['baseline', 'candidate']);
+  assert.deepEqual(batchOrder(1), ['candidate', 'baseline']);
   assert.deepEqual(summarize([4, 1, 3, 2]), { medianMs: 2.5, p95Ms: 4 });
   assert.throws(() => summarize([]), /samples/);
-  assert.throws(() => summarize([NaN]), /finite/);
 });
 
-test('a cosmetic exit-zero failure is not a successful benchmark sample', () => {
-  const session = 'bench-main';
-  const agents = { [session]: { pid: 42, repoRoot: '/fixture/api', state: 'working' } };
-  const intents = { [session]: { current: { state: 'working' } } };
-  const result = { status: 0, stdout: '', stderr: 'familiar: bad discovery\n' };
-  assert.throws(() => proveHook(result, agents, intents, session, 42, '/fixture/api'),
-    /cleanly|diagnostic/);
-  result.stderr = '';
-  proveHook(result, agents, intents, session, 42, '/fixture/api');
-  delete intents[session];
-  assert.throws(() => proveHook(result, agents, intents, session, 42, '/fixture/api'));
+test('pair differences do not mistake between-pair drift for the version delta', () => {
+  const pairs = [10, 20, 30, 40].map((base, index) => ({
+    index, order: batchOrder(index), contexts: { main: {
+      baseline: { samples: [{ hookMs: base }, { hookMs: base }] },
+      candidate: { samples: [{ hookMs: base + 2 }, { hookMs: base + 2 }] },
+    } },
+  }));
+  const r = pairedComparison(pairs, 'main');
+  assert.deepEqual(r.pairedDeltasMs, [2, 2, 2, 2]);
+  assert.equal(r.deltaMedianMs, 2);
+  assert.equal(r.timingStatus, 'review-required');
 });
 
-test('just bench-hook records both contexts and successful hooks', {
+test('an exit-zero diagnostic cannot be a successful sample', () => {
+  const id = 'bench-main';
+  const agents = { [id]: { pid: 42, repoRoot: '/fixture/api', state: 'working' } };
+  const intents = { [id]: { current: { state: 'working' } } };
+  assert.throws(() => proveHook({ status: 0, stdout: '', stderr: 'familiar: failed\n' },
+    agents, intents, id, 42, '/fixture/api'), /cleanly|diagnostic/);
+});
+
+test('the real just recipe forwards paths and records paired hooks', {
   skip: process.platform !== 'linux' && 'CLI fixture uses Linux /proc',
 }, (t) => {
-  const fixture = mkdtempSync(join(tmpdir(), 'familiar-bench-test-'));
-  t.after(() => rmSync(fixture, { recursive: true, force: true }));
-  const log = join(fixture, 'runs.jsonl');
-  const result = spawnSync('just', [
-    'bench-hook', 'before', fixture, '1', '0', '1',
-  ], { cwd: REPO, encoding: 'utf8', timeout: 30_000,
+  const root = mkdtempSync(join(tmpdir(), 'familiar-paired-smoke-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const fixture = join(root, "pilot's fixture with spaces");
+  const log = join(root, 'runs.jsonl');
+  const r = spawnSync('just', ['bench-hook', 'pilot', REPO, REPO,
+    fixture, '1', '0', '1'], { cwd: REPO, encoding: 'utf8', timeout: 30_000,
     env: { ...process.env, TT_LOG: log } });
-  assert.equal(result.status, 0, result.stderr);
-  const report = JSON.parse(readFileSync(join(fixture, 'before.json'), 'utf8'));
-  assert.equal(report.schema, 1);
-  assert.equal(report.phase, 'before');
-  for (const name of ['main', 'linked']) {
-    const sample = report.contexts[name].batches[0].samples[0];
-    assert.ok(Number.isFinite(sample.hookMs) && sample.hookMs > 0);
-    assert.ok(sample.git.length >= 2);
-    assert.equal(sample.provedState, 'working');
+  assert.equal(r.status, 0, r.stderr);
+  const report = JSON.parse(readFileSync(join(fixture, 'report.json'), 'utf8'));
+  assert.equal(report.mode, 'pilot');
+  for (const context of ['main', 'linked']) {
+    for (const version of ['baseline', 'candidate']) {
+      const sample = report.pairs[0].contexts[context][version].samples[0];
+      assert.ok(Number.isFinite(sample.hookMs) && sample.hookMs > 0);
+      assert.equal(sample.provedState, 'working');
+      assert.ok(sample.git.length >= 2);
+    }
   }
-  const runs = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
-  for (const name of ['main', 'linked']) {
-    assert.ok(runs.some((r) => r.target === `bench-hook-${name}-before`
-      && r.exit === 0));
+  const rows = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+  for (const context of ['main', 'linked']) {
+    for (const version of ['baseline', 'candidate']) {
+      assert.ok(rows.some((r) => r.target === `bench-hook-${context}-${version}` && r.exit === 0));
+    }
   }
 });
 ```
 
-Add these concrete pure comparison tests. Their report shape is the same
-shape emitted by the worker; these exercise the verdict even when the CLI
-smoke uses only one sample:
+Add malformed mode/settings/source-path tests, artifact-overwrite refusal,
+nonfinite samples, cleanup after signal/error, and source-selection regression:
+run the wrapper against a small second temporary checkout whose proc module
+exports a distinct sentinel, then assert it patches/imports that checkout's
+module and bin. That fixture needs no npm packages; its stand-in bin inspects
+its own proc export and argv. This catches mistakenly importing the driver's
+proc module without requiring two dependency installations in every test-fast.
+
+- [ ] **Step 2: Run `just test-fast` and confirm the absent tool/recipe is RED.**
+
+Dependency/fixture failures are not the expected assertion failure. Record the
+setup baseline's tt time for comparison with the finished Task 1 fast suite.
+
+- [ ] **Step 3: Implement fixture helpers, paired controller and worker.**
+
+Reuse the existing theme-pack fixture; seed one main Git repo plus one linked
+project under FIXTURE. Both measured versions receive the same project paths,
+config/theme/payload. Give each source/context its own bus state so one schema
+cannot pollute the other. Use a stable worker owner during each batch. Five
+warm-ups are validated but excluded; all subsequent samples must prove success.
+Keep HOME/XDG, CODEX_HOME and Familiar files inside FIXTURE for workers; clear
+Git bindings, TMUX/NODE_OPTIONS and set TERM=dumb. Preserve the caller's HOME/
+XDG/TT_LOG for the tt parent so timings reach the normal log. Use argv `env`
+assignments for worker overrides, not interpolated shell source.
+
+Implement the shared fixture helpers with their agreed signatures:
 
 ```js
-const synthetic = (mainMs, linkedMs, linkedCalls, probeMs = 0) => ({
-  contexts: Object.fromEntries([
-    ['main', mainMs, 2], ['linked', linkedMs, linkedCalls],
-  ].map(([name, hookMs, count]) => [name, { batches: [0, 1].map(() => ({
-    samples: [0, 1].map(() => ({ hookMs, provedState: 'working',
-      git: Array.from({ length: count }, (_, i) => ({
-        args: name === 'linked' && i === 2 ? ['--is-bare-repository'] : ['rev-parse'],
-        ms: name === 'linked' && i === 2 ? probeMs : 1, exit: 0,
-      })),
-    })),
-  })) }])) });
-
-test('benchmark verdict accounts for one measured probe and flags regressions', () => {
-  const before = synthetic(10, 10, 2);
-  assert.equal(compare(before, synthetic(10, 12, 3, 2)).verdict, 'accept');
-  assert.equal(compare(before, synthetic(20, 12, 3, 2)).verdict, 'needs-investigation');
-  assert.equal(compare(before, synthetic(10, 12, 4, 2)).verdict, 'needs-investigation');
-});
-```
-
-Add command checks that reject `after` without baseline, a reused `before.json`,
-an invalid phase/nonpositive samples, and a child with a diagnostic despite
-exit zero. Test argument forwarding with a fixture directory containing spaces
-and an apostrophe. Keep pure tests portable; only the Linux CLI smoke is skipped
-on other hosts. The real-Git discovery tests in Task 2 are not Linux-only.
-
-- [ ] **Step 2: Run `just test-fast`; confirm the missing tool/recipe tests fail.**
-
-The RED failure must name the absent benchmark import or recipe. Do not count
-unhydrated dependency errors as the expected failure.
-
-- [ ] **Step 3: Implement the fixture and benchmark with standard library tools.**
-
-The shared fixture helper can use this exact pattern:
-
-```js
+export function fixtureGitEnv(over = {}) {
+  const env = { ...process.env, ...over };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_')) delete env[key];
+  }
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = '/dev/null';
+  return env;
+}
 export function git(root, args) {
   const r = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {
     encoding: 'utf8', timeout: 5_000, killSignal: 'SIGKILL', env: fixtureGitEnv(),
@@ -260,220 +278,139 @@ export const addWorktree = (main, target) => {
 };
 ```
 
-- [ ] **Step 4: Implement the owned controller and isolated worker invocation.**
-
-`tools/bench-hook.mjs` has controller and internal worker modes in the same
-file. Define the environment helper in the shared Git fixture module:
+The controller executes both sources in one run:
 
 ```js
-export function fixtureGitEnv(over = {}) {
-  const env = { ...process.env, ...over };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('GIT_')) delete env[key];
+for (let index = 0; index < pairs; index++) {
+  const order = batchOrder(index);
+  for (const context of ['main', 'linked']) {
+    for (const version of order) {
+      await measureBatch({ index, context, version, measuredRoot: sources[version] });
+    }
   }
-  env.GIT_CONFIG_NOSYSTEM = '1';
-  env.GIT_CONFIG_GLOBAL = '/dev/null';
-  return env;
 }
 ```
 
-Its test sets bogus `GIT_DIR`/`GIT_WORK_TREE` and confirms seeded fixture
-metadata stays inside the supplied root. Do not unset the caller's real shell
-variables; this is a child-process environment only. Test through
-`fixtureGitEnv(over)` and a child; do not mutate the test runner environment.
-Load/test the preload exclusively in child processes; importing its global
-patches into the test runner would contaminate unrelated tests.
+`measureBatch` is a local controller function: spawn real `tools/tt` with
+`bench-hook-${context}-${version}`, `cwd: measuredRoot`, then the current
+benchmark's internal worker with measured bin/context/index/settings in argv.
+Capture source revision/hash, batch start/end, order, load average snapshots,
+raw timings and the child result. The tt code is the current driver's wrapper;
+its cwd ensures its recorded revision is the source being measured.
 
-The controller creates/reuses FIXTURE's `repo`, `linked`, config/theme
-and results. Copy `test/fixtures/theme-pack` to the fixture themes root, use
-`theme: fixture`, `motion: reduced`, dark/satScale=1, and an empty pin catalog.
-Set the worker's HOME, CODEX_HOME and all FAMILIAR directories to fixture-owned paths.
-Clear TMUX, TMUX_PANE and NODE_OPTIONS, set TERM=dumb, and keep all child
-stdout/stderr as pipes. Refuse to reuse an unrelated nonempty directory;
-require the fixture manifest on subsequent calls. Store phase artifacts
-without overwriting an earlier phase.
+Use normal, awaited subprocesses. No `detached: true`, process groups or
+`active-groups.json`. Keep active handles/PIDs in memory. A worker emits its
+ready PID before work starts and owns its asynchronous hook children; the CLI
+wrapper owns real Git children. On TERM/INT or an error, forward cancellation
+from controller to worker to wrapper, kill/reap owned children, then allow tt
+and controller to finish. Do not return while any owned child runs; signal
+handlers must complete cleanup before exit. Test this chain. No PID file is
+needed or trusted for cleanup after a killed controller.
 
-For each context, the controller runs the internal worker through the existing
-wrapper using argv, not a shell string:
+- [ ] **Step 4: Implement the CLI wrapper against the measured checkout.**
+
+Follow the argv/import wrapper pattern already used by `tty-familiar.mjs`.
+Resolve modules from the measured bin's canonical URL:
 
 ```js
-const args = [
-  join(REPO, 'tools/tt'), `bench-hook-${context}-${phase}`, '--',
-  'env', ...Object.entries(workerOverrides).map(([k, v]) => `${k}=${v}`),
-  process.execPath, fileURLToPath(import.meta.url), '--worker',
-  phase, fixture, context, String(samples), String(warmups), String(batches),
+const bin = realpathSync(process.argv[2]);
+const args = process.argv.slice(3);
+const { defaultProcessOps } = await import(new URL('../src/bus/proc.js', pathToFileURL(bin)));
+const parent = defaultProcessOps.recordOf(process.ppid);
+defaultProcessOps.ancestors = () => [
+  defaultProcessOps.recordOf(process.pid), { ...parent, comm: 'claude', tty: true },
 ];
-const child = spawn('python3', args, {
-  cwd: REPO, env: trackingEnv, stdio: ['ignore', 'pipe', 'pipe'],
-  detached: true,
-});
+process.argv = [process.execPath, bin, ...args];
+// Install real execFile instrumentation before this import.
+await import(pathToFileURL(bin).href);
 ```
 
-Record each owned group leader in the fixture's `active-groups.json` before
-waiting; clear that entry only after cleanup. The recipe smoke checks that
-this manifest is empty/removed when the command returns. Keep stdout piped
-regardless of the caller's terminal.
+Do not use an --import preload. Do not import the driver's proc module: it
+would be another module instance when measuring the detached baseline.
+Instrument real execFile before CLI import, synchronize builtin ESM exports,
+and preserve promisify.custom's stdout/stderr/error semantics. Track Git
+children in memory for cancellation and record argv, duration and exit.
+Known native failures (including bare true + exit 128) must remain unchanged.
+The wrapper is test machinery only; production launchers/adapters stay untouched.
 
-`trackingEnv` retains the caller's HOME/XDG/TT_LOG and session identity so tt
-records in its normal shared log (or the test's explicit TT_LOG), while clearing
-Git bindings through `fixtureGitEnv` and TMUX/NODE_OPTIONS. `workerOverrides`
-assigns the fixture HOME/XDG, CODEX_HOME, all Familiar directories, TERM=dumb
-and empty TMUX/NODE_OPTIONS before the worker starts. Passing these as `env`
-argv assignments preserves spaces/apostrophes and ensures the worker's initial
-`/proc` environment cannot trigger a live tmux probe. Never give tt a fixture
-HOME and accidentally redirect its timing log out of the shared record.
-
-Here `detached` creates an owned process group only: the controller awaits it,
-captures its output and never returns while it runs. On EXIT/TERM/INT or a
-bounded timeout, kill/reap that owned group, including tt, worker and hooks.
-Do not disown or use nohup. Complete group cleanup before reporting a failure.
-This ensures worker fd 1 is always a private pipe even when a person runs
-the recipe from a terminal.
-
-- [ ] **Step 5: Implement the timed CLI hook loop and sample proof.**
-
-The worker runs the repository's explicit `bin/familiar` through Node for
-`hook PreToolUse --agent claude-code`, with a stable `bench-main` or
-`bench-linked` session id. Each subprocess uses:
+The worker invokes this current wrapper with the measured bin:
 
 ```js
 const started = performance.now();
-const r = spawnSync(process.execPath, [
-  '--import', preloadPath, binPath, 'hook', 'PreToolUse', '--agent', 'claude-code',
-], { cwd: checkout, env: sampleEnv,
-  input: JSON.stringify({ session_id: sessionId, cwd: checkout }),
-  encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL' });
+const result = await runOwnedChild(process.execPath, [wrapperPath, measuredBin,
+  'hook', 'PreToolUse', '--agent', 'claude-code'], {
+  cwd: projectRoot, env: sampleEnv,
+  input: JSON.stringify({ session_id: id, cwd: projectRoot }),
+});
 const hookMs = performance.now() - started;
-if (r.error) throw r.error;
-if (r.status !== 0 || r.stderr !== '' || r.stdout !== '') {
-  throw new Error(`benchmark hook did not complete cleanly: ${r.stderr}`);
-}
-const agents = JSON.parse(readFileSync(paths.agentsPath, 'utf8'));
-const intents = JSON.parse(readFileSync(paths.intentPath, 'utf8'));
-proveHook(r, agents, intents, sessionId, process.pid, checkout);
+proveHook(result, readAgents(), readIntents(), id, process.pid, projectRoot);
 ```
 
-The exported proof uses the same checks as the loop and is tested directly:
+`runOwnedChild` is a local worker function using asynchronous spawn with pipes,
+a ten-second timeout and registered cleanup handles. Check process outcome/
+diagnostics before opening state files, then prove working state/owner/root.
+Wrapper Git metrics flush synchronously on clean exit; interrupted sample
+results cannot become valid timing samples. Always pipe the worker's stdout;
+real emission's isatty guard therefore prevents any live-terminal writes.
 
-```js
-export function proveHook(r, agents, intents, sessionId, workerPid, checkout) {
-  if (r.error) throw r.error;
-  if (r.status !== 0 || r.signal || r.stderr !== '' || r.stdout !== '') {
-    throw new Error(`benchmark hook did not complete cleanly: ${r.stderr}`);
-  }
-  assert.equal(agents[sessionId]?.state, 'working');
-  assert.equal(intents[sessionId]?.current?.state, 'working');
-  assert.equal(agents[sessionId]?.pid, workerPid);
-  assert.equal(agents[sessionId]?.repoRoot, checkout);
-}
-```
-
-- [ ] **Step 6: Implement the explicit test-only preload and real-Git metrics.**
-
-Use the test-only preload to make process selection deterministic: replace
-`defaultProcessOps.ancestors` with the real hook and its real worker parent
-records, changing only the parent fixture's reported comm to `claude` and
-selection tty flag to non-null. PID/starttime and liveness stay real; the
-actual parent's stdout remains a pipe, so emission's real isatty guard
-suppresses terminal output. This injection is fixture machinery, not a
-production flag. Do not change adapters or launch an actual agent/TUI.
-
-Instrument the real `node:child_process.execFile` before importing the CLI,
-then call `syncBuiltinESMExports()`. Forward argv/options/callback unchanged;
-record only Git argv, elapsed milliseconds and exit outcome. Preserve
-`promisify.custom` behavior by returning `{ stdout, stderr }` and the original
-error with its stdout/stderr, so the native bare failure is not changed by
-instrumentation. Flush metrics synchronously to the sample's fixture trace
-at process exit. Test that both success and a known nonzero real-Git result
-retain their output/exit semantics. Product modules never import this preload.
-
-Time from before spawning the hook to completed child exit, before reading
-its metrics. This measures CLI startup, fixture preload, real Git, theme
-resolution, transaction writes and non-TTY presentation/cleanup; it excludes
-an actual agent/TUI, PTY/graphics delivery and live Darwin latency. Report that
-boundary explicitly. The same preload/setup is used in both phases.
-
-- [ ] **Step 7: Implement summaries, comparison, persistence and recipe.**
-
-Use a direct numeric implementation for the exported summary:
-
-```js
-export function summarize(samples) {
-  if (samples.length === 0) throw new Error('benchmark has no samples');
-  if (!samples.every(Number.isFinite)) throw new Error('samples must be finite');
-  const sorted = [...samples].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return {
-    medianMs: sorted.length % 2 ? sorted[middle]
-      : (sorted[middle - 1] + sorted[middle]) / 2,
-    p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
-  };
-}
-```
-
-`compare` uses the largest before batch median as reference and max minus min
-of before batch medians as measured variation. Main after median may be no
-higher than reference plus variation; linked also gets the median measured
-duration of its one additional probe (`args` includes `--is-bare-repository`).
-Check every after sample for two/main or three/linked Git calls. Emit reasons
-for exceeded bounds or wrong counts, plus p95/deltas for human disposition.
-Keep the same settings/versions/fixture identity across phases; reject a
-mismatched artifact instead of silently comparing unrelated runs.
-
-Store each successful sample as `{ hookMs, git: [{ args, ms, exit }],
-provedState: 'working' }`, grouped by context and batch. Warm-ups are validated
-but omitted from statistics. The report contains schema=1, phase, revision,
-dirty flag, Node/Git versions, fixture identity, measurement boundary, raw
-batches, summary and comparison when `after`. Append completed samples to
-per-context JSONL as they finish, so an aborted run retains analyzable evidence.
-Persist raw results outside the
-repository; record their absolute artifact location on the task during execution.
-Budgets smaller than 30 samples/two batches are explicitly `pilot-only`:
-validate hooks, artifact settings and after counts, but do not claim statistical
-latency acceptance from a single sample. The synthetic verdict checks above
-exercise the comparison gate without relying on noisy pilot timing.
-
-The just recipe forwards its parameters through exported recipe variables,
-avoiding shell interpolation of a fixture path:
+- [ ] **Step 5: Add the permanent recipe and its CI prerequisite.**
 
 ```just
-bench-hook $phase $fixture $samples="30" $warmups="5" $batches="2":
-    node tools/bench-hook.mjs "$phase" "$fixture" "$samples" "$warmups" "$batches"
+bench-hook $mode $baseline $candidate $fixture $samples="30" $warmups="5" $pairs="4":
+    node tools/bench-hook.mjs "$mode" "$baseline" "$candidate" "$fixture" "$samples" "$warmups" "$pairs"
 ```
 
-The controller's per-context `tools/tt` calls record the timings; do not add
-another timer wrapper or call a test runner from this recipe.
+Install just in BOTH Ubuntu jobs, `test` and `smoke`, before their npm/test
+commands. Keep the real recipe smoke; do not replace it with a direct node
+call. The checked upstream v4 action is:
 
-- [ ] **Step 8: Run `just test-fast` and the smallest benchmark pilot.**
+```yaml
+- uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+  with:
+    just-version: '1.58.0'
+```
 
-Use `mktemp -d` for FIXTURE; keep its path in the task note. Run:
+The action/version input is documented in
+[setup-just's README](https://github.com/extractions/setup-just#usage).
+The v4 tag SHA was resolved while drafting this revision. Add a regular suite
+check using the existing YAML dependency that both Ubuntu job step arrays
+contain this setup before their npm/test commands. The macOS recipe smoke
+remains explicitly skipped; the portable benchmark unit tests still run there.
+
+- [ ] **Step 6: GREEN tests, pilot, immediate evidence attachment and commit.**
+
+Run `just test-fast`, inspect its tt wall time/test count against the setup
+baseline and record the added smoke's elapsed cost. Investigate a material
+unexplained test-fast regression; retain the required recipe/path-forwarding
+check and avoid broadening the pilot (one hook per source/context only).
+
+Run one pilot with the current checkout in both source positions:
 
 ```sh
 bench_fixture=$(mktemp -d)
-just bench-hook before "$bench_fixture" 1 0 1
+just bench-hook pilot "$PWD" "$PWD" "$bench_fixture" 1 0 1
+tasks attach fam-4f90f3 "$bench_fixture/report.json" --caption "Paired benchmark pilot; tool proof, not latency acceptance"
 ```
 
-Read the raw result and tt records. Verify both contexts actually wrote working
-state and measured real Git; no stderr, user-state writes or surviving children.
-This one-case-per-context pilot checks the entire recipe through its result.
-Remove only its owned fixture or use a fresh one for the full baseline.
+Read its raw batches and tt rows. Attach raw results and source hashes to this
+step immediately, BEFORE cleanup/parking/commit; do not rely on a temporary
+directory surviving a timer. Verify the attachment through tasks show/check,
+then clean only its owned fixture. Task 4 creates a new paired measurement
+fixture; it never uses this pilot as a performance baseline.
 
-- [ ] **Step 9: Record the unchanged-product baseline and commit.**
-
-Run `just bench-hook before "$bench_fixture" 30 5 2` in a fresh fixture before
-Task 2. It records two baseline batches per context and must finish in the
-foreground/tracked command. Inspect completed results if it is refused or
-aborted before retrying. Product source is unchanged in this task; record
-revision/dirty status and hashes of `src/bus/identity.js`, `pins.js`, `resolve.js`
-and `transaction.js` with the artifact. Save the same fixture for Task 4.
-
-`tasks note` the boundary, versions, medians/p95, counts, baseline variation and
-artifact path. Then `just check`, `tasks check`, `git diff --check`, close this
-step and commit the benchmark, tests, helper, just recipe and step record:
+Run `just check`, `tasks check`, `git diff --check`, close this step and commit
+its tool/wrapper/tests/CI/recipe/fixture/attachment/task changes. After committing,
+record the exact Task 1 commit on the execution goal (execution-owned note,
+no amendment merely to put a commit id inside its own commit):
 
 ```sh
-git commit -m "test(identity): add hook latency benchmark and baseline"
+git commit -m "test(identity): add paired hook benchmark and CI prerequisite"
+task1_commit=$(git rev-parse HEAD)
+tasks note fam-169e3f "baseline-code: $task1_commit — benchmark/tool commit; product identity unchanged"
 ```
+
+That commit contains the benchmark but no product identity changes; Task 4
+will create a hydrated detached checkout at it as the baseline code source.
 
 ---
 
@@ -885,8 +822,9 @@ git commit -m "feat(identity): inherit repository pins in Git worktrees"
 - `convergeCodexProject({ repoRoot, member, catalog, pack, themeId, petsDir })`
   continues accepting the already resolved member. Do not add a separate
   inherited-member calculation to it.
-- Task 1's `before.json` and raw batches are immutable baseline inputs;
-  `after.json` reports the same fixture/boundary with Task 2–3 product code.
+- Task 1's commit is the baseline CODE revision, not its pilot timings.
+  The current driver measures that checkout and the candidate in one paired
+  sitting on a fresh fixture; Task 1's attached pilot is tool evidence only.
 
 - [ ] **Step 1: Write the real-worktree installer and CLI parity checks.**
 
@@ -945,41 +883,76 @@ work, not a claimed new RED→GREEN fix. If they expose a defect, retain the
 failing regression, fix the shared owning function, then run the same front
 door to GREEN. Never weaken a correct assertion to preserve a bad target.
 
-- [ ] **Step 3: Pilot after measurement, then record the full comparison.**
+- [ ] **Step 3: Measure both source versions in one paired sitting.**
 
-Use a separate disposable pilot fixture and one successful hook per context
-to verify the after recipe/result checks; do not overwrite the saved baseline.
-Run a pilot `before` followed by pilot `after` at identical 1/0/1 budgets in
-that disposable fixture. Its verdict is `pilot-only`, not latency acceptance.
-Then, on the saved Task 1 fixture with its unchanged theme/config:
+Use the exact Task 1 commit recorded on `fam-169e3f` as baseline code. From the
+main checkout, follow the ordinary worktree rules for this auxiliary source:
 
 ```sh
-just bench-hook after "$bench_fixture" 30 5 2
+work-link --ensure .worktrees
+git worktree add --detach .worktrees/identity-benchmark-baseline "$task1_commit"
+git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/identity-benchmark-baseline
 ```
 
-Read raw before/after batches, not only a command exit. Each sampled hook
-must prove working agents/intent and zero diagnostics; every normal main
-sample must have two real Git calls and linked samples three. A bare-backed
-suite fixture already proves three-call bare discovery; do not confuse the
-separate probe's expected native exit 128 with a failed CLI hook.
+From the main checkout, hydrate it with
+`npm --prefix .worktrees/identity-benchmark-baseline install` (no setup recipe),
+then verify source/package-lock hashes and dependency availability. Do not share/repoint node_modules or a
+launcher, and do not run task writes in the detached source. Task 4's claim
+stays in `.worktrees/worktree-identity`. Record auxiliary path/revision/setup
+on Task 4. Explicit measured bin paths avoid changing live host pointers.
 
-For each context, compare before batch medians with after median/p95 and
-report absolute/percentage deltas. Baseline variation is max minus min of
-baseline batch medians; reference the largest baseline batch median. Main
-acceptance allows that reference plus observed variation. Linked acceptance
-also allows the after median duration of its one additional bare/root probe.
-Report p95 changes and investigate unexplained tail growth, even if medians
-are within those bounds. A larger unexplained change or wrong spawn count
-is `needs-investigation`; record evidence, fix/rerun affected work or explicitly
-resolve it before final acceptance. Do not ask for an idle desktop unless a
-measured preflight refusal actually requires it.
+The latest benchmark driver/wrapper must patch proc.js relative to EACH
+measured bin, not relative to its own worktree. The source-selection regression
+from Task 1 exercises this distinction. The same Node/Git versions, fixture
+project paths, theme/config, payloads and measurement boundary apply to both
+sources. Keep source/context bus state separate.
 
-Attach baseline/after reports and their source hashes to the execution goal
-using `tasks attach` before cleaning the owned fixture. Keep original raw
-artifacts available until attachments/checks confirm preservation; redact any
-unrelated host content rather than committing it. Record the exact measurement
-boundary and limitations (fixture process selection, non-TTY presentation,
-Linux host, no live-agent or Darwin latency claim).
+Run a disposable one-pair pilot against the two checkouts and attach it. Then
+create a NEW full-run fixture and execute the whole comparison in one tracked
+foreground invocation; from the main checkout:
+
+```sh
+bench_fixture=$(mktemp -d)
+cd .worktrees/worktree-identity
+just bench-hook compare ../identity-benchmark-baseline "$PWD" "$bench_fixture" 30 5 4
+```
+
+The controller resolves both source paths and runs adjacent baseline/candidate
+batches for main and linked contexts, reversing their order on alternate pairs.
+Read the complete ordering and raw samples. Do not combine Task 1's pilot or
+old sittings with this run. If interrupted, attach/analyze completed data and
+start a fresh complete sitting after resolving the cause; a partial/resumed
+run does not support latency acceptance.
+
+Each sample must prove successful working agents/intent and no diagnostics.
+Count baseline 2/main and 2/linked versus candidate 2/main and 3/linked. The
+portable bare suite regression independently pins Git's true/exit-128 contract.
+Report source median/p95, per-pair median differences, balanced-order breakdown,
+absolute/percentage deltas, probe duration, elapsed/run/load context and source
+hashes. Temporal pairing reduces load drift; it does not prove a statistical
+confidence bound or attribute every host disturbance to the code.
+
+There is NO largest-baseline-plus-two-batch-spread threshold and no automatic
+timing pass. Tool structural checks are pass/fail; timing status stays
+review-required. The executor records an evidence-backed disposition on Task 4:
+look for consistent unexplained main slowdown and linked overhead beyond the
+measured extra probe, inspect order-dependent results and p95 tails, and
+investigate/repeat in a fresh same-sitting run when disturbance or contradictory
+pairs makes the comparison inconclusive. A benign-looking aggregate alone is
+not acceptance. Preserve successful correctness checks while investigating.
+Do not ask for an idle desktop without an observed load/preflight reason.
+
+Attach the COMPLETE raw paired report immediately to Task 4 and record the
+latency disposition/rationale; verify the attachment before removing its
+fixture. Task 1's pilot is already durable and is not this baseline. State the
+boundary: current wrapper, measured CLI code/dependencies, real Git, fixture
+process lookup, private-pipe presentation, Linux host; no live-agent/Darwin
+latency claim.
+
+Remove only the auxiliary baseline checkout after the normal ignored-file,
+host-pointer, submodule and tt-report checks, unlocking it before removal.
+Its ignored npm inputs are disposable; preserve any unexpected data first.
+Do not remove the main implementation worktree until its final integration.
 
 - [ ] **Step 4: Document the changed contract and preserve history.**
 
@@ -998,7 +971,7 @@ Add these concrete points to install/surface docs:
 - Managed Codex pet configs remain per checkout, but `.codex/config.toml`'s
   exclusion is shared repository-wide and idempotent.
 - Describe the benchmark recipe, its fixture/results, Linux boundary, persistent
-  tests and before/after method. It is a lasting developer tool, not a one-off
+  tests and paired same-sitting method. It is a lasting developer tool, not a one-off
   command that vanishes after measuring this branch.
 
 Append an implementation/date cross-reference to historical Codex parity
@@ -1038,5 +1011,5 @@ git commit -m "test(identity): verify worktree surfaces and hook latency"
 ## Plan review status
 
 This is the written plan for user review. No product code has been changed and
-no benchmark baseline has been measured yet. Step tasks remain blocked on
+no benchmark comparison has been measured yet. Step tasks remain blocked on
 `fam-9ab24c` until its plan review is accepted.

@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/worktree-identity
 created: 2026-10-07T13:05:48Z
-updated: 2026-10-07T16:05:08Z
+updated: 2026-10-07T17:00:05Z
 started: 2026-10-07T13:21:16Z
 depends: []
 parent: fam-74f6e9
@@ -57,4 +57,12 @@ On completion, run tasks note on fam-a940d1 with the agreed contract in the same
 - 2026-10-07T16:05:06Z (design/worktree-identity): review: plan round 1 — verdict: accept; findings: none; reviewer: codex
 - 2026-10-07T16:05:07Z (design/worktree-identity): Ruling: self-reviewed plan against each approved spec section, interfaces, five review-focus cases and current code; no placeholders or uncovered requirements. Four execution steps belong to fam-169e3f and are blocked on this design/plan review. Real-Git bare partial-output regression runs in the regular suite; lasting benchmark/recipe has its own tests, explicit full CLI boundary, isolated worker/process-group cleanup, unchanged shared tt logging and before/after evidence. All 19 JS snippets parse; exported just parameters were verified with spaces/apostrophes. No minor (deferred) findings. Product suite/baseline setup remains deferred until execution.
 - 2026-10-07T16:05:07Z (design/worktree-identity): parked (waiting on user, review): User reviews docs/plans/2026-10-07-worktree-pin-inheritance.md in .worktrees/worktree-identity; after approval, agent resumes here, closes the reviewed design/plan task with its finding note to fam-a940d1, sets execution goal fam-169e3f to direct based on approval, hydrates and runs the deferred baseline, then executes fam-4f90f3 inline unless user chooses otherwise. No code or benchmark run started.
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T16:36:56Z (design/worktree-identity): resumed
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T16:36:56Z (design/worktree-identity): review: plan round 2 — verdict: revise; findings: Important 3, Minor 3; reviewer: human
+- 2026-10-07T17:00:02Z (design/worktree-identity): Ruling: accept all three Important and three Minor plan findings. Task 1 now produces tested paired-source tool and immediately attached pilot, installs pinned just in both Ubuntu jobs, and measures added test-fast cost. Task 4 hydrates detached Task 1 code and compares both versions in one counterbalanced sitting; no historical-baseline threshold or automatic timing acceptance. CLI wrapper resolves proc from measured bin, follows existing wrapper pattern, and tracks cancellation only in memory; PID file/process groups removed. Tasks 2–3 byte-identical (SHA256 b30f81022c7e8c443c5bd914950d6b5a7db0ebd9bb31b05ef32f8513de119925). No minor (deferred) findings.
+- 2026-10-07T17:00:02Z (design/worktree-identity): review: plan round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-07T17:00:02Z (design/worktree-identity): Ruling: self-review checked corrected comparison/CI/evidence/cleanup contracts, unchanged product steps, mapped headings and code snippet syntax. Distinct temporary source checkouts proved measured-bin-relative proc module mutation reaches the imported bin; fixture removed. setup-just v4 SHA and just 1.58.0 release verified from upstream. just check/tasks check/whitespace checks clean. No actual workflow installation, product code, dependency setup or benchmark run; revised plan still needs user approval.
+- 2026-10-07T17:00:03Z (design/worktree-identity): parked (waiting on user, review): User reviews revised docs/plans/2026-10-07-worktree-pin-inheritance.md in .worktrees/worktree-identity; after approval, agent closes the reviewed design/plan task, hydrates and verifies execution tree, then starts fam-4f90f3 inline. Task 1 supplies paired tool/CI/pilot only; Task 4 measures baseline code and candidate together in a fresh sitting. All six findings addressed; no product work or measurement started.
   provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
