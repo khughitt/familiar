@@ -227,8 +227,8 @@ the Git anchor, pin tiers, remote-less keys, current-worktree labels,
 per-worktree Codex targets and runtime-record transition. The user accepted
 the revised spec at `842c20d`; it is an agreed design, not implemented behavior.
 The written plan is `docs/plans/2026-10-07-worktree-pin-inheritance.md` and
-still needs review. `fam-169e3f` owns its four blocked execution steps;
-`fam-9ab24c` remains the design/plan deliverable.
+is accepted. `fam-169e3f` owns its four paused execution steps;
+`fam-9ab24c` closes the reviewed design/plan deliverable.
 
 After the user's revise verdict, the spec now uses a combined `rev-parse`
 query rather than listing sibling worktrees: two discovery spawns for main
@@ -236,7 +236,7 @@ checkouts and three for linked checkouts, with explicit newline-path recovery.
 It requires a new own-property guard for old records, names the shared Git
 exclusion write, and adds before/after hook latency measurements. Bare `.git`
 anchors omit the inherited name alias; other suffixes remain verbatim. The
-revised written spec passed user review; plan review still gates execution.
+revised written spec passed user review; the user's explicit execution pause now gates implementation.
 
 Git fixtures uncovered a separate-directory main-path limitation. Upstream
 searches and source checks found no matching correction in the searched
@@ -249,4 +249,10 @@ immediately attached pilot, not saved performance timings. Task 4 runs a
 hydrated detached Task 1 code checkout and the candidate in a fresh, same-sitting
 paired comparison. The wrapper resolves proc.js from each measured bin. Ubuntu
 CI installs just for the actual recipe smoke; cleanup stays in memory, and the
-new fast-test cost is measured. Plan review still gates execution.
+new fast-test cost is measured. The user accepted the plan and explicitly paused before execution.
+
+Final plan corrections: just setup/check is limited to the Ubuntu test job;
+Task 4 must reconcile the spec's Latency acceptance section with the paired
+same-sitting method. Both artifacts are reviewed; implementation is paused at
+the user's request. No dependency hydration, product edits or benchmark runs
+have started. Resume `fam-169e3f`/`fam-4f90f3` only on explicit instruction.

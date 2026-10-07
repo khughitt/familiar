@@ -4,7 +4,7 @@ title: Decide whether a worktree inherits its parent checkout's identity pin
 status: idea
 priority: 2
 created: 2026-09-05T10:35:25Z
-updated: 2026-10-07T13:06:42Z
+updated: 2026-10-07T17:32:50Z
 depends: [fam-9ab24c]
 parent: fam-74f6e9
 tags: [identity, pins]
@@ -15,3 +15,4 @@ matchPin (src/bus/pins.js) compares a path: pin to repoRoot by exact canonical e
 ## Notes
 
 - 2026-10-07T13:06:41Z (main): scope: briefed; retained idea; fam-9ab24c owns Git-based worktree inheritance design, including overrides and remote-less identity; directory ancestry is insufficient for external worktrees; brief: docs/notes/2026-10-07-project-identity-brief.md
+- 2026-10-07T17:32:50Z (design/worktree-identity): finding: user approved Git-based repository anchor spec and implementation plan. Remote > exact checkout path > inherited repository path > exact checkout name > inherited name; current labels retained, remote-less keys shared, own-field guard faults old records, Codex exclusions stay shared. Artifacts: docs/specs/2026-10-07-worktree-pin-inheritance-design.md and docs/plans/2026-10-07-worktree-pin-inheritance.md. Implementation goal fam-169e3f is explicitly paused before execution; no code or host wiring changed.

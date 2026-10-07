@@ -2,7 +2,9 @@
 
 Approved by the user at revision `842c20d`, 2026-10-07. Task: `fam-9ab24c`; source:
 `docs/notes/2026-10-07-project-identity-brief.md`. Engine baseline: `1bc3d3e`.
-The implementation plan still requires review; no product behavior is implemented yet.
+The implementation plan is accepted; execution is paused at the user's request.
+Its paired same-sitting latency protocol governs execution; Task 4 will
+reconcile the Latency acceptance section below. No product behavior is implemented yet.
 
 ## Intent and scope
 

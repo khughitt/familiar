@@ -16,7 +16,8 @@ package dependency.
 
 **Spec:** `docs/specs/2026-10-07-worktree-pin-inheritance-design.md`, approved by
 the user at `842c20d`. Design/plan task: `fam-9ab24c`. Execution goal:
-`fam-169e3f`. This plan still requires user review before implementation.
+`fam-169e3f`. Plan accepted by the user after the final minor corrections; execution is
+paused at the user's request.
 
 **Execution recommendation:** Native inline. Context, record and matcher
 signatures are tightly coupled; one implementer can retain that context. A
@@ -106,7 +107,7 @@ cd .worktrees/worktree-identity
 **Files:**
 
 - Modify: `justfile` (one lasting recipe), `.github/workflows/test.yml`
-  (install just in both Ubuntu jobs).
+  (install just in the Ubuntu test job).
 - Create: `tools/bench-hook.mjs` (controller, worker, paired reports).
 - Create: `test/fixtures/bench-hook-cli.mjs` (CLI wrapper following
   `test/fixtures/tty-familiar.mjs`, with measured-checkout process/Git instrumentation).
@@ -360,8 +361,8 @@ bench-hook $mode $baseline $candidate $fixture $samples="30" $warmups="5" $pairs
     node tools/bench-hook.mjs "$mode" "$baseline" "$candidate" "$fixture" "$samples" "$warmups" "$pairs"
 ```
 
-Install just in BOTH Ubuntu jobs, `test` and `smoke`, before their npm/test
-commands. Keep the real recipe smoke; do not replace it with a direct node
+Install just in the Ubuntu `test` job before its npm/test commands.
+The `smoke` job does not run tests or this recipe and needs no just install. Keep the real recipe smoke; do not replace it with a direct node
 call. The checked upstream v4 action is:
 
 ```yaml
@@ -373,8 +374,8 @@ call. The checked upstream v4 action is:
 The action/version input is documented in
 [setup-just's README](https://github.com/extractions/setup-just#usage).
 The v4 tag SHA was resolved while drafting this revision. Add a regular suite
-check using the existing YAML dependency that both Ubuntu job step arrays
-contain this setup before their npm/test commands. The macOS recipe smoke
+check using the existing YAML dependency that the `test` job step array
+contains this setup before its npm/test commands; do not require it in `smoke`. The macOS recipe smoke
 remains explicitly skipped; the portable benchmark unit tests still run there.
 
 - [ ] **Step 6: GREEN tests, pilot, immediate evidence attachment and commit.**
@@ -979,6 +980,11 @@ section 6.2; retain its original observed counterexample and retired ancestry
 suggestion as history, clearly superseded by the new contract. Update the
 current spec from approved-design to implemented only after the checks actually
 prove it; link measured results from the brief/task.
+Explicitly update the current spec's **Latency acceptance** section to this
+plan's paired same-sitting protocol: hydrated baseline code, measured-checkout
+wrapper, adjacent counterbalanced batches, fresh fixture, paired reports and
+evidence-backed disposition. Remove the old separated-run/baseline-variation
+wording so the implemented spec agrees with its approved plan.
 
 - [ ] **Step 5: Final review, corrective rounds, commit and local integration.**
 
@@ -1010,6 +1016,7 @@ git commit -m "test(identity): verify worktree surfaces and hook latency"
 
 ## Plan review status
 
-This is the written plan for user review. No product code has been changed and
-no benchmark comparison has been measured yet. Step tasks remain blocked on
-`fam-9ab24c` until its plan review is accepted.
+The user accepted this plan after the final two minor corrections. No product
+code has changed and no benchmark comparison has run. Execution is paused at
+the user's request; resume only after their explicit instruction. The design/plan
+task closes independently of the paused implementation goal `fam-169e3f`.
