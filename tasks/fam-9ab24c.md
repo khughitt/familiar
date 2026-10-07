@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: design/worktree-identity
 created: 2026-10-07T13:05:48Z
-updated: 2026-10-07T14:20:32Z
+updated: 2026-10-07T16:05:08Z
 started: 2026-10-07T13:21:16Z
 depends: []
 parent: fam-74f6e9
@@ -16,6 +16,7 @@ tags: []
 source: docs/notes/2026-10-07-project-identity-brief.md
 agent: codex
 spec: docs/specs/2026-10-07-worktree-pin-inheritance-design.md
+plan: docs/plans/2026-10-07-worktree-pin-inheritance.md
 ---
 
 Why: fam-a940d1 shows path pins, project-name pins and remote-less project keys diverging between a checkout and its worktrees. Filesystem ancestry is insufficient when .worktrees is a symlink to external storage.
@@ -48,4 +49,12 @@ On completion, run tasks note on fam-a940d1 with the agreed contract in the same
 - 2026-10-07T14:20:30Z (design/worktree-identity): review: spec round 4 — verdict: accept; findings: none; reviewer: codex
 - 2026-10-07T14:20:31Z (design/worktree-identity): Ruling: fresh scoped review accepts all eight revisions with no findings. Unwritten implementation/tests, actual latency results, independent fixture reproduction and broader upstream-search completeness remain outside this draft review; source/probe evidence and limitations are recorded in the spec. No minor (deferred) findings. User spec approval still gates writing the plan.
 - 2026-10-07T14:20:31Z (design/worktree-identity): parked (waiting on user, review): User reviews the revised docs/specs/2026-10-07-worktree-pin-inheritance-design.md in .worktrees/worktree-identity; after approval, agent resumes here and writes the implementation plan for its separate review. All eight requested revisions addressed and fresh scoped review accepted; no product implementation or latency measurements yet.
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T14:48:37Z (design/worktree-identity): resumed
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-07T14:48:38Z (design/worktree-identity): review: spec round 5 — verdict: accept; findings: none; reviewer: claude-code/opus-5.5
+- 2026-10-07T14:48:38Z (design/worktree-identity): approval: user approved revised spec at 842c20d and authorized writing the plan. Carry into plan: real-Git bare partial-output/exit-128 regression in the normal suite; permanent benchmark recipe as tested deliverable. Native inline execution is the recommendation for tightly coupled context/resolver work; user plan review still gates execution.
+- 2026-10-07T16:05:06Z (design/worktree-identity): review: plan round 1 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-07T16:05:07Z (design/worktree-identity): Ruling: self-reviewed plan against each approved spec section, interfaces, five review-focus cases and current code; no placeholders or uncovered requirements. Four execution steps belong to fam-169e3f and are blocked on this design/plan review. Real-Git bare partial-output regression runs in the regular suite; lasting benchmark/recipe has its own tests, explicit full CLI boundary, isolated worker/process-group cleanup, unchanged shared tt logging and before/after evidence. All 19 JS snippets parse; exported just parameters were verified with spaces/apostrophes. No minor (deferred) findings. Product suite/baseline setup remains deferred until execution.
+- 2026-10-07T16:05:07Z (design/worktree-identity): parked (waiting on user, review): User reviews docs/plans/2026-10-07-worktree-pin-inheritance.md in .worktrees/worktree-identity; after approval, agent resumes here, closes the reviewed design/plan task with its finding note to fam-a940d1, sets execution goal fam-169e3f to direct based on approval, hydrates and runs the deferred baseline, then executes fam-4f90f3 inline unless user chooses otherwise. No code or benchmark run started.
   provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
