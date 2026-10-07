@@ -33,13 +33,13 @@ one catalog remains the input. Its proposed file-location override is separate.
 
 Add one field to the internal Git context and visual bus records:
 
-| Field | Meaning |
-| --- | --- |
-| `remote` | Normalized effective origin for the invoking checkout, or null. |
-| `repoRoot` | Physical root of the current checkout, or null outside a worktree. This remains the write target for a project's Codex config. |
-| `repositoryRoot` | Physical Git repository anchor under the supported layouts below: main checkout root, or common Git directory for a bare-backed linked worktree. Null outside a worktree. |
-| `project` | Current checkout's basename, otherwise cwd's basename. A display label and exact checkout-name pin candidate. |
-| `projectKey` | `remote ?? repositoryRoot ?? cwd`. The sole input to automatic slot hashing. |
+| Field | Change | Meaning |
+| --- | --- | --- |
+| `remote` | Existing | Normalized effective origin for the invoking checkout, or null. |
+| `repoRoot` | Existing | Physical root of the current checkout, or null outside a worktree. This remains the write target for a project's Codex config. |
+| `repositoryRoot` | **New** | Physical Git repository anchor under the supported layouts below: main checkout root, or common Git directory for a bare-backed linked worktree. Null outside a worktree. |
+| `project` | Existing | Current checkout's basename, otherwise cwd's basename. A display label and exact checkout-name pin candidate. |
+| `projectKey` | Existing; derivation changes | `remote ?? repositoryRoot ?? cwd`. The sole input to automatic slot hashing. |
 
 Ordinary main checkouts keep their current key and label. A remote-less main
 checkout and its linked worktrees now share the main checkout's path key.
@@ -52,8 +52,8 @@ The implicit-root guarantee supports a conventional physical `<main>/.git`
 directory. Separated Git metadata requires the actual main checkout to be
 declared through its `core.worktree` configuration before linked-checkout
 inheritance is supported. This is a setup prerequisite, not a configuration
-change Familiar performs. An identifiable separated **main** checkout can
-still use its current root, as discovery step 5 describes.
+change Familiar performs. Every separated **main** checkout uses its current
+root, identified by equal Git and common directories in discovery step 2.
 
 Without that reciprocal declaration, metadata named `.git` outside the main
 checkout is indistinguishable from a conventional repository at its parent.
@@ -63,9 +63,14 @@ share the original main checkout's key/pins. Successful probing alone cannot
 recover the arbitrary original checkout path. Require `core.worktree` rather
 than adding a filesystem scan or registry to discover it.
 
-The inherited project-name candidate is `basename(repositoryRoot)`. This is
-still a deliberate basename alias, not a unique semantic project ID. No new
-label field or user-visible identity schema is required.
+The inherited project-name candidate is `basename(repositoryRoot)`, except
+that the anonymous name `.git` contributes no inherited name tier. Keep every
+other basename verbatim: do not strip a terminal `.git` suffix. Thus a bare
+`familiar.git` anchor matches `project: familiar.git`, not `project: familiar`.
+This avoids a second normalization rule or another persisted field to classify
+bare roots. Exact current-checkout names remain unchanged, including an
+explicit checkout actually named `.git`. These are still deliberate basename
+aliases, not unique semantic project IDs.
 
 Effective worktree-specific origins remain authoritative. If Git's per-worktree
 configuration deliberately changes or removes origin, identity follows that
@@ -84,7 +89,7 @@ Evaluate the following tiers over the complete existing catalog:
 | 2 | Exact canonical current checkout path (`repoRoot`) |
 | 3 | Exact canonical inherited repository path (`repositoryRoot`) |
 | 4 | Exact current checkout name (`project`) |
-| 5 | Inherited repository name (`basename(repositoryRoot)`) |
+| 5 | Inherited repository name (`basename(repositoryRoot)`), omitted for `.git` |
 | 6 | Automatic slot from `projectKey` |
 
 Remote > path > project therefore remains intact. An exact worktree path
@@ -95,6 +100,11 @@ worktree by path; a project-name pin has always been less specific than a path.
 When the current and inherited roots/names are equal, evaluate that candidate
 once. Unrelated clones sharing an origin still share its remote identity;
 unrelated remote-less repositories keep distinct path keys.
+
+A shared matching remote pin already applies across worktrees today and cannot
+be overridden by a worktree path pin. The gain here is for path pins,
+project-name pins and remote-less repositories; a distinct effective origin
+requires a deliberate worktree-specific configuration change.
 
 Within a tier, preserve first matching catalog entry. Entries with multiple
 selectors remain valid and may match in any applicable tier; do not split,
@@ -114,51 +124,64 @@ Keep discovery in `src/bus/identity.js`, outside the bus lock. Use argv-based
 `execFile`; do not shell-interpolate paths or parse `.git` files/private
 worktree metadata. The discovery procedure is:
 
-1. Obtain the current checkout root with `git -C cwd rev-parse --show-toplevel`.
-   As today, git absent or a directory outside a working tree returns null
-   context. A bare directory itself remains outside this checkout-based
-   identity path; its linked working trees are supported.
-2. Read `git -C cwd worktree list --porcelain -z`. Parse NUL-delimited records,
-   with the first record as the main-repository candidate. Require an absolute
-   `worktree` field and well-formed record boundaries; do not `.trim()` paths.
-3. For a first record marked `bare`, use
-   `git -C cwd rev-parse --path-format=absolute --git-common-dir` as the anchor.
-   This also handles a bare Git directory literally named `.git`. Its name
-   is retained verbatim for the inherited project alias, including `.git`.
-4. For a non-bare candidate equal to `repoRoot`, use that root. Otherwise run
-   `git -C candidate rev-parse --show-toplevel` to obtain the actual main
-   anchor under the supported conventional layout or a separated Git
-   directory's explicit `core.worktree` declaration. Success verifies Git's
-   effective working-tree interpretation, not the arbitrary original checkout
-   of an undeclared separated layout. Do not accept a merely existing directory
-   as proof of a checkout.
-5. If that main-checkout probe fails without timing out, compare
-   `git -C cwd rev-parse --absolute-git-dir` with the first candidate. Equality
-   identifies a separated-directory **main** checkout, for which the already
-   obtained `repoRoot` is authoritative. Otherwise fail with a diagnostic that
-   the primary checkout cannot be established; for a separated Git directory,
-   name the need to declare its real main checkout with `core.worktree`.
-   Do not fabricate a root after a failed probe or switch keys to the current
-   linked worktree. The successful but ambiguous undeclared `.git` case has
-   the explicit support limitation above; this error rule cannot detect it.
-6. Read and normalize the effective origin as today. Absence or an unsupported
+1. Obtain three paths in one call:
+   `git -C cwd rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`.
+   Remove only the final output LF, then split on LF. Accept exactly three
+   nonempty absolute paths, in that option order. If the successful output
+   does not split into exactly three lines, repeat each of the three options
+   in its own `rev-parse --path-format=absolute` call, preserving embedded
+   newlines and trailing spaces by removing only its final output LF. This
+   explicit framing check triggers the unusual-path fallback; never guess
+   where one path ends. Three-line output with invalid path values, or invalid
+   per-option results, is a metadata error. As today, Git absent or a directory
+   outside a working tree returns null context. A bare directory itself is
+   outside this checkout-based identity path; its linked trees are supported.
+2. If `gitDir === commonDir`, this is the main checkout, including a separated
+   main checkout: `repositoryRoot = repoRoot`. No main-root verification or
+   sibling lookup is needed. Git and common directories are discovery locals,
+   not additional persisted visual fields.
+3. Otherwise this is a linked worktree. Its candidate is the parent of
+   `commonDir` when that directory's final component is exactly `.git`, and
+   `commonDir` otherwise. Run one probe:
+   `git -C candidate rev-parse --is-bare-repository --show-toplevel`.
+   A successful result must start with `false` and an LF, followed by one
+   nonempty absolute root value and its terminating LF; retain any embedded
+   newlines in that root. Use that root as `repositoryRoot`. For a bare anchor,
+   Git prints `true` and an LF before `--show-toplevel` fails with exit 128
+   because no checkout exists. Recognize exactly that result (stdout `true\n`,
+   exit 128, no spawn/timeout/signal failure) and use `commonDir` as
+   `repositoryRoot`. This combines bare detection and verification without
+   another process, including a bare Git directory literally named `.git`.
+4. Reject other failed or malformed probe results with a diagnostic that the
+   primary checkout cannot be established; for separated metadata, name the
+   need to declare its real main checkout with `core.worktree`. Do not switch
+   to the current linked worktree's path. Successful probing establishes Git's
+   working-tree interpretation under the supported layouts, not an arbitrary
+   original checkout in the undeclared separated `.git` case described above.
+5. Read and normalize the effective origin as today. Absence or an unsupported
    remote spelling means null; a timed-out Git command always fails discovery.
 
 All commands share a two-second discovery deadline, with each spawn receiving
 the remaining budget and `SIGKILL`. Exhausting the budget aborts, including a
-timeout in a verification probe. This prevents the extra probes from multiplying
-today's per-command worst-case wait. Ordinary primary checkouts need three
-spawns; ordinary linked worktrees need four; the separated-main case needs at
-most five. A bare-backed linked worktree needs four. No shell pipeline, disk
-cache, background daemon or persistent checkout inventory is added.
+timeout in a verification probe. Ordinary and separated main checkouts need
+two spawns, the same as today; ordinary and bare-backed linked worktrees need
+three. Newline-ambiguous batched output adds three per-option calls, for totals
+of five/main and six/linked, all within that same deadline. No command lists
+sibling worktrees or checks their locations: a prunable or inaccessible sibling
+must not expand this discovery's filesystem reach. No shell pipeline, disk cache,
+background daemon or persistent checkout inventory is added.
 
-For single-path Git output, remove only its terminating line ending, retaining
-embedded newlines and trailing spaces. For porcelain output, retain all bytes
-until NUL parsing. Malformed successful metadata and post-discovery failures
+For single-path Git output, remove only its terminating LF, retaining
+embedded newlines and trailing spaces. Malformed successful metadata and post-discovery failures
 propagate through the existing CLI/cosmetic boundary. The hook reports one
 diagnostic and does not admit an incoming record with guessed identity.
 `whoami` and the explicit installer retain their normal nonzero error behavior.
 Initial non-worktree/absent-Git behavior remains the existing null context.
+The identifiable undeclared separated-linked layout resolves by checkout today;
+this design deliberately changes it to a discovery error until `core.worktree`
+declares the primary. The diagnostic repeats on every hook that performs
+identity discovery; removal hooks still skip discovery. Do not add a diagnostic
+cache or select an automatic pet by pretending the failed probe was absence.
 
 ## Consumer changes and state transition
 
@@ -175,16 +198,25 @@ in the investigation, not only the CLI path:
   The actual target remains `repoRoot`, never `repositoryRoot`. An explicit
   request from a linked worktree writes only that worktree's config; it does
   not overwrite the main checkout's config or enumerate sibling worktrees.
+  The existing exclusion write is repository-wide: `--git-path info/exclude`
+  resolves to the shared Git exclusion file, where one idempotent
+  `.codex/config.toml` line applies to all worktrees. Preserve that behavior.
 - `src/install/codex-converge.js` continues to use the hook's resolved member
   and actual checkout target, preserving installed-pet and unmanaged/tracked
   config guards. All surfaces consume the resulting identity/intent as today.
 
 The new internal context requires `repositoryRoot` explicitly, including null
-for a non-worktree. Do not add an old-record resolver or infer it from an old
-`repoRoot`. Pre-upgrade runtime records lack the new context: the existing
-per-record resolution boundary reports/evicts them when a transaction resolves
-them, and each session's next hook re-admits it with the new context. A statusline
-before that hook may report an unavailable identity; it must not guess one.
+for a non-worktree. Add a **new own-property check** inside each record's `try`
+in `resolveIdentities()`: `Object.hasOwn(record, 'repositoryRoot')` must be
+true before calling `resolveIdentity()`. A missing property throws a diagnostic
+such as `session record lacks repositoryRoot; wait for its next hook` and
+becomes that record's fault; an explicit null passes this presence check.
+The current code has no such trigger and would quietly hash the stored old
+key. Do not infer the missing anchor from old `repoRoot` or add an old-record
+resolver. The existing fault boundary handles the **newly triggered** fault:
+transactions report/evict pre-upgrade records, and each session's next hook
+re-admits it with the new context. A statusline before that hook may report an
+unavailable identity; it must not guess one.
 An incoming discovery failure writes no agent/intent replacement. Document
 this short transition and verify recovery without restarting unrelated sessions.
 No authored pin changes or permanent compatibility layer are involved.
@@ -197,10 +229,27 @@ semantic identity contract as part of this work.
 
 ## Evidence and upstream limitation
 
-Temporary Git fixtures on Git 2.56.0 verified main, internal, external and
+Initial temporary Git fixtures on Git 2.56.0 verified main, internal, external and
 symlinked worktrees; an unrelated nested repo; bare-backed worktrees; and NUL
-records with newline/trailing-space paths. They confirmed the intended
-repository relationship, not the proposed pin resolver (which is unwritten).
+records with newline/trailing-space paths. Those listing probes are historical
+investigation evidence, not the chosen hook procedure. The pin resolver is
+still unwritten.
+
+Following spec review, new fixtures verified the combined three-path query,
+equal Git/common directories for main versus distinct directories for linked
+checkouts, newline framing and exact per-option recovery, and shared
+`info/exclude` targets. The combined bare/root probe returned `false` plus a
+root for ordinary/declared separated primaries, and exactly `true\n` with exit
+128 for bare anchors named `bare.git` and `.git`. These checks support the
+revised command contract; they are not product-suite or latency measurements.
+An end-to-end temporary discovery pilot then confirmed two spawns for main
+checkouts, three for ordinary/declared-separated/bare-backed linked trees,
+and five/main or six/linked when newline framing triggers separate queries.
+Moving a sibling without repairing its registration left main/linked discovery
+unchanged. These are native path, framing and spawn checks; shared-deadline
+enforcement and the new record guard still require implementation tests.
+[Git's rev-parse documentation](https://git-scm.com/docs/git-rev-parse)
+describes the absolute path options and bare/worktree queries.
 
 [Git's worktree manual](https://git-scm.com/docs/git-worktree) specifies main
 first and stable NUL-delimited porcelain. The fixture also showed that a
@@ -227,6 +276,35 @@ The prepared upstream report is linked from the brief and requires publishing
 approval separately. Revisit the verification only if upstream provides an
 authoritative main-checkout path; do not assume a release will do so.
 
+## Latency acceptance
+
+Every tool call pays for discovery. The implementation plan must measure
+representative hook wall time on a conventional main checkout and a linked
+worktree before and after the change, on the same host with the same temporary
+repositories, theme/config, payload and terminal-disabled setup. Use real Git,
+not mocked exec timings. Keep bus state and all generated files in the fixture;
+never repoint installed launchers or use live user state.
+
+Add one small justfile benchmark recipe around the existing `tools/tt` wrapper
+and reuse the hook fixture machinery. Record distinct main/linked and
+before/after targets, revisions and raw results. Capture discovery duration
+and Git spawn count as well as total hook wall time, so the plan can explain
+whether changes come from Git, process startup or other hook work. After five
+warm-ups, collect at least 30 successful hook samples per context and phase,
+report median and p95 in milliseconds plus absolute/percentage deltas, and
+repeat a baseline batch to characterize run-to-run variation. The benchmark
+must state precisely which hook boundary it measures; a pure `gitContext()`
+timing alone does not meet the hook-wall-time requirement.
+
+Assert two discovery spawns for normal main checkouts and three for linked
+checkouts (ordinary and bare-backed). No sibling enumeration is allowed.
+Investigate a main-checkout slowdown beyond baseline variation, or a linked
+slowdown unexplained by one extra verification spawn and baseline variation,
+before declaring latency acceptance. Report the evidence and disposition on
+the task; spawn counts alone are not a wall-time verdict. Do not add a cache,
+framework or background service to pass the check. Measurements run during
+implementation, after the reviewed plan has set up the worktree.
+
 ## Acceptance checks for the implementation plan
 
 Use the existing test files and fixture helpers. The plan must prove:
@@ -244,15 +322,29 @@ Use the existing test files and fixture helpers. The plan must prove:
   for the identifiable undeclared separated-linked layout. A separate fixture
   demonstrates the undetectable undeclared `store/.git` limitation and recovery
   after declaring `core.worktree`; it must not assert universal detection.
+- The inherited name tier is omitted for `.git`, all other names retain their
+  suffix/case, and exact checkout-name pins remain unchanged. A shared matching
+  remote pin still wins over an exact worktree path pin.
 - Metadata parse failures, paths with spaces/newlines/trailing spaces, injected
   timeouts at each spawn, and remaining-budget propagation never yield a
   silently changed identity within the supported layouts or exceed the
   two-second discovery budget.
+- Combined-output ambiguity triggers the three per-option queries; partial
+  bare/root output is accepted only in its specified exit-128 case. A timeout
+  or killed command with partial `true\n` output still fails. Normal and bare
+  linked discovery do not enumerate siblings; a missing/prunable sibling or
+  simulated inaccessible sibling cannot introduce an extra probe or failure.
+- Hook latency, discovery timing and spawn counts meet the measurement and
+  disposition requirements above; capture both before and after results.
 - Transaction round trips retain the anchor; old runtime records fault and
-  re-admit on their next hook; one faulty record does not break healthy ones.
+  re-admit on their next hook. Missing or inherited-only `repositoryRoot`
+  properties fault because of the new presence guard; an own null property is
+  allowed. One faulty record does not break healthy ones.
 - CLI, bus/intent and standalone/bulk Codex planners agree on member and slot.
-  Linked-worktree config writes target that worktree only; convergence still
-  receives the already resolved member and preserves its existing refusal gates.
+  Linked-worktree pet config writes target that worktree only, while its
+  exclusion write updates shared `info/exclude` with the managed line exactly
+  once. Convergence still receives the already resolved member and preserves
+  its existing refusal gates.
 
 Likely files: `test/{identity,pins,resolve,transaction,bin-familiar,
 codex,install-codex-single,codex-converge}.test.js`. Use

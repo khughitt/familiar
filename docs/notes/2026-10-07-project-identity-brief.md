@@ -228,6 +228,14 @@ per-worktree Codex targets and runtime-record transition. It awaits user
 review; this is not an agreed or implemented contract. The written plan
 will follow that review.
 
+After the user's revise verdict, the spec now uses a combined `rev-parse`
+query rather than listing sibling worktrees: two discovery spawns for main
+checkouts and three for linked checkouts, with explicit newline-path recovery.
+It requires a new own-property guard for old records, names the shared Git
+exclusion write, and adds before/after hook latency measurements. Bare `.git`
+anchors omit the inherited name alias; other suffixes remain verbatim. The
+revised written spec still needs user review before planning.
+
 Git fixtures uncovered a separate-directory main-path limitation. Upstream
 searches and source checks found no matching correction in the searched
 surfaces; `docs/notes/2026-10-07-git-main-worktree-report.md` is a prepared,
