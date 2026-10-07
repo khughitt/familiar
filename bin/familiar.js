@@ -31,6 +31,7 @@ import { terminalTarget } from '../src/render/term/target.js';
 import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js';
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
+import { sweepTemps } from '../src/bus/temp-sweep.js';
 import { composeForIntent, textLines } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
@@ -940,6 +941,9 @@ async function main({ command, args: rest, color, mode }) {
       ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
       startTimeOf: defaultProcessOps.startTimeOf,
     });
+    await sweepTemps({
+      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
+    });
 
     // CODEX ONLY, SessionStart ONLY. Codex draws its own pet from a file rather
     // than from the bus, so the file has to be kept true. Everything needed is
@@ -1194,12 +1198,16 @@ async function main({ command, args: rest, color, mode }) {
       ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
       startTimeOf: defaultProcessOps.startTimeOf,
     });
+    const { removed: swept } = await sweepTemps({
+      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
+    });
     if (mode === 'json') {
-      process.stdout.write(`${JSON.stringify({ reaped, pruned: removed.length })}\n`);
+      process.stdout.write(`${JSON.stringify({ reaped, pruned: removed.length, swept: swept.length })}\n`);
       return;
     }
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     if (removed.length > 0) process.stdout.write(`pruned ${removed.length} transmission ledger(s)\n`);
+    if (swept.length > 0) process.stdout.write(`swept ${swept.length} orphaned temp file(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Its output is
