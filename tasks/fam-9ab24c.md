@@ -1,13 +1,15 @@
 ---
 id: fam-9ab24c
 title: Design worktree pin inheritance from the brief
-status: todo
+status: doing
 priority: 2
 size: m
 complexity: high
 process: planned
+owner: main
 created: 2026-10-07T13:05:48Z
-updated: 2026-10-07T13:05:48Z
+updated: 2026-10-07T13:21:16Z
+started: 2026-10-07T13:21:16Z
 depends: []
 parent: fam-74f6e9
 tags: []
@@ -21,3 +23,8 @@ Current lean: inherit through Git repository/worktree metadata; preserve exact-w
 Where to look: src/bus/{identity,pins,resolve,transaction}.js, bin/familiar.js identityResolver, src/install/codex.js; test/{identity,pins,resolve,transaction,install-codex-single}.test.js. Coordinate the context boundary with fam-6e8321; do not duplicate relay migration.
 Done: Design and plan reviewed, with concrete checks for in-tree and external/symlinked worktrees, unrelated nested repos, explicit overrides, no remote, every pin form and shared surface resolution; retain bounded Git subprocesses. No live host wiring.
 On completion, run tasks note on fam-a940d1 with the agreed contract in the same commit as the design result, and update the brief.
+
+## Notes
+
+- 2026-10-07T13:21:16Z (main): started
+  provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
