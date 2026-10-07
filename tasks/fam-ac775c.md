@@ -1,17 +1,19 @@
 ---
 id: fam-ac775c
 title: "Codex 0.160 hooks run under the app-server daemon, so no Codex session reaches the bus"
-status: doing
+status: done
 priority: 1
 size: s
 complexity: mid
 process: direct
 owner: main
 created: 2026-10-07T10:25:46Z
-updated: 2026-10-07T11:55:39Z
+updated: 2026-10-07T11:57:06Z
 started: 2026-10-07T11:55:31Z
+completed: 2026-10-07T11:57:06Z
 depends: []
 tags: [codex, bug, identity]
+model: claude-opus-5-5
 agent: claude-code/claude-opus-5-5
 ---
 
@@ -32,3 +34,7 @@ Open: map a hook's session_id/cwd to the owning TUI pid (and its terminal) witho
 - 2026-10-07T11:55:31Z (main): started
   provenance: {"harness_session":"claude-code:606ce4e5-bf4b-4762-8cf0-a7aa91f09c3a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-07T11:55:38Z (main): scope: launching with --no-daemon is the user's dotfiles fix; this task makes the codex adapter recognise a daemon-hosted hook and report it naming --no-daemon, instead of the generic 'could not find the codex process' line. Mapping a daemon hook to its TUI (option 1) stays out of scope.
+- 2026-10-07T11:57:06Z (fix/codex-daemon-hook): done
+  provenance: {"harness_session":"claude-code:606ce4e5-bf4b-4762-8cf0-a7aa91f09c3a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-07T11:57:06Z (fix/codex-daemon-hook): codex adapter now reports a daemon-hosted hook (Codex 0.160+) with a --no-daemon fix instead of the generic not-found error; launching with --no-daemon is the user-side fix
+  provenance: {"harness_session":"claude-code:606ce4e5-bf4b-4762-8cf0-a7aa91f09c3a","harness_session_source":"CLAUDE_CODE_SESSION_ID"}

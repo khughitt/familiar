@@ -94,6 +94,19 @@ export function resolveAgentPid({
 } = {}) {
   const chain = ancestors(startPid);
   const agent = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM && p.tty !== null);
+  // CODEX 0.160+ DAEMON. Measured 2026-10-07: the TUI hands turns to a shared `codex app-server`
+  // daemon and hooks run under it, so the nearest codex owns no terminal and the TUI is not an
+  // ancestor at all. Nothing in the hook names its TUI -- even the environment is the daemon's,
+  // inherited from whichever terminal started it -- so the only fix is the user's launch flag.
+  const headless = chain.find((p, i) => i > 0 && p.comm === AGENT_COMM);
+  if (!agent && headless) {
+    throw new Error(
+      `the codex process ${headless.pid} owns no terminal: Codex 0.160+ runs hooks under its ` +
+      'shared app-server daemon, where no session can be tied to its terminal -- launch it ' +
+      'with `codex --no-daemon`. Chain: ' +
+      chain.map((p) => `${p.pid}(${p.comm})`).join(' -> ')
+    );
+  }
   if (!agent) {
     throw new Error(
       `could not find the codex process among the ancestors of ${startPid}: ` +
