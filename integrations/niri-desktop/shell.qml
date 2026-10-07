@@ -18,6 +18,11 @@ ShellRoot {
     property bool overlayMapped: false
     property bool playbackStarted: false
     property string phase: ""
+    // The first motion of a moment, held until the freshly mapped overlay has
+    // presented a frame. Mapping the layer surface and uploading the sprite
+    // texture land in that frame; starting the clock before it spends the
+    // opening of a 250 ms entry on frames that never reach the screen.
+    property var pendingLaunch: null
 
     function applyIntent(text) {
         const parsed = Logic.parseIntent(text);
@@ -113,6 +118,7 @@ ShellRoot {
     }
 
     function stopMotion() {
+        pendingLaunch = null;
         yAnimation.stop();
         opacityAnimation.stop();
         hold.stop();
@@ -192,14 +198,28 @@ ShellRoot {
         familiarImage.opacity = opacity;
     }
 
+    function launchAfterFrame(launch) {
+        phase = "awaiting-frame";
+        pendingLaunch = launch;
+    }
+
+    function frameSwapped() {
+        if (pendingLaunch === null) return;
+        const launch = pendingLaunch;
+        pendingLaunch = null;
+        launch();
+    }
+
     function startFull() {
         if (activeCandidate.state === "done") {
             configureSmall(1);
-            animateY(peekY(), 250, Easing.OutCubic, "done-entered");
+            const peek = peekY();
+            launchAfterFrame(function() { animateY(peek, 250, Easing.OutCubic, "done-entered"); });
         } else {
             configureLarge(1);
             familiarImage.rotation = 8;
-            animateY(overlay.height, 1100, Easing.InQuad, "error-fallen");
+            const floor = overlay.height;
+            launchAfterFrame(function() { animateY(floor, 1100, Easing.InQuad, "error-fallen"); });
         }
     }
 
@@ -207,11 +227,11 @@ ShellRoot {
         if (activeCandidate.state === "done") {
             configureSmall(0);
             familiarImage.y = peekY();
-            animateOpacity(1, 200, "done-faded-in");
+            launchAfterFrame(function() { animateOpacity(1, 200, "done-faded-in"); });
         } else {
             configureLarge(0);
             familiarImage.y = (overlay.height - familiarImage.height) / 2;
-            animateOpacity(1, 200, "error-faded-in");
+            launchAfterFrame(function() { animateOpacity(1, 200, "error-faded-in"); });
         }
     }
 
@@ -305,6 +325,9 @@ ShellRoot {
                 asynchronous: true
                 cache: false
                 smooth: true
+                // The error fall rotates the sprite, and error art runs to its
+                // image bounds, so the quad's own edge shows.
+                antialiasing: true
                 fillMode: Image.PreserveAspectFit
                 width: implicitHeight > 0 ? height * implicitWidth / implicitHeight : 0
                 onStatusChanged: root.startWhenReady()
@@ -313,6 +336,12 @@ ShellRoot {
 
         onWidthChanged: Qt.callLater(root.startWhenReady)
         onHeightChanged: Qt.callLater(root.startWhenReady)
+    }
+
+    Connections {
+        target: familiarImage.Window.window
+        enabled: root.pendingLaunch !== null
+        function onFrameSwapped() { root.frameSwapped(); }
     }
 
     Timer {
