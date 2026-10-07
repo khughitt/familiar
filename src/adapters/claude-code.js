@@ -75,11 +75,14 @@ export function resolveAgentPid({
   return agent.pid;
 }
 
-// claude-code's events are already edges: every one of them names a state outright, and none of
-// them needs to know what came before. The identity reducer is not a placeholder for something
-// smarter -- it is the honest answer, and it is written here rather than defaulted in the core
-// because a default in the core is how the core quietly acquires an opinion about agents.
-export const reduceState = (level) => level;
+// claude-code's events are edges -- every one names a state outright and none needs what came
+// before -- with ONE exception. idle_prompt fires 60s after a turn ends whether or not that turn
+// left background work running (measured on 2.1.292: a background shell still running gets the
+// prompt; a background subagent suppresses it upstream). An agent waiting on its own command is
+// not waiting on the user, so that prompt resolves to `idle` -- where `done` would have decayed
+// to anyway -- rather than needs-input.
+export const reduceState = (level, _prev, { backgroundTasks }) =>
+  (level === 'needs-input' && backgroundTasks > 0 ? 'idle' : level);
 
 // claude-code's status line runs `familiar statusline`, which prints the placeholder cells the
 // transmitted image lands in. So familiar transmits.

@@ -25,12 +25,33 @@ test('an unrecognized hook event is an error, never a silent no-op', () => {
 
 test('claude-code reduces a level to itself, and prints the cells its status line draws', () => {
   assert.equal(printsPlaceholderCells, true);
-  for (const level of STATES) assert.equal(reduceState(level, null), level);
+  for (const backgroundTasks of [undefined, 0]) {
+    for (const level of STATES) assert.equal(reduceState(level, null, { backgroundTasks }), level);
+  }
+});
+
+test('needs-input while background work runs reduces to idle; nothing else changes', () => {
+  assert.equal(reduceState('needs-input', 'done', { backgroundTasks: 2 }), 'idle');
+  for (const level of STATES.filter((s) => s !== 'needs-input')) {
+    assert.equal(reduceState(level, 'done', { backgroundTasks: 2 }), level);
+  }
 });
 
 test('parsePayload takes the session id and cwd the hook provides', () => {
   const payload = JSON.stringify({ session_id: 'abc', cwd: '/home/k/d/api', tool_name: 'Bash' });
-  assert.deepEqual(parsePayload(payload), { sessionId: 'abc', cwd: '/home/k/d/api' });
+  assert.deepEqual(parsePayload(payload), {
+    sessionId: 'abc', cwd: '/home/k/d/api', backgroundTasks: undefined,
+  });
+});
+
+test('parsePayload counts only the running background tasks it is given', () => {
+  const payload = JSON.stringify({
+    session_id: 'abc',
+    cwd: '/home/k/d/api',
+    background_tasks: [{ status: 'running' }, { status: 'completed' }, { status: 'running' }],
+  });
+  assert.equal(parsePayload(payload).backgroundTasks, 2);
+  assert.equal(parsePayload(JSON.stringify({ session_id: 'abc', background_tasks: [] })).backgroundTasks, 0);
 });
 
 test('a payload without a session id is unusable and says so', () => {

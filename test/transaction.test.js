@@ -590,3 +590,51 @@ test('a path: pin still matches after a record with a remote makes the full roun
   assert.equal(intent.s1.current.identity.slot, 3);
   assert.equal(intent.s1.current.identity.member, 'dog-in-disguise');
 });
+
+// Measured 2026-10-07 on Claude Code 2.1.292: a turn that ends with a background shell still
+// running fires Stop with `background_tasks: [{ status: 'running', ... }]`, and idle_prompt
+// follows 60s later -- while the agent is waiting on its own command, not on the user.
+const bgStdin = (tasks) => JSON.stringify({
+  session_id: 's1',
+  cwd: '/home/k/d/api',
+  background_tasks: tasks,
+});
+const RUNNING = { id: 'b1', type: 'shell', status: 'running' };
+
+test('idle_prompt while a background task runs is idle, not needs-input', async () => {
+  const { paths, deps } = harness();
+  await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps });
+  await applyHookEvent({ event: 'Notification:idle_prompt', stdin, deps });
+
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.s1.state, 'idle');
+  assert.equal(agents.s1.backgroundTasks, 1);
+});
+
+test('idle_prompt after the background work has finished is needs-input again', async () => {
+  const { paths, deps } = harness();
+  await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps });
+  await applyHookEvent({ event: 'Stop', stdin: bgStdin([{ ...RUNNING, status: 'completed' }]), deps });
+  await applyHookEvent({ event: 'Notification:idle_prompt', stdin, deps });
+
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.s1.state, 'needs-input');
+  assert.equal(agents.s1.backgroundTasks, 0);
+});
+
+test('an event without background_tasks carries the last known count forward', async () => {
+  const { paths, deps } = harness();
+  await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps });
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.s1.backgroundTasks, 1);
+});
+
+test('a background_tasks field that is not a list is a named failure', async () => {
+  const { deps } = harness();
+  await assert.rejects(
+    applyHookEvent({ event: 'Stop', stdin: bgStdin({ running: 1 }), deps }),
+    /background_tasks must be a list/,
+  );
+});
