@@ -8,12 +8,14 @@ import { MOTION_POLICIES } from '../animation/program.js';
 // projectKey -> slot -> hue -> member -> sprite.
 // The hue is the stable axis; the theme is data layered on top.
 //
-// `remote` and `repoRoot` are carried separately rather than recovered from
-// `projectKey`: the key collapses to whichever is available, so a `path:` pin
-// could never match a repo that also has a remote. Silently ignoring a pin the
-// user wrote is exactly the failure this system exists to avoid.
-export function resolveIdentity({ projectKey, project, remote, repoRoot, catalog, pack }) {
-  const pin = matchPin(catalog, { remote, repoRoot, project });
+// `remote`, `repoRoot` and `repositoryRoot` are carried separately rather than
+// recovered from `projectKey`: the key collapses to whichever is available, so a
+// `path:` pin could never match a repo that also has a remote. Silently ignoring a
+// pin the user wrote is exactly the failure this system exists to avoid.
+export function resolveIdentity({
+  projectKey, project, remote, repoRoot, repositoryRoot, catalog, pack,
+}) {
+  const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
 
   const slot = pin ? pin.slot : autoSlot(projectKey);
 
@@ -115,11 +117,18 @@ export function resolveIdentities({ agents, catalog, pack }) {
   const faults = new Map();
   for (const [sessionId, record] of Object.entries(agents)) {
     try {
+      // A record written before the repository anchor existed carries a key derived the old
+      // way. It is not guessed from repoRoot: it faults, and its session's next hook writes
+      // it again with the anchor. An own null (outside any repository) is an answer.
+      if (!Object.hasOwn(record, 'repositoryRoot')) {
+        throw new Error('session record lacks repositoryRoot; wait for its next hook');
+      }
       identities.set(sessionId, resolveIdentity({
         projectKey: record.projectKey,
         project: record.project,
         remote: record.remote,
         repoRoot: record.repoRoot,
+        repositoryRoot: record.repositoryRoot,
         catalog,
         pack,
       }));

@@ -64,6 +64,7 @@ const record = (over = {}) => ({
   projectKey: 'github.com/me/api',
   project: 'api',
   cwd: '/home/k/d/api',
+  repositoryRoot: '/home/k/d/api',
   pid: 4242,
   state: 'working',
   updatedAt: 1_000_000,
@@ -78,6 +79,7 @@ const ctx = {
   project: 'api',
   remote: 'github.com/me/api',
   repoRoot: '/home/k/d/api',
+  repositoryRoot: '/home/k/d/api',
 };
 
 test('an unpinned project is hashed to a slot and gets that slot default member', () => {
@@ -349,6 +351,24 @@ test('an unresolvable record is a FAULT ON THAT RECORD, not on the pass', () => 
   assert.equal(identities.get('s1').member, 'dog-in-disguise');
   assert.match(faults.get('s2'), /theme "cats" has no member "cheshire"/);
   assert.equal(faults.size, 1);
+});
+
+// A record written before repositoryRoot existed would otherwise hash its stored old key
+// quietly. It faults instead, and the session's next hook re-admits it; an own null (outside
+// any repository) is a real answer, and an inherited property is not an own one.
+test('an old record faults while own null and healthy anchors resolve', () => {
+  const old = record();
+  delete old.repositoryRoot;
+  const inherited = Object.assign(Object.create({ repositoryRoot: '/fixture/api' }), old);
+  const agents = {
+    old, inherited,
+    outside: record({ sessionId: 'outside', repositoryRoot: null }),
+    current: record({ sessionId: 'current', repositoryRoot: '/fixture/api' }),
+  };
+  const r = resolveIdentities({ agents, catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([...r.faults.keys()], ['old', 'inherited']);
+  assert.match(r.faults.get('old'), /lacks repositoryRoot/);
+  assert.deepEqual([...r.identities.keys()], ['outside', 'current']);
 });
 
 test('resolveAll keys intent records by session id', () => {

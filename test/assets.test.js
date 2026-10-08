@@ -269,6 +269,7 @@ function admissionRecord(sessionId, project) {
     project,
     remote: null,
     repoRoot: `/repos/${project}`,
+    repositoryRoot: `/repos/${project}`,
     cwd: `/repos/${project}`,
     pid: 100,
     state: 'working',
