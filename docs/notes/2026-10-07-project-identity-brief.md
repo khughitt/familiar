@@ -256,3 +256,10 @@ Task 4 must reconcile the spec's Latency acceptance section with the paired
 same-sitting method. Both artifacts are reviewed; implementation is paused at
 the user's request. No dependency hydration, product edits or benchmark runs
 have started. Resume `fam-169e3f`/`fam-4f90f3` only on explicit instruction.
+
+Implemented 2026-10-08 (`fam-169e3f`): repository anchors, inherited pin tiers,
+per-worktree Codex targets and the old-record guard, with `just bench-hook` as a
+lasting paired benchmark. The same-sitting comparison against the pre-change code
+showed no consistent main-checkout slowdown (paired median +0.7 ms) and linked
+overhead matching the one verification spawn (+2.4 ms median, probe 3.4 ms); the
+raw report and disposition are attached to `fam-f3d48e`.

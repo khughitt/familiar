@@ -64,6 +64,7 @@ const record = (over = {}) => ({
   projectKey: 'github.com/me/api',
   project: 'api',
   cwd: '/home/k/d/api',
+  repositoryRoot: '/home/k/d/api',
   pid: 4242,
   state: 'working',
   updatedAt: 1_000_000,
@@ -78,6 +79,7 @@ const ctx = {
   project: 'api',
   remote: 'github.com/me/api',
   repoRoot: '/home/k/d/api',
+  repositoryRoot: '/home/k/d/api',
 };
 
 test('an unpinned project is hashed to a slot and gets that slot default member', () => {
@@ -349,6 +351,59 @@ test('an unresolvable record is a FAULT ON THAT RECORD, not on the pass', () => 
   assert.equal(identities.get('s1').member, 'dog-in-disguise');
   assert.match(faults.get('s2'), /theme "cats" has no member "cheshire"/);
   assert.equal(faults.size, 1);
+});
+
+// A record written before repositoryRoot existed would otherwise hash its stored old key
+// quietly. It faults instead, and the session's next hook re-admits it; an own null (outside
+// any repository) is a real answer, and an inherited property is not an own one.
+test('an old record faults while own null and healthy anchors resolve', () => {
+  const old = record();
+  delete old.repositoryRoot;
+  const inherited = Object.assign(Object.create({ repositoryRoot: '/fixture/api' }), old);
+  const agents = {
+    old, inherited,
+    outside: record({ sessionId: 'outside', repositoryRoot: null }),
+    current: record({ sessionId: 'current', repositoryRoot: '/fixture/api' }),
+  };
+  const r = resolveIdentities({ agents, catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([...r.faults.keys()], ['old', 'inherited']);
+  assert.match(r.faults.get('old'), /lacks repositoryRoot/);
+  assert.deepEqual([...r.identities.keys()], ['outside', 'current']);
+});
+
+// A worktree resolves through its repository's pin: the winning pin's slot AND its own
+// theme-scoped member map, validated exactly as any other pin's.
+const WORKTREE = {
+  projectKey: '/fixture/api', project: 'fix-api', remote: null,
+  repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
+};
+
+test('a worktree inherits its repository path pin with the pin\'s member', () => {
+  const catalog = { identities: [{ path: '/fixture/api', slot: 6,
+    members: { cats: 'maine-coon', inactive: 'not-in-this-pack' } }] };
+  const result = resolveIdentity({ ...WORKTREE, catalog, pack: PACK });
+  assert.equal(result.slot, 6);
+  assert.equal(result.member, 'maine-coon');
+  assert.equal(result.project, 'fix-api');
+});
+
+test('an inherited pin is validated like any pin', () => {
+  const unknown = { identities: [{ path: '/fixture/api', slot: 6, members: { cats: 'cheshire' } }] };
+  assert.throws(() => resolveIdentity({ ...WORKTREE, catalog: unknown, pack: PACK }),
+    /theme "cats" has no member "cheshire"/);
+  const contradiction = { identities: [{ path: '/fixture/api', slot: 3, members: { cats: 'maine-coon' } }] };
+  assert.throws(() => resolveIdentity({ ...WORKTREE, catalog: contradiction, pack: PACK }),
+    /but the pin declares slot 3/);
+});
+
+test('a worktree path pin brings its own member map, never the inherited one', () => {
+  const catalog = { identities: [
+    { path: '/fixture/api', slot: 6, members: { cats: 'maine-coon' } },
+    { path: '/fixture/fix-api', slot: 6 },
+  ] };
+  const result = resolveIdentity({ ...WORKTREE, catalog, pack: PACK });
+  assert.equal(result.slot, 6);
+  assert.equal(result.member, 'schrodingers-cat', 'slot 6 default, not the inherited maine-coon');
 });
 
 test('resolveAll keys intent records by session id', () => {

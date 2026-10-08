@@ -563,6 +563,17 @@ Consequences to decide, in order:
    *different* member than their parent — correctly, per the resolver, but
    surprisingly.
 
+**Addendum (2026-10-08): superseded.** The observations above are kept as the
+history that prompted the change; they no longer describe the code. Worktree
+inheritance was designed in `docs/specs/2026-10-07-worktree-pin-inheritance-design.md`
+(`fam-9ab24c`) and implemented under `fam-169e3f`. It does not use ancestry, as
+item 2 suggested: a worktree's repository is found through Git's own worktree
+relationship, so externally stored and symlinked worktrees inherit and nested
+unrelated repositories do not. Exact worktree pins precede inherited ones within
+the path and name tiers, remote-less worktrees share their repository's key, and
+item 3 is settled: convergence writes each worktree's own config with the member
+its repository's pins choose.
+
 ## 7. Field repairs applied 2026-09-05
 
 Independent of the design; done to stop the bleeding.

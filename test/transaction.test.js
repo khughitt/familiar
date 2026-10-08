@@ -55,7 +55,9 @@ function harness(over = {}) {
         spriteFor: (m, s) => ({ terminal: `/c/${m}/${s}.png`, rows: 12 }),
         animationFor: () => ({ kind: 'static' }),
       }),
-      gitContext: async () => ({ remote: 'github.com/me/api', repoRoot: '/home/k/d/api' }),
+      gitContext: async () => ({
+        remote: 'github.com/me/api', repoRoot: '/home/k/d/api', repositoryRoot: '/home/k/d/api',
+      }),
       processOps: {
         ancestors: () => [
           { pid: process.pid, ppid: 4242, comm: 'node', tty: null, starttime: 1 },
@@ -85,6 +87,7 @@ test('writes the bus AND the resolved intent in one transaction', async () => {
     project: 'api',
     remote: 'github.com/me/api',
     repoRoot: '/home/k/d/api',
+    repositoryRoot: '/home/k/d/api',
     cwd: '/home/k/d/api',
     pid: 4242,
     starttime: 987_654,
@@ -110,6 +113,7 @@ test('one Darwin process table serves an N-record transaction', async () => {
     project: `project-${sessionId}`,
     remote: null,
     repoRoot: `/projects/${sessionId}`,
+    repositoryRoot: `/projects/${sessionId}`,
     cwd: `/projects/${sessionId}`,
     pid,
     starttime: started,
@@ -298,7 +302,12 @@ test('a record that cannot be resolved is never admitted: both files are untouch
     applyHookEvent({
       event: 'UserPromptSubmit',
       stdin: JSON.stringify({ session_id: 's2', cwd: '/home/k/d/other' }),
-      deps: { ...deps, gitContext: async () => ({ remote: 'github.com/me/other', repoRoot: '/home/k/d/other' }) },
+      deps: {
+        ...deps,
+        gitContext: async () => ({
+          remote: 'github.com/me/other', repoRoot: '/home/k/d/other', repositoryRoot: '/home/k/d/other',
+        }),
+      },
     }),
     /theme "cats" has no member "cheshire"/
   );
@@ -326,7 +335,9 @@ test('a record that cannot be resolved is never admitted: both files are untouch
 
 test('a first-ever transaction that cannot resolve creates NO files at all', async () => {
   const { paths, deps } = harness({
-    gitContext: async () => ({ remote: 'github.com/me/other', repoRoot: '/home/k/d/other' }),
+    gitContext: async () => ({
+      remote: 'github.com/me/other', repoRoot: '/home/k/d/other', repositoryRoot: '/home/k/d/other',
+    }),
     // Same substitution as above: an unresolvable record is now a pin naming a
     // member the theme does not have, not a pin to an unpopulated slot.
     catalog: parseIdentities(
@@ -419,7 +430,9 @@ const REPIN_B_TO_A_MISSING_MEMBER = parseIdentities(
 const stdinB = JSON.stringify({ session_id: 's2', cwd: '/home/k/d/other' });
 const asProjectB = (deps) => ({
   ...deps,
-  gitContext: async () => ({ remote: 'github.com/me/other', repoRoot: '/home/k/d/other' }),
+  gitContext: async () => ({
+    remote: 'github.com/me/other', repoRoot: '/home/k/d/other', repositoryRoot: '/home/k/d/other',
+  }),
 });
 
 test('a record that BECOMES unresolvable is evicted — it does not take the other sessions down with it', async () => {
@@ -495,6 +508,33 @@ test('eviction is self-healing: fix the config and the session is simply back', 
   });
   assert.deepEqual(Object.keys(await readJson(paths.agentsPath)).sort(), ['s1', 's2']);
   assert.deepEqual(Object.keys(await readJson(paths.intentPath)).sort(), ['s1', 's2']);
+});
+
+// The repositoryRoot transition: a record persisted before the field existed is evicted by
+// the next transaction, and its own session's next hook re-admits it with the new context.
+// No migration, no restart of the hook or of any other session.
+test('a pre-anchor record is evicted once and re-admitted by its next hook', async () => {
+  const { paths, deps } = harness();
+  writeFileSync(paths.agentsPath, JSON.stringify({
+    s2: {
+      sessionId: 's2', projectKey: 'github.com/me/other', project: 'other',
+      remote: 'github.com/me/other', repoRoot: '/home/k/d/other', cwd: '/home/k/d/other',
+      pid: 4242, starttime: 987_654, seq: 1, state: 'working', updatedAt: 999_000,
+    },
+  }));
+
+  const result = await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  assert.equal(result.evicted.length, 1);
+  assert.equal(result.evicted[0].sessionId, 's2');
+  assert.match(result.evicted[0].reason, /lacks repositoryRoot/);
+  assert.deepEqual(Object.keys(await readJson(paths.agentsPath)), ['s1']);
+  assert.deepEqual(Object.keys(await readJson(paths.intentPath)), ['s1']);
+
+  await applyHookEvent({ event: 'PreToolUse', stdin: stdinB, deps: asProjectB(deps) });
+  const agents = await readJson(paths.agentsPath);
+  assert.deepEqual(Object.keys(agents).sort(), ['s1', 's2']);
+  assert.deepEqual(Object.keys(await readJson(paths.intentPath)).sort(), ['s1', 's2']);
+  assert.equal(agents.s2.repositoryRoot, '/home/k/d/other');
 });
 
 test('reap evicts a faulted record too — every record it sees is pre-existing', async () => {
@@ -575,7 +615,9 @@ test('a path: pin still matches after a record with a remote makes the full roun
   // a member, so a dropped repoRoot resolves rather than throwing — the slot is
   // now the whole signal.)
   const { paths, deps } = harness({
-    gitContext: async () => ({ remote: 'github.com/me/other', repoRoot: '/home/k/d/other' }),
+    gitContext: async () => ({
+      remote: 'github.com/me/other', repoRoot: '/home/k/d/other', repositoryRoot: '/home/k/d/other',
+    }),
     catalog: parseIdentities('identities:\n  - path: /home/k/d/other\n    slot: 3\n'),
   });
 
@@ -600,6 +642,47 @@ const bgStdin = (tasks) => JSON.stringify({
   background_tasks: tasks,
 });
 const RUNNING = { id: 'b1', type: 'shell', status: 'running' };
+
+// A linked worktree's hook: the record keeps its own label and the repository's key and
+// anchor, and the repository's path pin reaches the intent. Exact worktree path pins win
+// over it; a matching remote pin wins over both.
+const linkedStdin = JSON.stringify({ session_id: 'w1', cwd: '/fixture/fix-api' });
+const linkedContext = (remote = null) => async () => ({
+  remote, repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
+});
+
+test('a worktree hook inherits its repository pin through the transaction', async () => {
+  const mainPin = parseIdentities('identities:\n  - path: /fixture/api\n    slot: 7\n');
+  const { paths, deps } = harness({ catalog: mainPin, gitContext: linkedContext() });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps });
+
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.w1.projectKey, '/fixture/api');
+  assert.equal(agents.w1.repositoryRoot, '/fixture/api');
+  assert.equal(agents.w1.repoRoot, '/fixture/fix-api');
+  assert.equal(agents.w1.project, 'fix-api');
+  const intent = await readJson(paths.intentPath);
+  assert.equal(intent.w1.current.identity.slot, 7);
+  assert.equal(intent.w1.current.identity.member, 'dog-in-disguise');
+  assert.equal(intent.w1.current.identity.project, 'fix-api');
+});
+
+test('a worktree path pin overrides the inherited one, and a remote pin overrides both', async () => {
+  const both = parseIdentities(
+    'identities:\n  - path: /fixture/api\n    slot: 7\n  - path: /fixture/fix-api\n    slot: 3\n',
+  );
+  const own = harness({ catalog: both, gitContext: linkedContext() });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps: own.deps });
+  assert.equal((await readJson(own.paths.intentPath)).w1.current.identity.slot, 3);
+
+  const remote = parseIdentities(
+    'identities:\n  - path: /fixture/api\n    slot: 7\n  - path: /fixture/fix-api\n    slot: 3\n'
+    + '  - remote: github.com/example/api\n    slot: 6\n',
+  );
+  const dominated = harness({ catalog: remote, gitContext: linkedContext('github.com/example/api') });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps: dominated.deps });
+  assert.equal((await readJson(dominated.paths.intentPath)).w1.current.identity.slot, 6);
+});
 
 test('idle_prompt while a background task runs is idle, not needs-input', async () => {
   const { paths, deps } = harness();

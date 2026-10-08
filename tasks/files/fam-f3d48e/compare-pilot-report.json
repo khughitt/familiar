@@ -1,0 +1,409 @@
+{
+  "schema": 1,
+  "mode": "compare",
+  "runId": "009e32a9-0f5b-4afc-b75c-ca298fbb8414",
+  "startedAt": "2026-10-08T10:13:44.587Z",
+  "endedAt": "2026-10-08T10:13:45.714Z",
+  "settings": {
+    "samples": 1,
+    "warmups": 0,
+    "pairs": 1
+  },
+  "timingStatus": "review-required",
+  "boundary": "One `familiar hook PreToolUse --agent claude-code` process per sample, timed by the worker from spawn to exit: node startup, CLI import, Git discovery, the locked bus transaction and emission to a private pipe. Run through test/fixtures/bench-hook-cli.mjs (fixture process lookup, instrumented real execFile) with real Git on this host. Not a live-agent latency and not a Darwin measurement.",
+  "host": {
+    "platform": "linux",
+    "node": "v26.5.0",
+    "git": "git version 2.56.0",
+    "driverRevision": "aecce62fd0ca1985c05152d160e78bfd4cd76389"
+  },
+  "sources": {
+    "baseline": {
+      "root": "../identity-benchmark-baseline",
+      "revision": "437aa7e7ebd9854f4b4d23733ba1e5ed985d4c99",
+      "dirty": false,
+      "version": "0.1.0",
+      "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+      "lockHash": "2fcde0d99cc7102445a93502ccf8881d40c357caee6bff2b67217719395b1005"
+    },
+    "candidate": {
+      "root": ".",
+      "revision": "aecce62fd0ca1985c05152d160e78bfd4cd76389",
+      "dirty": true,
+      "version": "0.1.0",
+      "sourceHash": "4221ae9e7c0b9ea13842b1ba22636140c04328f79b3243626824323a31be80d6",
+      "lockHash": "2fcde0d99cc7102445a93502ccf8881d40c357caee6bff2b67217719395b1005"
+    }
+  },
+  "projects": {
+    "main": "<fixture>/projects/api",
+    "linked": "<fixture>/worktrees/fix-api"
+  },
+  "pairs": [
+    {
+      "index": 0,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "contexts": {
+        "main": {
+          "baseline": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "main",
+            "version": "baseline",
+            "startedAt": "2026-10-08T10:13:44.623Z",
+            "endedAt": "2026-10-08T10:13:44.898Z",
+            "loadavg": {
+              "before": [
+                17.87,
+                21.98,
+                14.91
+              ],
+              "after": [
+                17.87,
+                21.98,
+                14.91
+              ]
+            },
+            "revision": "437aa7e7ebd9854f4b4d23733ba1e5ed985d4c99",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-main-baseline",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 161.841286,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 6.3693899999999815,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 4.073945000000009,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          },
+          "candidate": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "main",
+            "version": "candidate",
+            "startedAt": "2026-10-08T10:13:44.899Z",
+            "endedAt": "2026-10-08T10:13:45.167Z",
+            "loadavg": {
+              "before": [
+                17.87,
+                21.98,
+                14.91
+              ],
+              "after": [
+                17.87,
+                21.98,
+                14.91
+              ]
+            },
+            "revision": "aecce62fd0ca1985c05152d160e78bfd4cd76389",
+            "sourceHash": "4221ae9e7c0b9ea13842b1ba22636140c04328f79b3243626824323a31be80d6",
+            "tt": {
+              "target": "bench-hook-main-candidate",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 151.71643,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "rev-parse",
+                      "--path-format=absolute",
+                      "--show-toplevel",
+                      "--git-dir",
+                      "--git-common-dir"
+                    ],
+                    "ms": 5.680102000000005,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 3.8933549999999997,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "linked": {
+          "baseline": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "linked",
+            "version": "baseline",
+            "startedAt": "2026-10-08T10:13:45.167Z",
+            "endedAt": "2026-10-08T10:13:45.447Z",
+            "loadavg": {
+              "before": [
+                17.87,
+                21.98,
+                14.91
+              ],
+              "after": [
+                17.87,
+                21.98,
+                14.91
+              ]
+            },
+            "revision": "437aa7e7ebd9854f4b4d23733ba1e5ed985d4c99",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-linked-baseline",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 160.082713,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 5.251204000000001,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 2.9524920000000066,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          },
+          "candidate": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "linked",
+            "version": "candidate",
+            "startedAt": "2026-10-08T10:13:45.447Z",
+            "endedAt": "2026-10-08T10:13:45.713Z",
+            "loadavg": {
+              "before": [
+                17.87,
+                21.98,
+                14.91
+              ],
+              "after": [
+                16.92,
+                21.71,
+                14.86
+              ]
+            },
+            "revision": "aecce62fd0ca1985c05152d160e78bfd4cd76389",
+            "sourceHash": "4221ae9e7c0b9ea13842b1ba22636140c04328f79b3243626824323a31be80d6",
+            "tt": {
+              "target": "bench-hook-linked-candidate",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 160.247975,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "rev-parse",
+                      "--path-format=absolute",
+                      "--show-toplevel",
+                      "--git-dir",
+                      "--git-common-dir"
+                    ],
+                    "ms": 7.617201999999992,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "rev-parse",
+                      "--is-bare-repository",
+                      "--show-toplevel"
+                    ],
+                    "ms": 4.154367000000008,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 3.246285999999998,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "structural": {
+    "gitSpawnsEnforced": true,
+    "expectedGitSpawns": {
+      "baseline": {
+        "main": 2,
+        "linked": 2
+      },
+      "candidate": {
+        "main": 2,
+        "linked": 3
+      }
+    },
+    "observedGitSpawns": {
+      "baseline-main": [
+        2
+      ],
+      "candidate-main": [
+        2
+      ],
+      "baseline-linked": [
+        2
+      ],
+      "candidate-linked": [
+        3
+      ]
+    },
+    "failures": [],
+    "pass": true
+  },
+  "summaries": {
+    "main": {
+      "context": "main",
+      "baseline": {
+        "medianMs": 161.841286,
+        "p95Ms": 161.841286
+      },
+      "candidate": {
+        "medianMs": 151.71643,
+        "p95Ms": 151.71643
+      },
+      "pairedDeltasMs": [
+        -10.124855999999994
+      ],
+      "deltaMedianMs": -10.124855999999994,
+      "deltaP95Ms": -10.124855999999994,
+      "deltaPercent": -6.256040254153686,
+      "byOrder": {
+        "baseline-first": {
+          "medianMs": -10.124855999999994,
+          "p95Ms": -10.124855999999994
+        },
+        "candidate-first": null
+      },
+      "candidateProbeMs": null,
+      "timingStatus": "review-required"
+    },
+    "linked": {
+      "context": "linked",
+      "baseline": {
+        "medianMs": 160.082713,
+        "p95Ms": 160.082713
+      },
+      "candidate": {
+        "medianMs": 160.247975,
+        "p95Ms": 160.247975
+      },
+      "pairedDeltasMs": [
+        0.16526199999998425
+      ],
+      "deltaMedianMs": 0.16526199999998425,
+      "deltaP95Ms": 0.16526199999998425,
+      "deltaPercent": 0.10323538182413503,
+      "byOrder": {
+        "baseline-first": {
+          "medianMs": 0.16526199999998425,
+          "p95Ms": 0.16526199999998425
+        },
+        "candidate-first": null
+      },
+      "candidateProbeMs": {
+        "medianMs": 4.154367000000008,
+        "p95Ms": 4.154367000000008
+      },
+      "timingStatus": "review-required"
+    }
+  }
+}

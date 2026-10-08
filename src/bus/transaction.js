@@ -163,13 +163,14 @@ export async function applyHookEvent({ event, stdin, deps }) {
       // event has reported a count; carried forward by every event that does not.
       const backgroundTasks = reported ?? prev?.backgroundTasks;
       const state = assertState(reduceState(level, prev?.state ?? null, { backgroundTasks }));
-      const { remote, repoRoot } = context;
+      const { remote, repoRoot, repositoryRoot } = context;
       next = {
         sessionId,
-        projectKey: projectKeyFor({ remote, repoRoot, cwd }),
+        projectKey: projectKeyFor({ remote, repositoryRoot, cwd }),
         project: displayProject({ repoRoot, cwd }),
         remote,
         repoRoot,
+        repositoryRoot,
         cwd,
         pid,
         starttime,

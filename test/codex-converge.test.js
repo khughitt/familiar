@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { loadThemePack } from 'familiar-theme';
 import { convergeCodexProject, shouldConverge } from '../src/install/codex-converge.js';
+import { addWorktree, seedRepo } from './fixtures/git-worktree.mjs';
 import { stampFor, STAMP_FILE } from '../src/install/pet-stamp.js';
 import { SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 
@@ -158,4 +161,19 @@ test('the hook branch actually calls the predicate — wiring guard', () => {
   assert.match(source, /shouldConverge\(\{\s*agent: name, event: positionals\[0\]\s*\}\)/,
     'bin/familiar must route convergence through shouldConverge');
   assert.match(source, /convergeCodexProject\(/);
+});
+
+// The hook hands convergence the member it already resolved for this worktree. Convergence
+// writes that member into the worktree's own config; it does not re-resolve, even when the
+// catalog holds an inherited pin that would choose differently.
+test('worktree convergence writes the supplied member into that worktree only', async (t) => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-converge-tree-')));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const main = seedRepo(join(dir, 'api'));
+  const tree = addWorktree(main, join(dir, 'fix-api'));
+  const catalog = { identities: [{ path: main, slot: 0 }] };
+  const result = await run(tree, petsFor(t), 'beta', catalog);
+  assert.equal(result.outcome, 'converged');
+  assert.match(readConfig(tree), /custom:familiar-beta/);
+  assert.equal(existsSync(join(main, '.codex', 'config.toml')), false);
 });

@@ -16,8 +16,8 @@ package dependency.
 
 **Spec:** `docs/specs/2026-10-07-worktree-pin-inheritance-design.md`, approved by
 the user at `842c20d`. Design/plan task: `fam-9ab24c`. Execution goal:
-`fam-169e3f`. Plan accepted by the user after the final minor corrections; execution is
-paused at the user's request.
+`fam-169e3f`. Plan accepted by the user after the final minor corrections and
+executed inline on 2026-10-08.
 
 **Execution recommendation:** Native inline. Context, record and matcher
 signatures are tightly coupled; one implementer can retain that context. A
@@ -1016,7 +1016,6 @@ git commit -m "test(identity): verify worktree surfaces and hook latency"
 
 ## Plan review status
 
-The user accepted this plan after the final two minor corrections. No product
-code has changed and no benchmark comparison has run. Execution is paused at
-the user's request; resume only after their explicit instruction. The design/plan
-task closes independently of the paused implementation goal `fam-169e3f`.
+The user accepted this plan after the final two minor corrections and resumed
+execution on 2026-10-08; all four tasks ran inline. Deviations are recorded as
+rulings in the execution report; the latency disposition is on `fam-f3d48e`.
