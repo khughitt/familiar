@@ -1,0 +1,379 @@
+{
+  "schema": 1,
+  "mode": "pilot",
+  "runId": "b5f494b0-2877-499c-9ab7-32237a278889",
+  "startedAt": "2026-10-08T09:59:09.135Z",
+  "endedAt": "2026-10-08T09:59:10.243Z",
+  "settings": {
+    "samples": 1,
+    "warmups": 0,
+    "pairs": 1
+  },
+  "timingStatus": "pilot-only",
+  "boundary": "One `familiar hook PreToolUse --agent claude-code` process per sample, timed by the worker from spawn to exit: node startup, CLI import, Git discovery, the locked bus transaction and emission to a private pipe. Run through test/fixtures/bench-hook-cli.mjs (fixture process lookup, instrumented real execFile) with real Git on this host. Not a live-agent latency and not a Darwin measurement.",
+  "host": {
+    "platform": "linux",
+    "node": "v26.5.0",
+    "git": "git version 2.56.0",
+    "driverRevision": "7731af9896c5ee2076b9f001ba333d5764bec08a"
+  },
+  "sources": {
+    "baseline": {
+      "root": ".",
+      "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+      "dirty": true,
+      "version": "0.1.0",
+      "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+      "lockHash": "2fcde0d99cc7102445a93502ccf8881d40c357caee6bff2b67217719395b1005"
+    },
+    "candidate": {
+      "root": ".",
+      "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+      "dirty": true,
+      "version": "0.1.0",
+      "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+      "lockHash": "2fcde0d99cc7102445a93502ccf8881d40c357caee6bff2b67217719395b1005"
+    }
+  },
+  "projects": {
+    "main": "<fixture>/projects/api",
+    "linked": "<fixture>/worktrees/fix-api"
+  },
+  "pairs": [
+    {
+      "index": 0,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "contexts": {
+        "main": {
+          "baseline": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "main",
+            "version": "baseline",
+            "startedAt": "2026-10-08T09:59:09.162Z",
+            "endedAt": "2026-10-08T09:59:09.446Z",
+            "loadavg": {
+              "before": [
+                4.39,
+                5.49,
+                5.41
+              ],
+              "after": [
+                4.39,
+                5.49,
+                5.41
+              ]
+            },
+            "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-main-baseline",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 163.382253,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 6.921831000000012,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 4.256529999999998,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          },
+          "candidate": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "main",
+            "version": "candidate",
+            "startedAt": "2026-10-08T09:59:09.447Z",
+            "endedAt": "2026-10-08T09:59:09.711Z",
+            "loadavg": {
+              "before": [
+                4.39,
+                5.49,
+                5.41
+              ],
+              "after": [
+                4.39,
+                5.49,
+                5.41
+              ]
+            },
+            "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-main-candidate",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 151.633628,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 5.603076999999999,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/projects/api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 4.177189999999996,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "linked": {
+          "baseline": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "linked",
+            "version": "baseline",
+            "startedAt": "2026-10-08T09:59:09.712Z",
+            "endedAt": "2026-10-08T09:59:09.969Z",
+            "loadavg": {
+              "before": [
+                4.39,
+                5.49,
+                5.41
+              ],
+              "after": [
+                4.39,
+                5.49,
+                5.41
+              ]
+            },
+            "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-linked-baseline",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 145.025347,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 6.30923700000001,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 4.336489999999998,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          },
+          "candidate": {
+            "index": 0,
+            "order": [
+              "baseline",
+              "candidate"
+            ],
+            "context": "linked",
+            "version": "candidate",
+            "startedAt": "2026-10-08T09:59:09.969Z",
+            "endedAt": "2026-10-08T09:59:10.241Z",
+            "loadavg": {
+              "before": [
+                4.39,
+                5.49,
+                5.41
+              ],
+              "after": [
+                4.39,
+                5.49,
+                5.41
+              ]
+            },
+            "revision": "7731af9896c5ee2076b9f001ba333d5764bec08a",
+            "sourceHash": "47c217e91b1ac636406747f5133171659bd7f0d238141ee537206a975da4a927",
+            "tt": {
+              "target": "bench-hook-linked-candidate",
+              "exit": 0
+            },
+            "warmups": 0,
+            "samples": [
+              {
+                "hookMs": 149.526768,
+                "provedState": "working",
+                "seq": 1,
+                "git": [
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "rev-parse",
+                      "--show-toplevel"
+                    ],
+                    "ms": 5.831496999999999,
+                    "exit": 0,
+                    "signal": null
+                  },
+                  {
+                    "args": [
+                      "-C",
+                      "<fixture>/worktrees/fix-api",
+                      "config",
+                      "--get",
+                      "remote.origin.url"
+                    ],
+                    "ms": 4.188862,
+                    "exit": 1,
+                    "signal": null
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "structural": {
+    "gitSpawnsEnforced": false,
+    "expectedGitSpawns": null,
+    "observedGitSpawns": {
+      "baseline-main": [
+        2
+      ],
+      "candidate-main": [
+        2
+      ],
+      "baseline-linked": [
+        2
+      ],
+      "candidate-linked": [
+        2
+      ]
+    },
+    "failures": [],
+    "pass": true
+  },
+  "summaries": {
+    "main": {
+      "context": "main",
+      "baseline": {
+        "medianMs": 163.382253,
+        "p95Ms": 163.382253
+      },
+      "candidate": {
+        "medianMs": 151.633628,
+        "p95Ms": 151.633628
+      },
+      "pairedDeltasMs": [
+        -11.748625000000004
+      ],
+      "deltaMedianMs": -11.748625000000004,
+      "deltaP95Ms": -11.748625000000004,
+      "deltaPercent": -7.190881986429703,
+      "byOrder": {
+        "baseline-first": {
+          "medianMs": -11.748625000000004,
+          "p95Ms": -11.748625000000004
+        },
+        "candidate-first": null
+      },
+      "candidateProbeMs": null,
+      "timingStatus": "review-required"
+    },
+    "linked": {
+      "context": "linked",
+      "baseline": {
+        "medianMs": 145.025347,
+        "p95Ms": 145.025347
+      },
+      "candidate": {
+        "medianMs": 149.526768,
+        "p95Ms": 149.526768
+      },
+      "pairedDeltasMs": [
+        4.5014209999999935
+      ],
+      "deltaMedianMs": 4.5014209999999935,
+      "deltaP95Ms": 4.5014209999999935,
+      "deltaPercent": 3.103885695236429,
+      "byOrder": {
+        "baseline-first": {
+          "medianMs": 4.5014209999999935,
+          "p95Ms": 4.5014209999999935
+        },
+        "candidate-first": null
+      },
+      "candidateProbeMs": null,
+      "timingStatus": "review-required"
+    }
+  }
+}
