@@ -123,6 +123,10 @@ export async function gitContext(cwd, {
     return { remote: null, repoRoot: null, repositoryRoot: null };
   }
 
+  // Before 2.31 Git has no --path-format, and rev-parse echoes an unknown flag as output.
+  if (String(batch.stdout).startsWith('--path-format=absolute\n')) {
+    throw new Error(`git in ${cwd} does not support --path-format; familiar needs Git 2.31 or newer`);
+  }
   let paths = withoutFinalLF(batch.stdout).split('\n');
   if (paths.length !== 3) {
     // Never guess where one path ends: ask for each on its own.

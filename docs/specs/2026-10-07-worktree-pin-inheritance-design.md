@@ -2,9 +2,10 @@
 
 Approved by the user at revision `842c20d`, 2026-10-07. Task: `fam-9ab24c`; source:
 `docs/notes/2026-10-07-project-identity-brief.md`. Engine baseline: `1bc3d3e`.
-The implementation plan is accepted; execution is paused at the user's request.
-Its paired same-sitting latency protocol governs execution; Task 4 will
-reconcile the Latency acceptance section below. No product behavior is implemented yet.
+Implemented 2026-10-08 under `fam-169e3f` through
+`docs/plans/2026-10-07-worktree-pin-inheritance.md`; the Latency acceptance
+section below states the paired same-sitting protocol that plan adopted. The
+measured comparison and its disposition are attached to `fam-f3d48e`.
 
 ## Intent and scope
 
@@ -280,32 +281,42 @@ authoritative main-checkout path; do not assume a release will do so.
 
 ## Latency acceptance
 
-Every tool call pays for discovery. The implementation plan must measure
-representative hook wall time on a conventional main checkout and a linked
-worktree before and after the change, on the same host with the same temporary
-repositories, theme/config, payload and terminal-disabled setup. Use real Git,
-not mocked exec timings. Keep bus state and all generated files in the fixture;
-never repoint installed launchers or use live user state.
+Every tool call pays for discovery, so hook wall time is measured on a
+conventional main checkout and a linked worktree, before and after the change,
+with real Git rather than mocked exec timings. Bus state and every generated file
+stay in a temporary fixture; installed launchers and live user state are never
+used or repointed.
 
-Add one small justfile benchmark recipe around the existing `tools/tt` wrapper
-and reuse the hook fixture machinery. Record distinct main/linked and
-before/after targets, revisions and raw results. Capture discovery duration
-and Git spawn count as well as total hook wall time, so the plan can explain
-whether changes come from Git, process startup or other hook work. After five
-warm-ups, collect at least 30 successful hook samples per context and phase,
-report median and p95 in milliseconds plus absolute/percentage deltas, and
-repeat a baseline batch to characterize run-to-run variation. The benchmark
-must state precisely which hook boundary it measures; a pure `gitContext()`
-timing alone does not meet the hook-wall-time requirement.
+The measurement is a paired, same-sitting comparison (`just bench-hook`, a
+lasting developer tool around `tools/tt`):
 
-Assert two discovery spawns for normal main checkouts and three for linked
-checkouts (ordinary and bare-backed). No sibling enumeration is allowed.
-Investigate a main-checkout slowdown beyond baseline variation, or a linked
-slowdown unexplained by one extra verification spawn and baseline variation,
-before declaring latency acceptance. Report the evidence and disposition on
-the task; spawn counts alone are not a wall-time verdict. Do not add a cache,
-framework or background service to pass the check. Measurements run during
-implementation, after the reviewed plan has set up the worktree.
+- **Sources.** The baseline is the code at the benchmark's own commit, in a
+  hydrated detached checkout; the candidate is the implementation. One driver
+  and one CLI wrapper measure both, and the wrapper loads every module from the
+  measured checkout's bin, never from its own.
+- **Pairs.** For each context, a baseline batch and a candidate batch run back
+  to back, and alternate pairs reverse their order, so host drift lands on both
+  sides of a pair. Five validated warm-ups precede at least 30 samples per batch;
+  four pairs by default.
+- **Fixture.** Every run starts in a fresh empty fixture: the same repositories,
+  theme, config and payload for both sources, separate bus state per source and
+  context. No earlier sitting or pilot is reused as a baseline.
+- **Proof.** A sample counts only when the hook exited cleanly with no output and
+  left a fresh working agent record and intent owned by the measuring worker.
+- **Report.** Source revisions and hashes, raw paired batches, load snapshots,
+  each context's median and p95, each pair's median difference and their
+  order breakdown, absolute and percentage deltas, and the linked probe's own
+  duration. Git spawn counts are structural pass/fail checks: two for main and
+  linked before, two for main and three for linked after; no sibling enumeration.
+  The hook boundary measured is one `familiar hook PreToolUse` process; a pure
+  `gitContext()` timing does not meet the requirement.
+
+Timing has no automatic verdict. The disposition, recorded on the task with its
+evidence, looks for a consistent main-checkout slowdown or linked overhead beyond
+the measured probe, order-dependent results and p95 tails, and repeats in a
+fresh same-sitting run when disturbance or contradictory pairs leave the
+comparison inconclusive. Pairing reduces drift; it does not prove a confidence
+bound. Do not add a cache, framework or background service to pass the check.
 
 ## Acceptance checks for the implementation plan
 

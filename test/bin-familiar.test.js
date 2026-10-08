@@ -23,6 +23,7 @@ import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
+import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import {
   appendHookTrace, emitHookTransition, makePrepareSprites, settleStatusline, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
@@ -1417,4 +1418,104 @@ test('a status line invocation makes exactly one cheap git call', (t) => {
   const calls = readFileSync(log, 'utf8').split('\n').filter((l) => l.length > 0);
   assert.equal(calls.length, 1, `expected one git call, got ${calls.length}:\n${calls.join('\n')}`);
   assert.match(calls[0], /symbolic-ref --short HEAD$/, `unexpected git call: ${calls[0]}`);
+});
+
+// --- Worktrees: every surface resolves a worktree through its repository ----
+//
+// One main checkout, an internal and an external worktree, and a symlink to the external one.
+// whoami, projects and a real hook (through the benchmark's wrapper, which stands the test
+// process in for the agent) must agree on the slot and member, while each keeps its own label.
+
+function worktreeLayout(t) {
+  const temp = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-cli-worktrees-')));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const main = seedRepo(join(temp, 'api'));
+  const internal = addWorktree(main, join(main, '.worktrees', 'fix-api'));
+  const external = addWorktree(main, join(temp, 'store', 'fix-ext'));
+  const link = join(temp, 'link');
+  symlinkSync(external, link);
+  return { temp, main, internal, external, link };
+}
+
+function pinned(identities) {
+  const e = env();
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), identities);
+  return fixtureGitEnv(e);
+}
+
+function whoami(e, dir) {
+  const r = spawnSync(process.execPath, [bin, '--json', 'whoami', dir], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+function projectsJson(e, dirs) {
+  const r = spawnSync(process.execPath, [bin, '--json', 'projects', ...dirs], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout).projects;
+}
+
+const benchWrapper = fileURLToPath(new URL('fixtures/bench-hook-cli.mjs', import.meta.url));
+function hookIdentity(e, dir) {
+  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+    cwd: dir, encoding: 'utf8', env: e,
+    input: JSON.stringify({ session_id: `cli-parity-${basenameOf(dir)}`, cwd: dir }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  const intent = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'intent.json'), 'utf8'));
+  return intent[`cli-parity-${basenameOf(dir)}`].current.identity;
+}
+const basenameOf = (dir) => dir.split('/').at(-1);
+
+test('unpinned remote-less worktrees share the repository slot and keep their labels', (t) => {
+  const { main, internal, external, link } = worktreeLayout(t);
+  const e = pinned('identities: []\n');
+  const seen = [main, internal, external, link].map((dir) => whoami(e, dir));
+  assert.deepEqual(seen.map((s) => s.project), ['api', 'fix-api', 'fix-ext', 'fix-ext']);
+  assert.equal(new Set(seen.map((s) => s.slot)).size, 1);
+  assert.equal(hookIdentity(e, external).slot, seen[0].slot);
+});
+
+test('a main path pin reaches every worktree on every surface', (t) => {
+  const { main, internal, external, link } = worktreeLayout(t);
+  const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`);
+  for (const dir of [main, internal, external, link]) assert.equal(whoami(e, dir).slot, 7);
+  const listed = projectsJson(e, [main, internal, external, link]);
+  assert.deepEqual(listed.map((p) => [p.project, p.slot, p.source]), [
+    ['api', 7, 'pin'], ['fix-api', 7, 'pin'], ['fix-ext', 7, 'pin'], ['fix-ext', 7, 'pin'],
+  ]);
+  const hooked = hookIdentity(e, internal);
+  assert.deepEqual([hooked.slot, hooked.member, hooked.project], [7, whoami(e, internal).member.id, 'fix-api']);
+});
+
+test('worktree path and name pins override inherited ones in their own tiers', (t) => {
+  const { main, internal, external } = worktreeLayout(t);
+  const paths = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`
+    + `  - path: ${JSON.stringify(internal)}\n    slot: 3\n  - project: fix-ext\n    slot: 5\n`);
+  assert.equal(whoami(paths, internal).slot, 3);
+  assert.equal(whoami(paths, external).slot, 7, 'a name pin never beats the inherited path');
+  assert.equal(whoami(paths, main).slot, 7);
+
+  const names = pinned('identities:\n  - project: api\n    slot: 2\n  - project: fix-ext\n    slot: 5\n');
+  assert.equal(whoami(names, main).slot, 2);
+  assert.equal(whoami(names, internal).slot, 2, 'the repository name is inherited');
+  assert.equal(whoami(names, external).slot, 5, 'the exact checkout name wins');
+});
+
+test('a matching remote pin dominates every path pin', (t) => {
+  const { main, internal, external } = worktreeLayout(t);
+  git(main, ['config', 'remote.origin.url', 'git@github.com:example/api.git']);
+  const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`
+    + `  - path: ${JSON.stringify(internal)}\n    slot: 3\n  - remote: github.com/example/api\n    slot: 6\n`);
+  for (const dir of [main, internal, external]) assert.equal(whoami(e, dir).slot, 6);
+  assert.equal(hookIdentity(e, internal).slot, 6);
+});
+
+test('projects with no directories lists path pins only, never their worktrees', (t) => {
+  const { main } = worktreeLayout(t);
+  const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`);
+  assert.deepEqual(projectsJson(e, []).map((p) => p.project), ['api']);
 });
