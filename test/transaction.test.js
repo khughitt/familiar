@@ -643,6 +643,47 @@ const bgStdin = (tasks) => JSON.stringify({
 });
 const RUNNING = { id: 'b1', type: 'shell', status: 'running' };
 
+// A linked worktree's hook: the record keeps its own label and the repository's key and
+// anchor, and the repository's path pin reaches the intent. Exact worktree path pins win
+// over it; a matching remote pin wins over both.
+const linkedStdin = JSON.stringify({ session_id: 'w1', cwd: '/fixture/fix-api' });
+const linkedContext = (remote = null) => async () => ({
+  remote, repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
+});
+
+test('a worktree hook inherits its repository pin through the transaction', async () => {
+  const mainPin = parseIdentities('identities:\n  - path: /fixture/api\n    slot: 7\n');
+  const { paths, deps } = harness({ catalog: mainPin, gitContext: linkedContext() });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps });
+
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.w1.projectKey, '/fixture/api');
+  assert.equal(agents.w1.repositoryRoot, '/fixture/api');
+  assert.equal(agents.w1.repoRoot, '/fixture/fix-api');
+  assert.equal(agents.w1.project, 'fix-api');
+  const intent = await readJson(paths.intentPath);
+  assert.equal(intent.w1.current.identity.slot, 7);
+  assert.equal(intent.w1.current.identity.member, 'dog-in-disguise');
+  assert.equal(intent.w1.current.identity.project, 'fix-api');
+});
+
+test('a worktree path pin overrides the inherited one, and a remote pin overrides both', async () => {
+  const both = parseIdentities(
+    'identities:\n  - path: /fixture/api\n    slot: 7\n  - path: /fixture/fix-api\n    slot: 3\n',
+  );
+  const own = harness({ catalog: both, gitContext: linkedContext() });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps: own.deps });
+  assert.equal((await readJson(own.paths.intentPath)).w1.current.identity.slot, 3);
+
+  const remote = parseIdentities(
+    'identities:\n  - path: /fixture/api\n    slot: 7\n  - path: /fixture/fix-api\n    slot: 3\n'
+    + '  - remote: github.com/example/api\n    slot: 6\n',
+  );
+  const dominated = harness({ catalog: remote, gitContext: linkedContext('github.com/example/api') });
+  await applyHookEvent({ event: 'PreToolUse', stdin: linkedStdin, deps: dominated.deps });
+  assert.equal((await readJson(dominated.paths.intentPath)).w1.current.identity.slot, 6);
+});
+
 test('idle_prompt while a background task runs is idle, not needs-input', async () => {
   const { paths, deps } = harness();
   await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps });

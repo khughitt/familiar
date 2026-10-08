@@ -1,7 +1,7 @@
 import { readFile as fsReadFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { assertSlot } from 'familiar-theme';
 
@@ -76,13 +76,27 @@ export async function loadIdentities(path, { readFile = fsReadFile } = {}) {
 // alias — "every repo called dotfiles gets the ginger tabby, wherever it lives".
 // When two repos share a basename and you want them distinct, pin the one you
 // care about by remote or path; the other falls through to its hashed slot.
-export function matchPin(catalog, { remote, repoRoot, project }, { realpath = defaultRealpath } = {}) {
+//
+// A Git worktree inherits its repository's choices: within the path and name
+// classes, the exact current checkout comes first and the repository anchor
+// (`repositoryRoot`) second, so a worktree pinned by path overrides its main
+// checkout's path pin, yet no path pin overrides a matching remote. The anchor's
+// basename is kept verbatim (`familiar.git` matches `project: familiar.git`), except
+// that an anonymous `.git` contributes no name at all. Each tier scans the whole
+// catalog and its first entry wins; the winning pin is the complete choice.
+export function matchPin(catalog, { remote, repoRoot, repositoryRoot, project }, { realpath = defaultRealpath } = {}) {
   const pins = catalog.identities;
   const root = repoRoot ? canonical(repoRoot, realpath) : null;
+  const repository = repositoryRoot ? canonical(repositoryRoot, realpath) : null;
+  const name = repositoryRoot ? basename(repositoryRoot) : null;
+  const inheritedName = name === '.git' || name === project ? null : name;
   return (
     (remote ? pins.find((p) => p.remote && p.remote.toLowerCase() === remote.toLowerCase()) : null) ??
     (root ? pins.find((p) => p.path && canonical(p.path, realpath) === root) : null) ??
+    (repository && repository !== root
+      ? pins.find((p) => p.path && canonical(p.path, realpath) === repository) : null) ??
     (project ? pins.find((p) => p.project && p.project === project) : null) ??
+    (inheritedName ? pins.find((p) => p.project === inheritedName) : null) ??
     null
   );
 }

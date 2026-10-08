@@ -150,3 +150,120 @@ test('member pins are theme-scoped: a pin for an inactive theme is inert', () =>
   assert.equal(pinnedMember(pin, 'elements'), null);   // inert, NOT an error
   assert.equal(pinnedMember({ slot: 6 }, 'cats'), null);
 });
+
+// --- Worktree inheritance: the repository's choices reach its worktrees -----
+//
+// Tiers, each over the whole catalog with its first entry winning: effective remote, exact
+// current checkout path, inherited repository path, exact current checkout name, inherited
+// repository name (never `.git`). The winning entry is returned whole: its slot and members.
+
+const MAIN = '/fixture/api';
+const TREE = '/fixture/fix-api';
+const identity = (p) => p;
+const linked = (over = {}) => ({
+  remote: null, repoRoot: TREE, repositoryRoot: MAIN, project: 'fix-api', ...over,
+});
+
+test('worktree path wins within path tier and remote still wins overall', () => {
+  const main = '/fixture/api';
+  const tree = '/fixture/fix-api';
+  const context = { remote: 'github.com/example/api',
+    repoRoot: tree, repositoryRoot: main, project: 'fix-api' };
+  const pins = [
+    { project: 'api', slot: 0 },
+    { project: 'fix-api', slot: 1 },
+    { path: main, slot: 7 },
+    { path: tree, slot: 3 },
+    { remote: 'github.com/example/api', slot: 6 },
+  ];
+  const realpath = (p) => p;
+  const slot = (catalog) => matchPin({ identities: catalog }, context, { realpath }).slot;
+  assert.equal(slot(pins), 6);
+  assert.equal(slot(pins.slice(0, 4)), 3);
+  assert.equal(slot(pins.slice(0, 3)), 7);
+  assert.equal(slot(pins.slice(0, 2)), 1);
+  assert.equal(slot(pins.slice(0, 1)), 0);
+});
+
+test('within an inherited tier the first catalog entry wins', () => {
+  const first = { path: MAIN, slot: 7 };
+  const second = { path: MAIN, slot: 2 };
+  const match = (pins) => matchPin({ identities: pins }, linked(), { realpath: identity });
+  assert.equal(match([first, second]), first);
+  assert.equal(match([second, first]), second);
+
+  const nameA = { project: 'fix-api', slot: 4 };
+  const nameB = { project: 'fix-api', slot: 5 };
+  assert.equal(match([nameA, nameB]), nameA);
+  assert.equal(match([nameB, nameA]), nameB);
+});
+
+test('a combined-selector entry is returned whole from whichever tier it wins', () => {
+  const combined = {
+    remote: 'github.com/example/api', path: MAIN, project: 'api', slot: 6,
+    members: { cats: 'schrodingers-cat' },
+  };
+  const pins = [{ project: 'fix-api', slot: 1 }, combined];
+  const match = (context) => matchPin({ identities: pins }, context, { realpath: identity });
+  assert.equal(match(linked({ remote: 'github.com/example/api' })), combined);
+  // No remote: the inherited path tier still outranks the earlier current-name entry.
+  assert.equal(match(linked()), combined);
+  assert.deepEqual(match(linked()).members, { cats: 'schrodingers-cat' });
+});
+
+test('outside a repository only the remote and the current name can match', () => {
+  const pins = [{ path: '/tmp/scratch', slot: 2 }, { project: 'scratch', slot: 8 }];
+  const context = { remote: null, repoRoot: null, repositoryRoot: null, project: 'scratch' };
+  assert.equal(matchPin({ identities: pins }, context, { realpath: identity }).slot, 8);
+  assert.equal(matchPin({ identities: pins.slice(0, 1) }, context, { realpath: identity }), null);
+});
+
+test('inherited and current paths are both canonicalized', () => {
+  const links = { '/links/api': MAIN, '/links/fix': TREE };
+  const realpath = (p) => links[p] ?? p;
+  assert.equal(matchPin({ identities: [{ path: '/links/api', slot: 7 }] }, linked(), { realpath }).slot, 7);
+  assert.equal(matchPin({ identities: [{ path: '/links/api', slot: 7 }, { path: '/links/fix', slot: 3 }] },
+    linked(), { realpath }).slot, 3);
+});
+
+test('a main checkout evaluates its path and name once', () => {
+  const pinned = '/elsewhere/other';
+  let calls = 0;
+  const realpath = (p) => {
+    if (p === pinned) calls += 1;
+    return p;
+  };
+  const context = { remote: null, repoRoot: MAIN, repositoryRoot: MAIN, project: 'api' };
+  const pins = [{ path: pinned, slot: 2 }, { project: 'api', slot: 9 }];
+  assert.equal(matchPin({ identities: pins }, context, { realpath }).slot, 9);
+  assert.equal(calls, 1, 'the shared root is not matched a second time as the inherited tier');
+});
+
+test('a bare .git anchor contributes no inherited name; other names stay verbatim', () => {
+  const bareDotGit = linked({ repositoryRoot: '/fixture/.git', project: 'tree' });
+  assert.equal(matchPin({ identities: [{ project: '.git', slot: 5 }] }, bareDotGit,
+    { realpath: identity }), null);
+
+  const bare = linked({ repositoryRoot: '/fixture/familiar.git', project: 'tree' });
+  const suffixed = { project: 'familiar.git', slot: 2 };
+  assert.equal(matchPin({ identities: [{ project: 'familiar', slot: 1 }, suffixed] }, bare,
+    { realpath: identity }), suffixed);
+  assert.equal(matchPin({ identities: [{ project: 'familiar', slot: 1 }] }, bare,
+    { realpath: identity }), null);
+
+  // An exact checkout name is untouched, even one actually named .git.
+  const named = linked({ repoRoot: '/fixture/.git', project: '.git' });
+  assert.equal(matchPin({ identities: [{ project: '.git', slot: 5 }] }, named,
+    { realpath: identity }).slot, 5);
+});
+
+test('the inherited name tier yields to the current name and to both paths', () => {
+  const pins = [{ project: 'api', slot: 0 }];
+  assert.equal(matchPin({ identities: pins }, linked(), { realpath: identity }).slot, 0);
+  assert.equal(matchPin({ identities: [...pins, { project: 'fix-api', slot: 1 }] }, linked(),
+    { realpath: identity }).slot, 1);
+  assert.equal(matchPin({ identities: [...pins, { path: MAIN, slot: 7 }] }, linked(),
+    { realpath: identity }).slot, 7);
+  assert.equal(matchPin({ identities: [{ project: 'other', slot: 3 }] }, linked(),
+    { realpath: identity }), null);
+});
