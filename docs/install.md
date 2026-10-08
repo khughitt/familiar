@@ -1,7 +1,7 @@
 # Install
 
-Familiar requires Node.js 22 or newer. Themes install separately; this engine
-ships no art.
+Familiar requires Node.js 22 or newer and Git 2.31 or newer. Themes install
+separately; this engine ships no art.
 
 ## Shared setup (macOS and Linux)
 
@@ -66,6 +66,66 @@ placeholder. It is gone: the generated document embeds the real path of the
 `bin/familiar` you linked, shell-quoted for the `/bin/zsh -c` boundary Codex runs
 hook commands through.
 
+## Project identity and Git worktrees
+
+Every project gets a familiar from a hash of its identity; `~/.config/familiar/identities.yaml`
+pins one deliberately by `remote:`, `path:` or `project:` (basename). A Git
+worktree follows its repository: a pin on the main checkout applies to every
+worktree of it, including one stored outside the checkout or reached through a
+symlink, while an unrelated repository nested inside it never inherits. The
+pin that wins is the first matching entry of the first tier that matches:
+
+1. the effective `remote:` (normalized origin) of the checkout you are in;
+2. `path:` of the current checkout;
+3. `path:` of the repository's main checkout;
+4. `project:` naming the current checkout's directory;
+5. `project:` naming the main checkout's directory;
+6. otherwise, the hash.
+
+A matching `remote:` pin already covers every worktree and wins over any path
+pin. To give one worktree its own familiar, pin that worktree by path; a
+`project:` pin never beats a path. The winning pin is the whole choice: its slot
+and its `members:` map.
+
+- **Labels and keys.** A worktree keeps its own directory name as its label, so
+  several working contexts stay distinguishable. Without a remote, the hash key
+  is the main checkout's path, so a repository and its worktrees share one
+  automatic familiar; moving or renaming a worktree does not change it.
+- **Bare repositories.** A worktree of a bare repository takes the bare
+  directory as its repository. Its name is kept verbatim (`familiar.git`
+  matches `project: familiar.git`, not `project: familiar`), and a bare
+  directory named just `.git` contributes no repository name.
+- **Separated Git metadata.** A main checkout whose metadata lives elsewhere
+  (`git init --separate-git-dir`) works as is. Its worktrees need the real main
+  checkout declared with `git config core.worktree <main checkout>`; until then
+  every hook that discovers identity reports an error naming `core.worktree`
+  (session-end hooks skip discovery). Metadata stored in a directory named
+  `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
+  `store` and is not always detectable: declare `core.worktree` there too.
+- **After upgrading.** Sessions already on the bus were recorded without a
+  repository anchor. The next hook evicts them once, naming the missing field,
+  and each session's own next hook re-admits it; a status line may show no
+  identity until then. Pins are untouched.
+
+### Measuring hook latency
+
+Every agent tool call runs a hook, so identity discovery is measured, not
+assumed. `just bench-hook MODE BASELINE CANDIDATE FIXTURE [SAMPLES WARMUPS PAIRS]`
+(defaults 30, 5 and 4) times complete `familiar hook PreToolUse` processes for
+two checkouts in one sitting, on a fixture main checkout and a linked worktree
+with real Git. Pairs run the two checkouts' batches back to back and alternate
+which goes first, so host drift lands on both sides of a pair. FIXTURE must be a
+fresh empty directory; it holds the repositories, separate bus state per
+checkout and context, `batches.jsonl` (appended as each batch completes) and
+`report.json`. A sample counts only when the hook exited cleanly with no output
+and left a fresh working agent record and intent. `pilot` mode accepts the same
+checkout twice and proves the tool; `compare` needs two distinct revisions and
+enforces the Git spawn counts (two on a main checkout; three on a linked one,
+two before worktree identity). Timing is never judged automatically: the report
+gives medians, p95, each pair's difference and the probe's own cost for review.
+Each batch is recorded by `tools/tt` as `bench-hook-<context>-<version>`. It
+needs Linux; the measurement covers the hook process, not a live agent.
+
 ## macOS integration
 
 ### Codex pets
@@ -89,7 +149,11 @@ compiled for the active theme, and say so. Re-run `familiar install pets` after
 switching themes.
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
-from each repository. It never overwrites an existing tracked config; review
+from each repository. In a Git worktree the config is written in that worktree
+only, with the member its repository's pins choose; the exclusion is one line in
+the repository's shared `info/exclude`, so it covers every worktree and is never
+duplicated. Pinned paths and the current directory are the only targets: other
+worktrees are not discovered. It never overwrites an existing tracked config; review
 its printed setting instead. It refuses an existing unmanaged untracked config,
 and it leaves the user-wide `~/.codex/config.toml` alone.
 To install pets without synchronizing projects, run `familiar install pets`.

@@ -100,7 +100,7 @@ export async function planCodexProjectForPath({
   if (!existsSync(path)) return { missing: path };
   if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
 
-  const { remote, repoRoot } = await gitContext(path);
+  const { remote, repoRoot, repositoryRoot } = await gitContext(path);
   // A repository is what makes the current directory a PROJECT. Without this, running the
   // command from a home directory would aim at `~/.codex/config.toml` -- the user-wide Codex
   // config -- and rewrite it as a Familiar-managed file. A pinned path stays exempt: pinning
@@ -124,9 +124,9 @@ export async function planCodexProjectForPath({
   // members -- verifying one pet's art and selecting another, which is the exact
   // broken selection the gate exists to prevent.
   const member = givenMember ?? resolveIdentity({
-    projectKey: projectKeyFor({ remote, repoRoot, cwd: path }),
+    projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
     project: displayProject({ repoRoot, cwd: path }),
-    remote, repoRoot, catalog, pack,
+    remote, repoRoot, repositoryRoot, catalog, pack,
   }).member;
 
   if (isTracked) {

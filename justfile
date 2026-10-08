@@ -44,3 +44,9 @@ hook-pre-commit:
 # What the pre-push hook runs: the same commands as `gate`, under one hook target.
 hook-pre-push:
     {{tt}} hook-pre-push -- sh -c '{{check_cmd}} && {{test_cmd}}'
+
+# Paired hook benchmark: baseline and candidate checkouts measured in one sitting, on a
+# main checkout and a linked worktree. MODE is `pilot` or `compare`; FIXTURE must be a
+# fresh empty directory. Each batch is recorded by tt as bench-hook-<context>-<version>.
+bench-hook $mode $baseline $candidate $fixture $samples="30" $warmups="5" $pairs="4":
+    node tools/bench-hook.mjs "$mode" "$baseline" "$candidate" "$fixture" "$samples" "$warmups" "$pairs"

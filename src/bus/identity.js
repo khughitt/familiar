@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, dirname, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fnv1a32 } from '../protocol/hash.js';
@@ -48,63 +48,136 @@ export function normalizeRemote(url) {
   return parts.join('/').toLowerCase();
 }
 
-// `git -C cwd rev-parse --show-toplevel` reports the PHYSICAL repo root (symlinks
-// resolved), not whatever path — symlinked or not — the caller passed as cwd.
-// This function passes that straight through. It never compares repoRoot to cwd,
-// and never re-lexicalizes it: canonicalizing a *pin's* path to match against a
-// physical repoRoot is a different module's job (identities.yaml matching).
-export async function gitContext(cwd, { exec = defaultExec, timeoutMs = GIT_TIMEOUT_MS } = {}) {
-  const run = async (args) => {
-    const { stdout } = await exec('git', ['-C', cwd, ...args], {
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-    });
-    const value = String(stdout).trim();
-    return value === '' ? null : value;
+// Git discovery for one hook: where this checkout is (`repoRoot`), which repository it belongs
+// to (`repositoryRoot`), and its effective origin. Both roots are PHYSICAL (symlinks resolved)
+// exactly as Git reports them; nothing here re-lexicalizes or compares them to cwd.
+// Canonicalizing a *pin's* path to match against them is pins.js's job.
+//
+// THE ANCHOR comes from Git's own relationship, never from the filesystem around the checkout:
+// a worktree stored outside its main checkout, or reached through a symlink, still belongs to
+// it, and a nested unrelated repository never does. A main checkout (Git and common
+// directories equal, separated metadata included) is its own anchor. A linked worktree's
+// candidate is its common directory's parent when that directory is named `.git`, else the
+// common directory itself, verified by ONE probe: `false` then the primary's root, or -- for a
+// bare repository, which has no checkout -- `true` then Git's exit 128 from --show-toplevel.
+// Nothing lists sibling worktrees: an unreachable sibling must not widen what a hook touches.
+//
+// Separated metadata named `.git` outside its checkout is indistinguishable from a repository
+// at its parent unless `core.worktree` declares the real primary; that declaration is a setup
+// prerequisite, not something discovered here.
+//
+// ONE DEADLINE for every spawn: each gets what remains of it, floored, never enlarged. A main
+// checkout takes two spawns and a linked one three; output that cannot be framed as three
+// lines (a path containing a newline) asks for each path on its own, three more.
+export async function gitContext(cwd, {
+  exec = defaultExec,
+  timeoutMs = GIT_TIMEOUT_MS,
+  now = () => performance.now(),
+} = {}) {
+  const deadline = now() + timeoutMs;
+  const timeout = () => Object.assign(
+    new Error(`git timed out after ${timeoutMs}ms in ${cwd} — the filesystem or a git helper is not responding`),
+    { code: 'FAMILIAR_GIT_TIMEOUT' },
+  );
+
+  // A TIMEOUT IS NOT AN ANSWER, and it must not be mistaken for one. If a timeout fell
+  // through to `repoRoot: null`, a wedged mount would silently re-key the project to its cwd,
+  // hash it to a DIFFERENT slot, and hand the user a different cat in a different colour for
+  // the same repo — a cosmetic layer lying about identity because a disk was slow. Every
+  // timeout leaves as this one error; the boundary in bin/familiar turns it into one stderr
+  // line and exit 0, which is the honest outcome and a bounded one.
+  const timedOut = (error) => error?.code === 'FAMILIAR_GIT_TIMEOUT'
+    || error?.killed === true || error?.signal === 'SIGKILL';
+  const run = async (at, args) => {
+    const remaining = Math.floor(deadline - now());
+    if (remaining <= 0) throw timeout();
+    try {
+      return await exec('git', ['-C', at, ...args], { timeout: remaining, killSignal: 'SIGKILL' });
+    } catch (error) {
+      if (timedOut(error)) throw timeout();
+      throw error;
+    }
   };
 
-  // A TIMEOUT IS NOT AN ANSWER, and it must not be mistaken for one. Both catches
-  // below exist to swallow a git that says "no" — not a git that says nothing. If
-  // a timeout fell through to `repoRoot: null`, a wedged mount would silently
-  // re-key the project to its cwd, hash it to a DIFFERENT slot, and hand the user
-  // a different cat in a different colour for the same repo — a cosmetic layer
-  // lying about identity because a disk was slow. Let it out: the boundary in
-  // bin/familiar turns it into one stderr line and exit 0, which is the honest
-  // outcome and a bounded one.
-  const timedOut = (error) => error?.killed === true || error?.signal === 'SIGKILL';
-  const rethrowIfTimeout = (error) => {
-    if (!timedOut(error)) return;
-    throw new Error(
-      `git timed out after ${timeoutMs}ms in ${cwd} — the filesystem or a git helper is not responding`
-    );
+  // A path may end in a newline or a space: remove the final LF and nothing else.
+  const withoutFinalLF = (text) => {
+    const s = String(text);
+    if (!s.endsWith('\n')) throw new Error(`git returned malformed path output in ${cwd}`);
+    return s.slice(0, -1);
+  };
+  const absolutePath = (value) => {
+    if (value === '' || !isAbsolute(value)) {
+      throw new Error(`git returned a non-absolute path in ${cwd}: ${JSON.stringify(value)}`);
+    }
+    return value;
   };
 
-  let repoRoot = null;
+  let batch;
   try {
-    repoRoot = await run(['rev-parse', '--show-toplevel']);
+    batch = await run(cwd, ['rev-parse', '--path-format=absolute',
+      '--show-toplevel', '--git-dir', '--git-common-dir']);
   } catch (error) {
-    rethrowIfTimeout(error);
-    // Not a repo (or git is absent). The cwd is then the identity; say so by
-    // reporting absence rather than fabricating a root.
-    return { remote: null, repoRoot: null };
+    if (timedOut(error)) throw error;
+    // Not a worktree (or git is absent). The cwd is then the identity; say so by reporting
+    // absence rather than fabricating a root.
+    return { remote: null, repoRoot: null, repositoryRoot: null };
+  }
+
+  // Before 2.31 Git has no --path-format, and rev-parse echoes an unknown flag as output.
+  if (String(batch.stdout).startsWith('--path-format=absolute\n')) {
+    throw new Error(`git in ${cwd} does not support --path-format; familiar needs Git 2.31 or newer`);
+  }
+  let paths = withoutFinalLF(batch.stdout).split('\n');
+  if (paths.length !== 3) {
+    // Never guess where one path ends: ask for each on its own.
+    const one = async (option) => withoutFinalLF(
+      (await run(cwd, ['rev-parse', '--path-format=absolute', option])).stdout);
+    paths = [await one('--show-toplevel'), await one('--git-dir'), await one('--git-common-dir')];
+  }
+  const [repoRoot, gitDir, commonDir] = paths.map(absolutePath);
+
+  let repositoryRoot = repoRoot;
+  if (gitDir !== commonDir) {
+    const candidate = basename(commonDir) === '.git' ? dirname(commonDir) : commonDir;
+    try {
+      const { stdout } = await run(candidate, ['rev-parse', '--is-bare-repository', '--show-toplevel']);
+      const text = String(stdout);
+      if (!text.startsWith('false\n')) throw new Error(`unexpected probe output ${JSON.stringify(text)}`);
+      repositoryRoot = absolutePath(withoutFinalLF(text.slice('false\n'.length)));
+    } catch (error) {
+      if (timedOut(error)) throw error;
+      const bare = error.code === 128 && !error.killed && error.signal == null
+        && error.stdout === 'true\n';
+      if (!bare) {
+        throw new Error(
+          `cannot establish the primary checkout of ${repoRoot} from ${candidate} (${error.message.trim()}); `
+          + 'if its Git metadata is stored separately, declare the real main checkout with core.worktree',
+        );
+      }
+      repositoryRoot = commonDir;
+    }
   }
 
   let remote = null;
   try {
-    remote = normalizeRemote(await run(['config', '--get', 'remote.origin.url']));
+    const { stdout } = await run(cwd, ['config', '--get', 'remote.origin.url']);
+    remote = normalizeRemote(String(stdout).trim());
   } catch (error) {
-    rethrowIfTimeout(error);
-    remote = null;   // a repo with no origin is normal, not an error
+    // Exit 1 is "no origin": a repo with no origin is normal, not an error.
+    if (error.code !== 1 || error.signal != null) throw error;
   }
 
-  return { remote, repoRoot };
+  return { remote, repoRoot, repositoryRoot };
 }
 
 // THE canonical identity. This — and only this — is what gets hashed.
 // A repo with no remote changes identity if you move it: acceptable,
 // documented, and fixed by adding a remote.
-export function projectKeyFor({ remote, repoRoot, cwd }) {
-  return remote ?? repoRoot ?? cwd;
+//
+// The repository anchor, not the checkout: a remote-less repository and all of its worktrees
+// share one key, and so one automatic familiar, while each keeps its own label.
+export function projectKeyFor({ remote, repositoryRoot, cwd }) {
+  return remote ?? repositoryRoot ?? cwd;
 }
 
 // A LABEL, not an identifier. Basenames collide; never key on this.
