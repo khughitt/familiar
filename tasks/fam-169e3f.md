@@ -8,7 +8,7 @@ complexity: high
 process: direct
 owner: design/worktree-identity
 created: 2026-10-07T14:55:59Z
-updated: 2026-10-08T09:47:03Z
+updated: 2026-10-08T09:59:15Z
 started: 2026-10-08T09:47:03Z
 depends: [fam-9ab24c]
 parent: fam-74f6e9
@@ -28,3 +28,4 @@ Implement the approved worktree identity contract through docs/plans/2026-10-07-
   provenance: {"harness_session":"codex:01a1167e-58c0-7021-ac6d-a3f665af2bb3","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-08T09:47:03Z (design/worktree-identity): started
   provenance: {"harness_session":"claude-code:09674786-ee56-47f3-819c-1e7f778aad4c","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-08T09:59:15Z (design/worktree-identity): baseline-code: 437aa7e7ebd9854f4b4d23733ba1e5ed985d4c99 — benchmark/tool commit; product identity unchanged

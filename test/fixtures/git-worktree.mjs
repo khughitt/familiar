@@ -3,6 +3,7 @@
 // and the system/global config, so a developer's Git setup cannot change a fixture.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 export function fixtureGitEnv(over = {}) {
   const env = { ...process.env, ...over };
@@ -26,6 +27,7 @@ export function git(root, args) {
 
 export function seedRepo(root, { gitDir = null } = {}) {
   mkdirSync(root, { recursive: true });
+  if (gitDir !== null) mkdirSync(dirname(gitDir), { recursive: true });
   git(root, ['init', '-q', '-b', 'main',
     ...(gitDir === null ? [] : ['--separate-git-dir', gitDir])]);
   git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',

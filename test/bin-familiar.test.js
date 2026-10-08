@@ -546,7 +546,7 @@ test('off statusline renders the HUD without familiar cells and gives wrapped te
   writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
     s1: {
       sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
+      repoRoot: null, repositoryRoot: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
       state: 'working', updatedAt: 1,
     },
   }));
@@ -740,7 +740,9 @@ ${poses}
         motionPolicy: 'full',
         prepareSprites,
         adapter: adapterFor('claude-code'),
-        gitContext: async () => ({ remote: 'github.com/me/api', repoRoot: '/repos/api' }),
+        gitContext: async () => ({
+          remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api',
+        }),
         resolveAgentPid: () => 4242,
         processOps: {
           ancestors: () => [],
@@ -1209,10 +1211,11 @@ const statusline = (e, args, payload) => spawnSync(process.execPath, [bin, 'stat
 function seedBus(e, sessionId, { state = 'working', cwd = process.cwd() } = {}) {
   const record = {
     sessionId,
-    projectKey: projectKeyFor({ remote: null, repoRoot: cwd, cwd }),
+    projectKey: projectKeyFor({ remote: null, repositoryRoot: cwd, cwd }),
     project: displayProject({ repoRoot: cwd, cwd }),
     remote: null,
     repoRoot: cwd,
+    repositoryRoot: cwd,
     cwd,
     pid: process.pid,
     starttime: startTimeOf(process.pid),

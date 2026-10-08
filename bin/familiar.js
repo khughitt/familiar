@@ -753,11 +753,13 @@ async function identityResolver() {
     pack,
     catalog,
     async resolve(cwd) {
-      const { remote, repoRoot } = await gitContext(cwd);
-      const projectKey = projectKeyFor({ remote, repoRoot, cwd });
+      const { remote, repoRoot, repositoryRoot } = await gitContext(cwd);
+      const projectKey = projectKeyFor({ remote, repositoryRoot, cwd });
       const project = displayProject({ repoRoot, cwd });
-      const pin = matchPin(catalog, { remote, repoRoot, project });
-      const identity = resolveIdentity({ projectKey, project, remote, repoRoot, catalog, pack });
+      const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
+      const identity = resolveIdentity({
+        projectKey, project, remote, repoRoot, repositoryRoot, catalog, pack,
+      });
       assetsFor(pack, identity.member, tone.mode);
       return { identity, pin };
     },
