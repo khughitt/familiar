@@ -72,6 +72,13 @@ The project's selection is then **maintained automatically**. The Codex
 `SessionStart` hook compares the member it resolved against the repository's
 managed `.codex/config.toml` and rewrites that one file when they disagree.
 
+In a Git worktree that file is the worktree's own, never the main checkout's,
+and the member is the one its repository's pins choose: a worktree inherits the
+main checkout's `path:` or `project:` pin unless it is pinned itself (see
+[project identity and Git worktrees](install.md#project-identity-and-git-worktrees)).
+The `.codex/config.toml` exclusion lives in the repository's shared
+`info/exclude`, written once for all worktrees.
+
 **A change takes effect on the next launch, not the current one.** Codex reads
 `[tui] pet` when its TUI starts, and no Familiar hook runs before the first turn
 — measured on Codex 0.153.4, see

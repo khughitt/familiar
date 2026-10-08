@@ -241,6 +241,14 @@ test('malformed metadata is an error, never "not a repository"', async () => {
   }
 });
 
+// Git before 2.31 does not know --path-format, and rev-parse echoes an unknown flag back as
+// output. That must name the version requirement, not surface as a puzzling bad path.
+test('a Git without --path-format names the version it needs', async () => {
+  const old = scripted(ok('--path-format=absolute\n/fixture/api\n.git\n.git\n'));
+  await assert.rejects(gitContext('/fixture/api', { exec: old.exec }), /Git 2\.31 or newer/);
+  assert.equal(old.calls.length, 1);
+});
+
 test('a failed primary probe names the core.worktree declaration', async () => {
   const declaredOnly = scripted(ok(LINKED_BATCH), fail({ code: 128, stdout: 'false\n' }));
   await assert.rejects(gitContext('/fixture/fix-api', { exec: declaredOnly.exec }), /core\.worktree/);
