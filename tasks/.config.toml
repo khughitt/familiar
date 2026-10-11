@@ -1,1 +1,4 @@
 prefix = "fam"
+
+[git]
+commit = true

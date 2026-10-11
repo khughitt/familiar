@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-01T12:49:23Z
-updated: 2026-10-01T12:49:23Z
+updated: 2026-10-11T15:42:45Z
 depends: []
 parent: fam-361178
 tags: []
@@ -23,4 +23,4 @@ Where to start: docs/notes/2026-10-01-tmux-rendering-followups-brief.md; bin/fam
 
 Done: design specifies attach-to-pane targeting, current intent/decay, owner liveness, client incarnation, locking and ordering against transitions/end, repeat-attach behavior, and hook installation/removal if needed. Name checks for a fresh client without a state transition, stale owners, concurrent SessionEnd, absent client, and passthrough refusal. Write the reviewed spec before an implementation plan.
 
-Ideas it wakes: On completion, run tasks note on fam-8d0b82 with the design decision in the same commit as the result, and update the brief. No host hook installation in this design task.
+Ideas it wakes: On completion, run tasks note on fam-8d0b82 with the design decision before the result's branch merges, and update the brief. No host hook installation in this design task.
