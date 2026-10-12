@@ -3,8 +3,9 @@ id: fam-5b276b
 title: Session-end hook parks a task the session still claims
 status: idea
 priority: 2
+reviewed: true
 created: 2026-09-09T12:39:44Z
-updated: 2026-10-07T13:09:53Z
+updated: 2026-10-12T18:19:07Z
 depends: [tasks-08b9d5, tasks-56b450, tasks-724c9e]
 parent: fam-2313e1
 tags: [hooks]
