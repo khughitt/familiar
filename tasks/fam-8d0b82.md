@@ -3,8 +3,9 @@ id: fam-8d0b82
 title: Repaint the cat when a tmux client attaches
 status: idea
 priority: 3
+reviewed: true
 created: 2026-09-18T11:32:35Z
-updated: 2026-10-01T12:50:38Z
+updated: 2026-10-12T18:19:09Z
 depends: []
 parent: fam-361178
 tags: [tmux]
