@@ -19,6 +19,7 @@
 - Every failure is a named, single-line message naming the path. Inside content, symlinks, FIFOs, sockets and devices still fail by path. `.git` is never copied.
 - The gate reads the descriptor once. The roles, the walk and `loadThemePack` share those bytes.
 - In the engine, the selection is parsed from the **staged** descriptor's bytes, and the walk never copies the root `theme.yaml` a second time.
+- No descriptor is read into memory before its size is checked: the gate checks the held handle's size, and the engine stats the completed staged copy before `readFile`.
 - Every installed byte was validated by the gate. Both transports promote `<run>/pack`, never a whole clone.
 - Engine tests run only through `just test-fast` (the project's test front door). The contract package has no justfile: use `npm test`, or `node --test <file>` for one file.
 - Pushing `familiar-theme` (branch and tag) is an external action: stop and get the user's approval at Task 3 Step 6.
@@ -47,6 +48,7 @@ The engine worktree already exists: `.worktrees/theme-add-copy` on branch `fix/t
 **Files:**
 - Create: `src/theme/content.js`
 - Modify: `src/index.js` (add the export)
+- Modify: `test/pack-parse.test.js` (`BARREL_EXPORTS`, the exact exported-name list)
 - Test: `test/content.test.js` (new)
 
 **Interfaces:**
@@ -173,15 +175,21 @@ export function packEntryRole(pack, relPath) {
 export { packEntryRole } from './theme/content.js';
 ```
 
+`test/pack-parse.test.js`: `BARREL_EXPORTS` pins the barrel's complete export list, sorted, so the new name must be added or the full suite fails. Insert `'packEntryRole'` between `'memberOrThrow'` and `'parseThemePack'`:
+
+```js
+  'memberOrThrow', 'packEntryRole', 'parseThemePack', 'pngSize', 'validateThemePack',
+```
+
 - [ ] **Step 4: Run the tests and verify they pass**
 
 Run: `node --test test/content.test.js`, then `npm test`
-Expected: PASS. The full suite stays green.
+Expected: PASS. The full suite stays green, `'the barrel exports exactly this set and nothing else'` included.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/theme/content.js src/index.js test/content.test.js
+git add src/theme/content.js src/index.js test/content.test.js test/pack-parse.test.js
 git commit -m "feat(pack): packEntryRole, the pack-content rule"
 ```
 
@@ -541,7 +549,7 @@ Run `git -C .worktrees/pack-content status --ignored --porcelain` and confirm on
 
 **Interfaces:**
 - Consumes: `packEntryRole`, `parseThemePack` and `LIMITS` from `familiar-theme` v0.3.0. Also `copyRegularFile(src, display, out, signal, { dev, ino })` and `unsupportedEntry(path)` from `src/theme/copy-regular-file.js`.
-- Produces: `copySource(sourceDir, dest, { signal, platform, afterDirectoryRead })`, with the same signature. It now stages `dest/theme.yaml` first, then copies only content and ancestors. New errors: `theme add: <source> has no theme.yaml`, `theme add: <path> is <n> bytes — descriptors are bounded at <max> (MAX_DESCRIPTOR_BYTES)`, and `theme add: <path> lies on a member's asset-root but is not a directory`.
+- Produces: `copySource(sourceDir, dest, { signal, platform, afterDirectoryRead, copyFile })`. `copyFile` is a test seam, like `afterDirectoryRead`, and defaults to `copyRegularFile`. Every regular-file copy, the descriptor's included, goes through it. It now stages `dest/theme.yaml` first, then copies only content and ancestors. New errors: `theme add: <source> has no theme.yaml`, `theme add: <path> is <n> bytes — descriptors are bounded at <max> (MAX_DESCRIPTOR_BYTES)`, and `theme add: <path> lies on a member's asset-root but is not a directory`.
 
 - [ ] **Step 1: Bump the dependency**
 
@@ -629,6 +637,22 @@ test('an oversized descriptor is refused before it is parsed', async (t) => {
   await assert.rejects(copySource(src, destDir()), /theme\.yaml is \d+ bytes .*MAX_DESCRIPTOR_BYTES/);
 });
 
+test('a descriptor that grows while it is copied is refused by size before it is read', async (t) => {
+  const src = writePack();
+  const dest = destDir();
+  t.after(() => { rmSync(src, { recursive: true }); rmSync(dest, { recursive: true }); });
+  // The source passes the pre-copy size check; the staged copy then grows past
+  // 2 GiB (sparse). Reading it into memory first would fail with Node's
+  // ERR_FS_FILE_TOO_LARGE instead of the named bound, so the message proves the
+  // size was checked before any read.
+  const growing = async (from, display, out, signal, expected) => {
+    await copyRegularFile(from, display, out, signal, expected);
+    if (out === join(realpathSync(dest), 'theme.yaml')) truncateSync(out, 3 * 1024 ** 3);
+  };
+  await assert.rejects(copySource(src, dest, { copyFile: growing }),
+    /theme\.yaml is 3221225472 bytes .*MAX_DESCRIPTOR_BYTES/);
+});
+
 test('selected entries keep every defense: descriptor, licence and ancestor symlinks', async (t) => {
   const cases = {
     'theme.yaml': (src) => {
@@ -667,7 +691,7 @@ test('a regular file on an asset-root path is refused as not a directory', async
 - [ ] **Step 4: Run the tests and verify they fail**
 
 Run: `just test-fast`
-Expected: FAIL. The cluttered-checkout test fails on `.worktrees … is not a regular file or directory` (the original bug). The missing-descriptor and oversize tests fail on their messages. The art-file test fails with `unsupportedEntry` wording. The relocated tests from Step 2 still pass.
+Expected: FAIL. The cluttered-checkout test fails on `.worktrees … is not a regular file or directory` (the original bug). The missing-descriptor and oversize tests fail on their messages. The growth test fails because `copySource` does not take `copyFile` yet, so the real copy runs and no bound is hit. The art-file test fails with `unsupportedEntry` wording. The relocated tests from Step 2 still pass.
 
 - [ ] **Step 5: Write the implementation**
 
@@ -690,7 +714,11 @@ function descriptorTooLarge(path, size) {
 // The selection comes from the STAGED descriptor (spec §3): the bytes that
 // choose what is copied are the bytes the gate validates. The walk never
 // touches the root theme.yaml again, so this copy is the only one.
-async function stageDescriptor(traversal, task, signal) {
+// Bounds are checked on the STAGED file before it is read: the source check
+// alone cannot bound it, because a source can grow while it streams. Staging is
+// written only by this installer under the lock (spec §3), so a stat of the
+// completed copy is sufficient.
+async function stageDescriptor(traversal, task, signal, copyFile) {
   const src = join(traversal, 'theme.yaml');
   const display = join(task.displayPath, 'theme.yaml');
   const out = join(task.to, 'theme.yaml');
@@ -703,17 +731,18 @@ async function stageDescriptor(traversal, task, signal) {
   }
   if (!st.isFile()) throw unsupportedEntry(display);
   if (st.size > LIMITS.MAX_DESCRIPTOR_BYTES) throw descriptorTooLarge(display, st.size);
-  await copyRegularFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
+  await copyFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
+  const staged = await lstat(out);
+  if (staged.size > LIMITS.MAX_DESCRIPTOR_BYTES) throw descriptorTooLarge(display, staged.size);
   const bytes = await readFile(out);
-  if (bytes.length > LIMITS.MAX_DESCRIPTOR_BYTES) throw descriptorTooLarge(display, bytes.length);
   return parseThemePack(bytes.toString('utf8'), task.to, { descriptorLabel: 'theme.yaml' });
 }
 ```
 
-3. In `copySource`: give the root task `rel: ''` (`pending = [{ openPath, displayPath, to, rel: '', dev, ino }]`) and declare `let pack;` before the loop. After `if (platform === 'darwin') await verifyPathIdentity(task);` and before `readdir`, add:
+3. In `copySource`: add `copyFile = copyRegularFile` to its options (after `afterDirectoryRead`). Give the root task `rel: ''` (`pending = [{ openPath, displayPath, to, rel: '', dev, ino }]`) and declare `let pack;` before the loop. After `if (platform === 'darwin') await verifyPathIdentity(task);` and before `readdir`, add:
 
 ```js
-      if (task.rel === '') pack = await stageDescriptor(traversal, task, signal);
+      if (task.rel === '') pack = await stageDescriptor(traversal, task, signal, copyFile);
 ```
 
 Replace the entry loop's body from `if (entry.name === '.git') continue;` through the end of the type dispatch with:
@@ -738,7 +767,7 @@ Replace the entry loop's body from `if (entry.name === '.git') continue;` throug
         } else if (role === 'ancestor' && st.isFile()) {
           throw notADirectory(display);
         } else if (st.isFile()) {
-          await copyRegularFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
+          await copyFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
         } else {
           throw unsupportedEntry(display);
         }
