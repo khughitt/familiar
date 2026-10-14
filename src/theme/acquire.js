@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
 import { constants, statSync } from 'node:fs';
-import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, readFile, realpath } from 'node:fs/promises';
 import { devNull } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
-import { LIMITS } from 'familiar-theme';
+import { LIMITS, packEntryRole, parseThemePack } from 'familiar-theme';
 import { changedEntry, copyRegularFile, unsupportedEntry } from './copy-regular-file.js';
 
 export const DEFAULT_TIMEOUT_MS = 300_000;
@@ -69,14 +69,55 @@ export function collapseStderr(text) {
 // writer can still swap a directory away and back between those checks, the
 // accepted Darwin race ceiling (spec §§5, 12). Static symlinks, FIFOs, sockets
 // and devices are rejected by lstat before open; a raced file replacement is
-// opened no-follow/nonblocking and rejected through the handle. `.git` at any
-// depth is excluded; git is never invoked on the source.
+// opened no-follow/nonblocking and rejected through the handle.
+// Only pack content is copied (spec 2026-10-14 §3): `theme.yaml` is staged first
+// and parsed from the staged bytes, then each entry's `packEntryRole` decides.
+// `outside` entries are skipped by name and never `lstat`ed. `.git` at any depth
+// is excluded, and git is never invoked on the source.
 // Regular files are copied by abortable streaming because fs.copyFile/fs.cp
 // accept no AbortSignal, and the wall clock must stop a stalled file.
+function notADirectory(path) {
+  return new Error(`theme add: ${path} lies on a member's asset-root but is not a directory`);
+}
+
+function descriptorTooLarge(path, size) {
+  return new Error(
+    `theme add: ${path} is ${size} bytes — descriptors are bounded at ${LIMITS.MAX_DESCRIPTOR_BYTES} (MAX_DESCRIPTOR_BYTES)`
+  );
+}
+
+// The selection comes from the STAGED descriptor (spec §3): the bytes that
+// choose what is copied are the bytes the gate validates. The walk never
+// touches the root theme.yaml again, so this copy is the only one.
+// Bounds are checked on the STAGED file before it is read: the source check
+// alone cannot bound it, because a source can grow while it streams. Staging is
+// written only by this installer under the lock (spec §3), so a stat of the
+// completed copy is sufficient.
+async function stageDescriptor(traversal, task, signal, copyFile) {
+  const src = join(traversal, 'theme.yaml');
+  const display = join(task.displayPath, 'theme.yaml');
+  const out = join(task.to, 'theme.yaml');
+  let st;
+  try {
+    st = await lstat(src);
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`theme add: ${task.displayPath} has no theme.yaml`);
+    throw error;
+  }
+  if (!st.isFile()) throw unsupportedEntry(display);
+  if (st.size > LIMITS.MAX_DESCRIPTOR_BYTES) throw descriptorTooLarge(display, st.size);
+  await copyFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
+  const staged = await lstat(out);
+  if (staged.size > LIMITS.MAX_DESCRIPTOR_BYTES) throw descriptorTooLarge(display, staged.size);
+  const bytes = await readFile(out);
+  return parseThemePack(bytes.toString('utf8'), task.to, { descriptorLabel: 'theme.yaml' });
+}
+
 export async function copySource(sourceDir, dest, {
   signal,
   platform = process.platform,
   afterDirectoryRead = () => {},
+  copyFile = copyRegularFile,
 } = {}) {
   const sourceReal = await realpath(sourceDir);
   const destReal = await realpath(dest);
@@ -88,8 +129,9 @@ export async function copySource(sourceDir, dest, {
   const root = await lstat(sourceReal);
   const pending = [{
     openPath: sourceReal, displayPath: sourceReal, to: destReal,
-    dev: root.dev, ino: root.ino,
+    rel: '', dev: root.dev, ino: root.ino,
   }];
+  let pack;
   for (let cursor = 0; cursor < pending.length; cursor++) {
     const task = pending[cursor];
     let handle;
@@ -98,11 +140,16 @@ export async function copySource(sourceDir, dest, {
       signal?.throwIfAborted();
       const traversal = traversalRoot(task, handle, platform);
       if (platform === 'darwin') await verifyPathIdentity(task);
+      if (task.rel === '') pack = await stageDescriptor(traversal, task, signal, copyFile);
       const entries = (await readdir(traversal, { withFileTypes: true }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       for (const entry of entries) {
         signal?.throwIfAborted();
         if (entry.name === '.git') continue;
+        if (task.rel === '' && entry.name === 'theme.yaml') continue;
+        const rel = task.rel === '' ? entry.name : `${task.rel}/${entry.name}`;
+        const role = packEntryRole(pack, rel);
+        if (role === 'outside') continue;
         const src = join(traversal, entry.name);
         const openPath = join(task.openPath, entry.name);
         const display = join(task.displayPath, entry.name);
@@ -112,10 +159,12 @@ export async function copySource(sourceDir, dest, {
         if (st.isDirectory()) {
           await mkdir(out);
           pending.push({
-            openPath, displayPath: display, to: out, dev: st.dev, ino: st.ino,
+            openPath, displayPath: display, to: out, rel, dev: st.dev, ino: st.ino,
           });
+        } else if (role === 'ancestor' && st.isFile()) {
+          throw notADirectory(display);
         } else if (st.isFile()) {
-          await copyRegularFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
+          await copyFile(src, display, out, signal, { dev: st.dev, ino: st.ino });
         } else {
           throw unsupportedEntry(display);
         }

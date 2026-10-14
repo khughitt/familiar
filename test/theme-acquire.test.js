@@ -15,7 +15,7 @@ import {
 } from '../src/theme/acquire.js';
 import { copyRegularFile } from '../src/theme/copy-regular-file.js';
 import { LIMITS, validateThemePack } from 'familiar-theme';
-import { writePack } from './helpers/fixture.js';
+import { DESCRIPTOR, writePack } from './helpers/fixture.js';
 
 const destDir = () => mkdtempSync(join(tmpdir(), 'dest-'));
 const acquireModule = new URL('../src/theme/acquire.js', import.meta.url).href;
@@ -54,9 +54,10 @@ function hasOpenChildDirectory(target) {
 }
 
 async function copyAfterQueuedSwap(t, kind) {
-  const src = mkdtempSync(join(tmpdir(), 'src-swap-'));
-  const victim = join(src, 'aa-victim');
-  const held = join(src, 'held-victim');
+  const src = writePack();
+  const member = join(src, 'sprites', 'solo');
+  const victim = join(member, 'aa-victim');
+  const held = join(member, 'held-victim');
   const outside = mkdtempSync(join(tmpdir(), 'outside-swap-'));
   const replacement = kind === 'directory' ? join(outside, 'replacement') : outside;
   mkdirSync(victim);
@@ -78,8 +79,9 @@ async function copyAfterQueuedSwap(t, kind) {
   try {
     await copySource(src, dest, {
       afterDirectoryRead(task) {
-        if (task.openPath !== sourceReal || !existsSync(join(dest, 'aa-victim'))) return;
-        swappedBeforeTraversal = !existsSync(join(dest, 'aa-victim', 'safe.txt'));
+        if (task.openPath !== join(sourceReal, 'sprites', 'solo')
+          || !existsSync(join(dest, 'sprites', 'solo', 'aa-victim'))) return;
+        swappedBeforeTraversal = !existsSync(join(dest, 'sprites', 'solo', 'aa-victim', 'safe.txt'));
         swappedBeforeSettlement = !copySettled;
         renameSync(victim, held);
         if (kind === 'directory') renameSync(replacement, victim);
@@ -158,12 +160,12 @@ test('a pack copies byte-for-byte, excluding any .git', async () => {
   const src = writePack();
   mkdirSync(join(src, '.git'));
   writeFileSync(join(src, '.git', 'config'), 'x');
-  mkdirSync(join(src, 'sprites', '.git'));
-  writeFileSync(join(src, 'sprites', '.git', 'HEAD'), 'x');
+  mkdirSync(join(src, 'sprites', 'solo', '.git'));
+  writeFileSync(join(src, 'sprites', 'solo', '.git', 'HEAD'), 'x');
   const dest = destDir();
   await copySource(src, dest);
   assert.equal(existsSync(join(dest, '.git')), false);
-  assert.equal(existsSync(join(dest, 'sprites', '.git')), false);
+  assert.equal(existsSync(join(dest, 'sprites', 'solo', '.git')), false);
   assert.deepEqual(readFileSync(join(dest, 'theme.yaml')),
     readFileSync(join(src, 'theme.yaml')));
   assert.deepEqual(readFileSync(join(dest, 'sprites', 'solo', 'idle.png')),
@@ -240,13 +242,13 @@ test('copy rejects an unsupported traversal platform', async (t) => {
 
 test('a symlink in the source fails acquisition by path, undereferenced', async () => {
   const src = writePack();
-  symlinkSync('/etc/hostname', join(src, 'link.png'));
+  symlinkSync('/etc/hostname', join(src, 'sprites', 'solo', 'link.png'));
   await assert.rejects(copySource(src, destDir()), /link\.png/);
 });
 
 test('a FIFO fails acquisition by path', async () => {
   const src = writePack();
-  execFileSync('mkfifo', [join(src, 'pipe')]);
+  execFileSync('mkfifo', [join(src, 'sprites', 'solo', 'pipe')]);
   await assert.rejects(copySource(src, destDir()), /pipe/);
 });
 
@@ -299,7 +301,7 @@ test('a regular file replaced between lstat and open is rejected by identity', a
 
 test('a Unix socket fails acquisition by path', async () => {
   const src = writePack();
-  const sock = join(src, 's');
+  const sock = join(src, 'sprites', 'solo', 's');
   const server = createNetServer();
   await new Promise((ready) => server.listen(sock, ready));
   try {
@@ -330,12 +332,12 @@ test('a queued directory swapped for a symlink is never followed', async (t) => 
   assert.equal(swappedBeforeTraversal, true, 'swap occurred after victim traversal');
   assert.equal(swappedBeforeSettlement, true, 'swap occurred after copy settled');
   assert.match(failure?.message ?? '', /aa-victim.*changed during acquisition.*retry/);
-  assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
+  assert.equal(existsSync(join(dest, 'sprites', 'solo', 'aa-victim', 'secret.txt')), false);
 });
 
 test('a contract-valid deep pack copies and acquires under a reduced fd limit', async (t) => {
   const src = writePack();
-  const deepRoot = join(src, 'extra');
+  const deepRoot = join(src, 'sprites', 'solo', 'extra');
   mkdirSync(deepRoot);
   const leafDir = makeDeepTree(deepRoot, 80);
   const leaf = join(leafDir, 'deep.txt');
@@ -376,7 +378,7 @@ test('a queued directory replaced by another directory is rejected by identity',
   assert.equal(swappedBeforeTraversal, true, 'replacement occurred after victim traversal');
   assert.equal(swappedBeforeSettlement, true, 'replacement occurred after copy settled');
   assert.match(failure?.message ?? '', /aa-victim.*changed during acquisition.*retry/);
-  assert.equal(existsSync(join(dest, 'aa-victim', 'secret.txt')), false);
+  assert.equal(existsSync(join(dest, 'sprites', 'solo', 'aa-victim', 'secret.txt')), false);
 });
 
 test('isolation env wins over anything the caller injects', () => {
@@ -437,7 +439,7 @@ test('a completed local acquisition returns local provenance', async () => {
 });
 
 test('a zero-millisecond acquisition cannot outrun the absolute deadline', async () => {
-  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
+  const src = writePack();
   await assert.rejects(
     acquireSource({ kind: 'local', path: src }, destDir(),
       { timeoutMs: 0, pollMs: 60_000 }),
@@ -446,15 +448,16 @@ test('a zero-millisecond acquisition cannot outrun the absolute deadline', async
 });
 
 test('the wall clock interrupts local topology traversal before it finishes', async () => {
-  const src = mkdtempSync(join(tmpdir(), 'src-many-'));
-  for (let i = 0; i < 500; i++) mkdirSync(join(src, `entry-${i}`));
+  const src = writePack();
+  for (let i = 0; i < 500; i++) mkdirSync(join(src, 'sprites', 'solo', `entry-${i}`));
   const dest = destDir();
   await assert.rejects(
     acquireSource({ kind: 'local', path: src }, dest,
       { timeoutMs: 0, pollMs: 60_000 }),
     /exceeded the 0 ms wall clock/
   );
-  assert.ok(readdirSync(dest).length < 500);
+  const member = join(dest, 'sprites', 'solo');
+  assert.ok(!existsSync(member) || readdirSync(member).length < 500);
 });
 
 test('Git diagnostics are bounded and disclose truncation', async (t) => {
@@ -482,7 +485,7 @@ process.exitCode = 1;
 });
 
 test('the final growth scan fails closed on an unreadable directory', async (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-empty-'));
+  const src = writePack();
   const dest = destDir();
   const blocked = join(dest, 'blocked');
   mkdirSync(blocked);
@@ -499,8 +502,8 @@ test('the final growth scan fails closed on an unreadable directory', async (t) 
 });
 
 test('an interval scan error aborts acquisition instead of throwing out of band', async (t) => {
-  const src = mkdtempSync(join(tmpdir(), 'src-large-'));
-  const bulk = join(src, 'bulk.bin');
+  const src = writePack();
+  const bulk = join(src, 'sprites', 'solo', 'bulk.bin');
   writeFileSync(bulk, '');
   truncateSync(bulk, 64 * 1024 * 1024);
   const dest = destDir();
@@ -572,4 +575,113 @@ process.exitCode = 1;
   assert.equal(hasOpenDirectory(dest), false, 'growth scan directory remained open');
   assert.equal(hasOpenChildDirectory(dest), false, 'queued scan directory remained open');
   assert.ok(visited() < queued.length, 'aborted scan drained every queued directory');
+});
+
+const treeOf = (root) => {
+  const out = [];
+  const walk = (dir, rel) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const r = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      out.push(entry.isDirectory() ? `${r}/` : r);
+      if (entry.isDirectory()) walk(join(dir, entry.name), r);
+    }
+  };
+  walk(root, '');
+  return out;
+};
+
+function clutteredCheckout() {
+  const src = writePack();
+  symlinkSync('../../elsewhere/.worktrees', join(src, '.worktrees'));
+  mkdirSync(join(src, '.superpowers'));
+  symlinkSync('/etc/hostname', join(src, '.superpowers', 'link'));
+  writeFileSync(join(src, 'README.md'), 'readme');
+  mkdirSync(join(src, 'docs'));
+  writeFileSync(join(src, 'docs', 'a.md'), 'doc');
+  writeFileSync(join(src, 'sprites', 'README.md'), 'sibling of a member');
+  execFileSync('mkfifo', [join(src, 'pipe')]);
+  writeFileSync(join(src, 'LICENSE'), 'MIT');
+  writeFileSync(join(src, 'LICENSE-assets'), 'CC-BY-4.0');
+  mkdirSync(join(src, 'LICENSES'));
+  writeFileSync(join(src, 'LICENSES', 'MIT.txt'), 'MIT');
+  return src;
+}
+
+const CONTENT_TREE = [
+  'LICENSE', 'LICENSE-assets', 'LICENSES/', 'LICENSES/MIT.txt',
+  'sprites/', 'sprites/solo/', 'sprites/solo/done.png', 'sprites/solo/error.png',
+  'sprites/solo/idle.png', 'sprites/solo/needs-approval.png', 'sprites/solo/needs-input.png',
+  'sprites/solo/working.png', 'theme.yaml',
+];
+
+test('a cluttered working checkout copies exactly its pack content', async (t) => {
+  const src = clutteredCheckout();
+  const dest = destDir();
+  t.after(() => { rmSync(src, { recursive: true }); rmSync(dest, { recursive: true }); });
+  await copySource(src, dest);
+  assert.deepEqual(treeOf(dest), CONTENT_TREE);
+  assert.deepEqual(readFileSync(join(dest, 'theme.yaml')), readFileSync(join(src, 'theme.yaml')));
+});
+
+test('a source without theme.yaml is a named refusal', async (t) => {
+  const src = writePack();
+  rmSync(join(src, 'theme.yaml'));
+  t.after(() => rmSync(src, { recursive: true }));
+  await assert.rejects(copySource(src, destDir()), /theme add: .* has no theme\.yaml/);
+});
+
+test('an oversized descriptor is refused before it is parsed', async (t) => {
+  const src = writePack({ descriptor: `${DESCRIPTOR}#${'x'.repeat(LIMITS.MAX_DESCRIPTOR_BYTES)}\n` });
+  t.after(() => rmSync(src, { recursive: true }));
+  await assert.rejects(copySource(src, destDir()), /theme\.yaml is \d+ bytes .*MAX_DESCRIPTOR_BYTES/);
+});
+
+test('a descriptor that grows while it is copied is refused by size before it is read', async (t) => {
+  const src = writePack();
+  const dest = destDir();
+  t.after(() => { rmSync(src, { recursive: true }); rmSync(dest, { recursive: true }); });
+  // The source passes the pre-copy size check; the staged copy then grows past
+  // 2 GiB (sparse). Reading it into memory first would fail with Node's
+  // ERR_FS_FILE_TOO_LARGE instead of the named bound, so the message proves the
+  // size was checked before any read.
+  const growing = async (from, display, out, signal, expected) => {
+    await copyRegularFile(from, display, out, signal, expected);
+    if (out === join(realpathSync(dest), 'theme.yaml')) truncateSync(out, 3 * 1024 ** 3);
+  };
+  await assert.rejects(copySource(src, dest, { copyFile: growing }),
+    /theme\.yaml is 3221225472 bytes .*MAX_DESCRIPTOR_BYTES/);
+});
+
+test('selected entries keep every defense: descriptor, licence and ancestor symlinks', async (t) => {
+  const cases = {
+    'theme.yaml': (src) => {
+      writeFileSync(join(src, 'real.yaml'), readFileSync(join(src, 'theme.yaml')));
+      rmSync(join(src, 'theme.yaml'));
+      symlinkSync('real.yaml', join(src, 'theme.yaml'));
+    },
+    LICENSE: (src) => symlinkSync('/etc/hostname', join(src, 'LICENSE')),
+    'LICENSES/MIT.txt': (src) => {
+      mkdirSync(join(src, 'LICENSES'));
+      symlinkSync('/etc/hostname', join(src, 'LICENSES', 'MIT.txt'));
+    },
+    sprites: (src) => {
+      renameSync(join(src, 'sprites'), join(src, 'real-sprites'));
+      symlinkSync('real-sprites', join(src, 'sprites'));
+    },
+  };
+  for (const [name, plant] of Object.entries(cases)) {
+    const src = writePack();
+    t.after(() => rmSync(src, { recursive: true }));
+    plant(src);
+    await assert.rejects(copySource(src, destDir()),
+      new RegExp(`${name.replaceAll('.', '\\.')} is not a regular file or directory`), name);
+  }
+});
+
+test('a regular file on an asset-root path is refused as not a directory', async (t) => {
+  const src = writePack({ descriptor: DESCRIPTOR.replace('asset-root: sprites/solo', 'asset-root: art/sprites/solo') });
+  writeFileSync(join(src, 'art'), 'not a directory');
+  t.after(() => rmSync(src, { recursive: true }));
+  await assert.rejects(copySource(src, destDir()),
+    /theme add: .*\/art lies on a member's asset-root but is not a directory/);
 });
