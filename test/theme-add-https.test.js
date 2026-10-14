@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import {
-  existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:https';
 import { devNull, tmpdir } from 'node:os';
@@ -248,5 +249,22 @@ test('a held HTTPS add makes a zero-retry HTTPS add fail by name', async (t) => 
     result = await first;
   }
   assert.equal(result.id, 'gate-fixture');
+  assert.deepEqual(stagingEntries(p), []);
+});
+
+test('an HTTPS install carries pack content only, never the repository around it', async (t) => {
+  const p = scratch();
+  const work = writePack();
+  writeFileSync(join(work, 'README.md'), 'readme');
+  mkdirSync(join(work, 'docs'));
+  symlinkSync('../theme.yaml', join(work, 'docs', 'alias.yaml'));
+  writeFileSync(join(work, 'LICENSE'), 'MIT');
+  const bare = bareRepoFrom(work);
+  const head = git(['rev-parse', 'HEAD'], bare).trim();
+  const { url, close } = await serveBare(bare);
+  t.after(close);
+  const result = await addTheme({ paths: p, source: url, caFile: CERT });
+  assert.deepEqual(readdirSync(result.dir).sort(), ['LICENSE', 'sprites', 'theme.yaml']);
+  assert.deepEqual(readReceipt(p, 'gate-fixture').receipt.source, { kind: 'https', url, commit: head });
   assert.deepEqual(stagingEntries(p), []);
 });

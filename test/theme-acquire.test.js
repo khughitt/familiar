@@ -368,7 +368,8 @@ try {
     ], { encoding: 'utf8', timeout: 5000 });
     assert.equal(result.signal, null, `${mode} hung under the reduced fd limit`);
     assert.equal(result.status, 0, `${mode}: ${result.stderr}`);
-    assert.equal(readFileSync(join(dest, relative(src, leaf)), 'utf8'), 'deep');
+    const base = mode === 'acquire' ? join(dest, 'pack') : dest;
+    assert.equal(readFileSync(join(base, relative(src, leaf)), 'utf8'), 'deep');
   }
 });
 
@@ -430,12 +431,13 @@ test('the post-acquisition size check rejects a fast local copy past the bound',
   );
 });
 
-test('a completed local acquisition returns local provenance', async () => {
+test('a completed local acquisition returns local provenance and its pack directory', async () => {
   const src = writePack();
   const dest = destDir();
-  const provenance = await acquireSource({ kind: 'local', path: src }, dest);
+  const { provenance, packDir } = await acquireSource({ kind: 'local', path: src }, dest);
   assert.deepEqual(provenance, { kind: 'local', path: realpathSync(src) });
-  assert.equal(existsSync(join(dest, 'theme.yaml')), true);
+  assert.equal(packDir, join(dest, 'pack'));
+  assert.equal(existsSync(join(packDir, 'theme.yaml')), true);
 });
 
 test('a zero-millisecond acquisition cannot outrun the absolute deadline', async () => {
@@ -456,7 +458,7 @@ test('the wall clock interrupts local topology traversal before it finishes', as
       { timeoutMs: 0, pollMs: 60_000 }),
     /exceeded the 0 ms wall clock/
   );
-  const member = join(dest, 'sprites', 'solo');
+  const member = join(dest, 'pack', 'sprites', 'solo');
   assert.ok(!existsSync(member) || readdirSync(member).length < 500);
 });
 

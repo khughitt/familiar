@@ -53,15 +53,13 @@ export async function addTheme({
       }
 
       const runDir = mkdtempSync(join(stagingRoot, 'run-'));
-      let promoted = false;
       try {
-        const provenance = await acquireSource(classified, runDir, {
+        const { provenance, packDir } = await acquireSource(classified, runDir, {
           caFile,
           timeoutMs,
           growthLimitBytes,
         });
-        rmSync(join(runDir, '.git'), { recursive: true, force: true });
-        const pack = await validate(runDir);
+        const pack = await validate(packDir);
         const target = join(paths.userThemesDir, pack.id);
 
         if (lstatOrNull(target) !== null) {
@@ -77,8 +75,7 @@ export async function addTheme({
           );
         }
 
-        renameSync(runDir, target);
-        promoted = true;
+        renameSync(packDir, target);
         const receipt = {
           id: pack.id,
           source: provenance,
@@ -87,7 +84,9 @@ export async function addTheme({
         await writeReceiptFn(paths, receipt);
         return { id: pack.id, dir: target, members: pack.members.size, provenance };
       } finally {
-        if (!promoted) rmSync(runDir, { recursive: true, force: true });
+        // After promotion the run holds only the discarded clone, if any; before
+        // it, everything. Either way nothing in it outlives this add.
+        rmSync(runDir, { recursive: true, force: true });
       }
     }, { ...lockOpts, staleMs: Infinity });
   } catch (error) {

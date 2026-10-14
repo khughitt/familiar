@@ -10,6 +10,12 @@ import { changedEntry, copyRegularFile, unsupportedEntry } from './copy-regular-
 export const DEFAULT_TIMEOUT_MS = 300_000;
 export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
 
+// A run directory holds the acquired pack at <run>/pack. A clone first lands
+// at <run>/clone and is copied from there, so both transports promote exactly
+// the pack content the gate validated (spec 2026-10-14 §3).
+export const PACK_DIR_NAME = 'pack';
+export const CLONE_DIR_NAME = 'clone';
+
 // Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
 // Credentialed URLs are refused because the given URL is persisted in the
 // receipt and printed by `theme list` — accepting one stores and displays a
@@ -348,21 +354,26 @@ export async function acquireSource(source, dest, {
   };
   const poller = setInterval(() => { void checkGrowth(); }, pollMs);
   try {
+    const packDir = join(dest, PACK_DIR_NAME);
     let provenance;
     if (source.kind === 'https') {
+      const cloneDir = join(dest, CLONE_DIR_NAME);
       const { commit } = await cloneSource(
-        source.url, dest, { caFile, signal: controller.signal }
+        source.url, cloneDir, { caFile, signal: controller.signal }
       );
+      await mkdir(packDir);
+      await copySource(cloneDir, packDir, { signal: controller.signal, platform });
       provenance = { kind: 'https', url: source.url, commit };
     } else {
       const path = await realpath(source.path);
-      await copySource(path, dest, { signal: controller.signal, platform });
+      await mkdir(packDir);
+      await copySource(path, packDir, { signal: controller.signal, platform });
       provenance = { kind: 'local', path };
     }
     await checkGrowth();
     if (performance.now() >= deadline) controller.abort(timeoutReason);
     controller.signal.throwIfAborted();
-    return provenance;
+    return { provenance, packDir };
   } catch (error) {
     const failure = controller.signal.aborted ? controller.signal.reason : error;
     if (!controller.signal.aborted) controller.abort(failure);

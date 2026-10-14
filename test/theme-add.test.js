@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync, symlinkSync, rmSync,
+  realpathSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,8 +85,8 @@ test('a failed receipt write leaves the pack installed and unreceipted — never
 test('a validation failure cleans its staging run', async () => {
   const p = scratch();
   const src = writePack();
-  rmSync(join(src, 'theme.yaml'));
-  await assert.rejects(addTheme({ paths: p, source: src }));
+  writeFileSync(join(src, 'sprites', 'solo', 'idle.png'), 'junk');
+  await assert.rejects(addTheme({ paths: p, source: src }), /idle\.png/);
   assert.deepEqual(stagingEntries(p), []);
   assert.equal(existsSync(join(p.userThemesDir, 'gate-fixture')), false);
 });
@@ -163,4 +164,42 @@ test('locked callback rejections pass through unchanged', async () => {
     }
     assert.equal(caught, rejection);
   }
+});
+
+test('a cluttered working checkout installs exactly its pack content', async (t) => {
+  const p = scratch();
+  const src = writePack();
+  symlinkSync('../../elsewhere/.worktrees', join(src, '.worktrees'));
+  mkdirSync(join(src, '.superpowers'));
+  symlinkSync('/etc/hostname', join(src, '.superpowers', 'link'));
+  writeFileSync(join(src, 'README.md'), 'readme');
+  writeFileSync(join(src, 'LICENSE'), 'MIT');
+  for (let i = 0; i < 600; i++) mkdirSync(join(src, 'node_modules', `m${i}`), { recursive: true });
+  t.after(() => rmSync(src, { recursive: true, force: true }));
+  const { dir } = await addTheme({ paths: p, source: src });
+  assert.deepEqual(readdirSync(dir).sort(), ['LICENSE', 'sprites', 'theme.yaml']);
+  assert.deepEqual(stagingEntries(p), []);
+});
+
+test('a source reached through a symlink installs from its real path', async (t) => {
+  const p = scratch();
+  const src = writePack();
+  const linkDir = mkdtempSync(join(tmpdir(), 'link-'));
+  const link = join(linkDir, 'checkout');
+  symlinkSync(src, link);
+  t.after(() => {
+    rmSync(src, { recursive: true, force: true });
+    rmSync(linkDir, { recursive: true, force: true });
+  });
+  const { dir, provenance } = await addTheme({ paths: p, source: link });
+  assert.equal(existsSync(join(dir, 'theme.yaml')), true);
+  assert.equal(provenance.path, realpathSync(src));
+});
+
+test('a source without theme.yaml is refused by name and leaves no staging', async () => {
+  const p = scratch();
+  const src = writePack();
+  rmSync(join(src, 'theme.yaml'));
+  await assert.rejects(addTheme({ paths: p, source: src }), /has no theme\.yaml/);
+  assert.deepEqual(stagingEntries(p), []);
 });
