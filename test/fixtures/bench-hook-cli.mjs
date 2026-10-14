@@ -9,6 +9,11 @@
 // The agent lookup is the one thing faked: the parent (the benchmark worker) stands in for a
 // `claude` process with a terminal, so the hook resolves a live, stable owner. Test machinery
 // only; production launchers and adapters are untouched.
+//
+// The terminal must be one the hook can never paint. On Linux the target is the parent's
+// /proc fd 1, a pipe, so the isatty gate refuses it. Darwin reads the record's tty name
+// instead: the fake carries a well-formed name with no device behind it, so the open fails
+// as quietly. The parent's real tty would be a developer's live terminal, or none on CI.
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -20,10 +25,14 @@ const args = process.argv.slice(3);
 const binUrl = pathToFileURL(bin);
 
 const { defaultProcessOps } = await import(new URL('../src/bus/proc.js', binUrl));
-const parent = defaultProcessOps.recordOf(process.ppid);
-defaultProcessOps.ancestors = () => [
-  defaultProcessOps.recordOf(process.pid), { ...parent, comm: 'claude', tty: true },
-];
+const realRecordOf = defaultProcessOps.recordOf;
+const agent = {
+  ...realRecordOf(process.ppid),
+  comm: 'claude',
+  tty: process.platform === 'darwin' ? 'ttysfffffff' : true,
+};
+defaultProcessOps.recordOf = (pid) => (pid === agent.pid ? agent : realRecordOf(pid));
+defaultProcessOps.ancestors = () => [realRecordOf(process.pid), agent];
 
 // Children are tracked so a cancelled wrapper reaps what it started; Git runs are recorded
 // for the benchmark. The promisified form keeps execFile's own stdout/stderr/error shape.
