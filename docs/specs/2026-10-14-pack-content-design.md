@@ -1,6 +1,6 @@
 # Pack content: what a theme pack is, for the gate and for `theme add`
 
-**Status:** approved 2026-10-14; plan [`2026-10-14-pack-content`](../plans/2026-10-14-pack-content.md) approved 2026-10-14
+**Status:** implemented 2026-10-14 (familiar-theme v0.3.0)
 **Date:** 2026-10-14
 **Task:** fam-13999b
 **Amends:** §3 "Local copy" and §2 step 4 of

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writePack } from './helpers/fixture.js';
@@ -33,4 +33,15 @@ test('theme validate with no directory prints usage and exits 2', () => {
   const r = run('theme', 'validate');
   assert.equal(r.status, 2);
   assert.match(r.stderr, /theme validate/);
+});
+
+test('theme validate accepts a working checkout with clutter beside the pack', (t) => {
+  const dir = writePack();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  symlinkSync('../../elsewhere/.worktrees', join(dir, '.worktrees'));
+  mkdirSync(join(dir, '.superpowers'));
+  symlinkSync('/etc/hostname', join(dir, '.superpowers', 'link'));
+  const r = run('theme', 'validate', dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /gate-fixture/);
 });

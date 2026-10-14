@@ -16,9 +16,12 @@ familiar scheme set dark
 familiar theme add <theme-url-or-directory>
 ```
 
-`familiar theme add` accepts a public HTTPS repository or a clean local theme
-checkout. It validates the complete pack before atomically installing it into
-`~/.config/familiar/themes/<id>`.
+`familiar theme add` accepts a public HTTPS repository or a local theme
+directory, such as your working checkout. It installs only the pack itself
+(`theme.yaml`, licence files, and each member's sprite directory), validates
+exactly those files, and atomically installs them into
+`~/.config/familiar/themes/<id>`. Anything else in the checkout (tool
+workspaces, docs, build output) is left behind.
 
 macOS agent lifecycle is supported. The portable core is CI-backed, and the
 Darwin agent resolver was activated on live-hook evidence captured on a physical

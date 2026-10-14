@@ -1,6 +1,6 @@
 # Phase 4: `theme add`
 
-**Status:** implemented; cutover complete, HTTPS smoke passed 2026-08-19
+**Status:** implemented; cutover complete, HTTPS smoke passed 2026-08-19. §2 step 4 and §3 "Local copy" are amended by [`2026-10-14-pack-content-design.md`](2026-10-14-pack-content-design.md): only pack content is copied, for both transports.
 **Date:** 2026-08-18
 
 The engine ships no art. This phase gives it the verb that makes that
