@@ -67,21 +67,6 @@ export function collapseStderr(text) {
     .join('; ');
 }
 
-// The defensive copy (spec §3). Validation runs only AFTER acquisition, so
-// the copy itself must refuse what it cannot safely materialize. On Linux,
-// directories are opened no-follow and traversed through their /proc fd
-// identity, so a pathname swap cannot redirect a queued walk. On Darwin,
-// traversal uses the verified pathname with parent identity checks; a hostile
-// writer can still swap a directory away and back between those checks, the
-// accepted Darwin race ceiling (spec §§5, 12). Static symlinks, FIFOs, sockets
-// and devices are rejected by lstat before open; a raced file replacement is
-// opened no-follow/nonblocking and rejected through the handle.
-// Only pack content is copied (spec 2026-10-14 §3): `theme.yaml` is staged first
-// and parsed from the staged bytes, then each entry's `packEntryRole` decides.
-// `outside` entries are skipped by name and never `lstat`ed. `.git` at any depth
-// is excluded, and git is never invoked on the source.
-// Regular files are copied by abortable streaming because fs.copyFile/fs.cp
-// accept no AbortSignal, and the wall clock must stop a stalled file.
 function notADirectory(path) {
   return new Error(`theme add: ${path} lies on a member's asset-root but is not a directory`);
 }
@@ -119,6 +104,22 @@ async function stageDescriptor(traversal, task, signal, copyFile) {
   return parseThemePack(bytes.toString('utf8'), task.to, { descriptorLabel: 'theme.yaml' });
 }
 
+// The defensive copy (spec §3). The gate still validates only AFTER acquisition (the
+// staged descriptor is parsed during the copy only to select pack content), so
+// the copy itself must refuse what it cannot safely materialize. On Linux,
+// directories are opened no-follow and traversed through their /proc fd
+// identity, so a pathname swap cannot redirect a queued walk. On Darwin,
+// traversal uses the verified pathname with parent identity checks; a hostile
+// writer can still swap a directory away and back between those checks, the
+// accepted Darwin race ceiling (spec §§5, 12). Static symlinks, FIFOs, sockets
+// and devices are rejected by lstat before open; a raced file replacement is
+// opened no-follow/nonblocking and rejected through the handle.
+// Only pack content is copied (spec 2026-10-14 §3): `theme.yaml` is staged first
+// and parsed from the staged bytes, then each entry's `packEntryRole` decides.
+// `outside` entries are skipped by name and never `lstat`ed. `.git` at any depth
+// is excluded, and git is never invoked on the source.
+// Regular files are copied by abortable streaming because fs.copyFile/fs.cp
+// accept no AbortSignal, and the wall clock must stop a stalled file.
 export async function copySource(sourceDir, dest, {
   signal,
   platform = process.platform,
@@ -310,7 +311,8 @@ export async function cloneSource(url, dest, { caFile, signal } = {}) {
       '--', url, dest],
     { env, signal, what: 'clone' }
   );
-  // Read provenance before the orchestrator removes .git.
+  // Read the commit while the clone still holds .git; the clone is discarded
+  // with the run.
   const commit = (await runGit(
     ['-C', dest, 'rev-parse', 'HEAD'], { env, signal, what: 'rev-parse' }
   )).trim();

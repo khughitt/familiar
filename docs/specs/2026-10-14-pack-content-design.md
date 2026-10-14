@@ -152,8 +152,10 @@ spec gets a status line pointing here for the amended sections.
 ## 4. Error handling
 
 - No `theme.yaml` at the source root: `theme add: <source> has no theme.yaml`.
-- An oversized or unparseable descriptor: the contract's own messages, the
-  same ones `theme validate` prints, with staging cleaned by the existing
+- An oversized descriptor: the engine refuses it itself, before parsing, as
+  `theme add: <path> is <n> bytes — descriptors are bounded at <max>
+  (MAX_DESCRIPTOR_BYTES)`. An unparseable one gives the contract's own
+  `parseThemePack` message. Either way staging is cleaned by the existing
   orchestrator `finally`.
 - An `asset-root` absent from the source: nothing is copied for it, and the
   gate fails with its existing `asset-root … does not exist`.

@@ -221,8 +221,8 @@ Usage
 Arguments
   SOURCE          An https:// git URL, or a local theme directory
 
-The pack is fetched into staging, validated whole, and promoted atomically;
-an install receipt records the source. Private repos: clone with git, then
+Only the pack (theme.yaml, licence files, member sprites) is staged,
+validated and promoted atomically; an install receipt records the source. Private repos: clone with git, then
 add the clone's directory.
 
 Examples
