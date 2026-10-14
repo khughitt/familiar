@@ -1,6 +1,6 @@
 # Pack content: what a theme pack is, for the gate and for `theme add`
 
-**Status:** draft for review
+**Status:** approved 2026-10-14; plan pending
 **Date:** 2026-10-14
 **Task:** fam-13999b
 **Amends:** §3 "Local copy" and §2 step 4 of
