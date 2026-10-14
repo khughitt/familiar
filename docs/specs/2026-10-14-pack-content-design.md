@@ -45,9 +45,14 @@ decided by its `/`-joined relative path:
 
 | role | entries |
 |---|---|
-| `content` | `theme.yaml`; a root entry whose name starts, case-insensitively, with `licen`, `copying` or `notice` (`LICENSE`, `LICENSE-assets`, `LICENCE.md`, `COPYING`, `NOTICE`, a REUSE `LICENSES/` directory); each member's `asset-root` and everything beneath it |
+| `content` | `theme.yaml`; any path whose **first segment** starts, case-insensitively, with `licen`, `copying` or `notice`: a root licence file (`LICENSE`, `LICENSE-assets`, `LICENCE.md`, `COPYING`, `NOTICE`) or a licence directory and everything beneath it (REUSE's `LICENSES/MIT.txt`); each member's `asset-root` and everything beneath it |
 | `ancestor` | a proper prefix of some member's `asset-root`, by segment (`sprites` for `sprites/persian`) |
 | `outside` | everything else |
+
+Content is closed under descent: every path beneath a `content` directory is
+`content`. Both content subtrees (licence directories and member trees) are
+defined by a prefix of the path, so a walker that asks for the role at every
+depth never drops a descendant.
 
 `asset-root` is already constrained by the contract: relative, no empty, `.`
 or `..` segments, ending in `sprites/<member-id>`. So the content set comes
@@ -75,9 +80,11 @@ else fails by path.
 - **Gate preflight walks pack content only.** The order becomes:
   1. `lstat` `theme.yaml` (or the candidate descriptor): a regular non-symlink
      file, bounded by `MAX_DESCRIPTOR_BYTES`.
-  2. Parse it.
+  2. Read its bytes **once** and parse them.
   3. Walk the root by role.
-  4. Everything after preflight is unchanged.
+  4. Load the pack from **those same bytes**: `loadThemePack` receives them
+     through its existing `readFile` seam, so the descriptor is never read a
+     second time. Everything after preflight is otherwise unchanged.
 
   `MAX_ENTRY_COUNT` and `MAX_TOTAL_BYTES` now count pack content only, so a
   checkout's clutter cannot trip them.
@@ -85,10 +92,14 @@ else fails by path.
   candidate stands in for `theme.yaml`: it is checked and counted as now, the
   root `theme.yaml` is skipped as now, and the roles come from the candidate's
   members.
-- **Drift fails closed.** If the descriptor changes between the preflight parse
-  and `loadThemePack`'s read, a newly named member's PNGs are missing from the
-  retained map. The coverage check then fails with "missing state". No new
-  check is needed, and a test proves it.
+- **No descriptor drift.** The roles, the walk and the load all come from one
+  read of the descriptor. A second read would not reliably fail closed.
+  Suppose preflight reads `asset-root: sprites/solo` and skips an `outside`
+  symlink `alias -> .`, and the descriptor is then rewritten to
+  `alias/sprites/solo`. A second read would resolve that to the directory
+  already walked, its PNGs would already be in the retained map, and coverage
+  would pass through a symlink the walk never examined. Reusing the bytes
+  closes that window by construction.
 - **Unchanged:** a pack that passed v0.2.0 passes v0.3.0. The gate only stops
   looking at non-content entries. `SPEC_VERSION` does not change, because the
   descriptor format is untouched.
@@ -104,8 +115,15 @@ else fails by path.
    exactly the descriptor the gate will validate, so there is no window
    between selection and validation.
 3. Walk the source with the existing identity-checked walker, filtering each
-   directory's entries through `packEntryRole`. The `.git` exclusion stays as a
-   second guard inside content.
+   directory's entries through `packEntryRole`. The walk **skips the root
+   `theme.yaml` entry**: step 1 already staged it, the copier creates files
+   exclusively (`wx`), so a second copy would fail with `EEXIST`, and leaving
+   the step-1 copy untouched keeps the parsed bytes and the staged bytes
+   identical. The `.git` exclusion stays as a second guard inside content.
+
+From here the staging run directory is written only by this installer, under
+the theme-add lock. The gate's single read of the staged descriptor (§2) is
+the one it validates and the one whose content was copied.
 
 The self-copy check (staging beneath the source) is unchanged.
 
@@ -143,14 +161,22 @@ spec gets a status line pointing here for the amended sections.
 
 **Contract package (its own suite).**
 - `packEntryRole` table: root files, licence-name variants and non-matches
-  (`licensed-art/` is content by prefix, which is accepted), member trees,
-  ancestors, shared ancestors, outside entries.
+  (`licensed-art/` is content by prefix, which is accepted), descendants of a
+  licence directory at several depths (`LICENSES/MIT.txt`,
+  `LICENSES/assets/CC-BY-4.0.txt`), member trees, ancestors, shared ancestors,
+  outside entries.
+- A `LICENSES/` directory's nested files are walked and counted. A symlink or
+  FIFO inside it fails by path.
+- The alias drift case: a pack whose descriptor names `sprites/solo`, beside
+  an outside symlink `alias -> .`, rewritten to `alias/sprites/solo` after the
+  preflight read (through an injected read hook). The gate validates the first
+  bytes and reads the descriptor exactly once. A test that only adds a new
+  member would miss this case.
 - The gate accepts a valid pack beside a root symlink, a FIFO, a socket and a
   large non-content file.
 - The gate still rejects a symlink inside a member tree, and an ancestor that
   is a symlink.
 - The entry and byte bounds ignore non-content entries.
-- Descriptor drift between the preflight parse and the load fails closed.
 
 **Engine (fast suite).**
 - The regression: a local checkout holding a `.worktrees` relative symlink, a
@@ -163,6 +189,10 @@ spec gets a status line pointing here for the amended sections.
   `LICENSE`.
 - A missing `theme.yaml` and an oversized descriptor give the named errors,
   with no staging residue.
+- The staged `theme.yaml` is byte-identical to the source's, is written once,
+  and the walk does not attempt it again (no `EEXIST`).
+- A source with `LICENSES/MIT.txt` installs it. A symlink under `LICENSES/`
+  fails by path.
 - The hermetic HTTPS test's served repository gains `README.md` and `docs/`
   holding a symlink. It installs, the installed tree is content only, and the
   receipt still carries the commit.
@@ -190,6 +220,7 @@ is forge's decision, filed as a follow-up rather than done here.
 |---|---|---|---|
 | where the rule lives | the contract package, one exported function | engine-only selection in `copySource` | `theme validate` would stay broken on every checkout, and the engine would duplicate contract knowledge (`asset-root` shape) |
 | how clutter is excluded | descriptor-derived content set | skip a fixed list of tool-workspace names (`.worktrees`, `.superpowers`) | the engine would learn host conventions, and the next stray entry (`.venv`, a build directory) would break it again |
+| descriptor reads in the gate | one read; roles, walk and load share the bytes | re-read for the load and rely on coverage to catch drift | an outside symlink alias can make a rewritten descriptor resolve to already-retained PNGs, so coverage passes; one read closes the window by construction |
 | selection source in the engine | the staged descriptor's bytes | parse the source descriptor in place | no window between the bytes that choose the selection and the bytes the gate validates |
 | clone path | same selective copy, from `<run>/clone` to `<run>/pack` | promote the whole clone | a narrowed gate would otherwise let unvalidated bytes, symlinks included, be installed |
 | licence files | root name prefix `licen` / `copying` / `notice` | omit them; or declare them in `theme.yaml` | omitting drops the asset terms from installed copies; a descriptor key would be a format change (`SPEC_VERSION`) for a convention every repository already follows |
