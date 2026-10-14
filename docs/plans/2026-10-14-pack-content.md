@@ -19,7 +19,7 @@
 - Every failure is a named, single-line message naming the path. Inside content, symlinks, FIFOs, sockets and devices still fail by path. `.git` is never copied.
 - The gate reads the descriptor once. The roles, the walk and `loadThemePack` share those bytes.
 - In the engine, the selection is parsed from the **staged** descriptor's bytes, and the walk never copies the root `theme.yaml` a second time.
-- No descriptor is read into memory before its size is checked: the gate checks the held handle's size, and the engine stats the completed staged copy before `readFile`.
+- No descriptor is read into memory before its size is checked: the gate checks the `lstat` size before opening (the held handle is checked only for type and identity), and the engine stats the completed staged copy before `readFile`.
 - Every installed byte was validated by the gate. Both transports promote `<run>/pack`, never a whole clone.
 - Engine tests run only through `just test-fast` (the project's test front door). The contract package has no justfile: use `npm test`, or `node --test <file>` for one file.
 - Pushing `familiar-theme` (branch and tag) is an external action: stop and get the user's approval at Task 3 Step 6.
