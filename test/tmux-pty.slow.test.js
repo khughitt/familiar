@@ -56,7 +56,8 @@ async function withServer({ passthrough, paneCommand, paneEnv = {} }, body) {
       attached = tty !== '';
       if (!attached) await sleep(100);
     }
-    assert.ok(attached, 'a client attached through the pty within 5 s');
+    // A client that cannot attach (an unknown TERM, a refused socket) says why on its pty.
+    assert.ok(attached, `a client attached through the pty within 5 s; client log:\n${readFileSync(log, 'latin1')}`);
     return await body({ readClient: () => readFileSync(log, 'latin1') });
   } finally {
     spawnSync('tmux', ['-S', sock, 'kill-server']);
