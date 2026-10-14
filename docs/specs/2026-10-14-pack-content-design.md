@@ -80,7 +80,9 @@ else fails by path.
 - **Gate preflight walks pack content only.** The order becomes:
   1. `lstat` `theme.yaml` (or the candidate descriptor): a regular non-symlink
      file, bounded by `MAX_DESCRIPTOR_BYTES`.
-  2. Read its bytes **once** and parse them.
+  2. Read its bytes **once**, never more than `MAX_DESCRIPTOR_BYTES + 1` (the
+     pack directory is the author's, so the file can grow after `lstat`; the
+     extra byte proves it is over the bound), and parse them.
   3. Walk the root by role.
   4. Load the pack from **those same bytes**: `loadThemePack` receives them
      through its existing `readFile` seam, so the descriptor is never read a

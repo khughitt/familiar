@@ -19,7 +19,7 @@
 - Every failure is a named, single-line message naming the path. Inside content, symlinks, FIFOs, sockets and devices still fail by path. `.git` is never copied.
 - The gate reads the descriptor once. The roles, the walk and `loadThemePack` share those bytes.
 - In the engine, the selection is parsed from the **staged** descriptor's bytes, and the walk never copies the root `theme.yaml` a second time.
-- No descriptor is read into memory before its size is checked: the gate checks the `lstat` size before opening (the held handle is checked only for type and identity), and the engine stats the completed staged copy before `readFile`.
+- No descriptor is read into memory before its size is checked. The gate checks the `lstat` size before opening, then reads at most `MAX_DESCRIPTOR_BYTES + 1` bytes through the held handle (checked for type and identity), so growth after `lstat` can never load more. The engine stats the completed staged copy before `readFile`.
 - Every installed byte was validated by the gate. Both transports promote `<run>/pack`, never a whole clone.
 - Engine tests run only through `just test-fast` (the project's test front door). The contract package has no justfile: use `npm test`, or `node --test <file>` for one file.
 - Pushing `familiar-theme` (branch and tag) is an external action: stop and get the user's approval at Task 3 Step 6.
@@ -206,7 +206,7 @@ git commit -m "feat(pack): packEntryRole, the pack-content rule"
 - Consumes: `packEntryRole` (Task 1); `parseThemePack(text, dir, { descriptorLabel })`; `loadThemePack(dir, { descriptorPath, descriptorLabel, readFile })`. `loadThemePack` reads the descriptor only through `readFile(descriptorRealPath, 'utf8')`.
 - Produces:
   - `validateThemePack(dir, { descriptorPath })`: same signature and return value. It now ignores `outside` entries.
-  - `validateThemePackWithLoader(dir, { descriptorPath, loadAnimation, afterDescriptorRead })`: an intra-package test seam. `afterDescriptorRead(path)` runs once, after the descriptor's single read and before the walk. It is not exported from `src/index.js`.
+  - `validateThemePackWithLoader(dir, { descriptorPath, loadAnimation, afterDescriptorStat, afterDescriptorRead })`: intra-package test seams, not exported from `src/index.js`. `afterDescriptorStat(path)` runs once, after the descriptor's `lstat` checks and before it is opened. `afterDescriptorRead(path)` runs once, after the descriptor's single read and before the walk.
 
 - [ ] **Step 1: Relocate the existing root fixtures in `test/validate-preflight.test.js`**
 
@@ -232,7 +232,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, ftruncateSync, mkdirSync, openSync, renameSync, rmSync, symlinkSync, writeFileSync,
+  closeSync, ftruncateSync, mkdirSync, openSync, renameSync, rmSync, symlinkSync, truncateSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
@@ -311,6 +312,17 @@ test('a root licence symlink fails by path', async (t) => {
   await assert.rejects(() => validateThemePack(dir), /LICENSE: is a symlink/);
 });
 
+test('a descriptor that grows after its lstat is never read past the bound', async (t) => {
+  const dir = pack(t);
+  // The descriptor passes the lstat check, then grows past 2 GiB (sparse) before
+  // it is opened. A whole-file read would load it or fail with Node's
+  // ERR_FS_FILE_TOO_LARGE; the bounded read stops one byte past the limit and
+  // names the bound.
+  await assert.rejects(() => validateThemePackWithLoader(dir, {
+    afterDescriptorStat(path) { truncateSync(path, 3 * 1024 ** 3); },
+  }), new RegExp(`theme\\.yaml: is more than ${LIMITS.MAX_DESCRIPTOR_BYTES} bytes .*MAX_DESCRIPTOR_BYTES`));
+});
+
 test('the descriptor is read once: a rewrite through an outside alias is never seen', async (t) => {
   const dir = pack(t);
   symlinkSync('.', join(dir, 'alias'));
@@ -330,7 +342,7 @@ test('the descriptor is read once: a rewrite through an outside alias is never s
 - [ ] **Step 3: Run the tests and verify they fail**
 
 Run: `node --test test/validate-content.test.js`
-Expected: FAIL. The clutter test rejects on `.worktrees` (or another root entry), the bounds test rejects on `MAX_ENTRY_COUNT`, and the drift test fails because `afterDescriptorRead` is never called (`reads` is 0). The ancestor, member-tree, licence and root-licence tests may already pass: they pin behaviour that must survive the change.
+Expected: FAIL. The clutter test rejects on `.worktrees` (or another root entry), the bounds test rejects on `MAX_ENTRY_COUNT`, the drift test fails because `afterDescriptorRead` is never called (`reads` is 0), and the growth test fails because `afterDescriptorStat` is never called: the descriptor stays small, the pack validates, and `assert.rejects` reports that nothing was rejected. The ancestor, member-tree, licence and root-licence tests may already pass: they pin behaviour that must survive the change.
 
 - [ ] **Step 4: Write the implementation**
 
@@ -347,7 +359,11 @@ const kindOf = (stat, entry) => (stat.isSymbolicLink() || entry?.isSymbolicLink(
 // The descriptor's one read (spec §2): roles, walk and load all use these bytes.
 // A second read could be rewritten to name an outside alias that resolves to an
 // already-walked directory, and coverage would pass through it.
-async function readDescriptor(path, rel) {
+//
+// The read is bounded, not just pre-checked: the pack directory is the author's,
+// so the file can grow after lstat. At most MAX_DESCRIPTOR_BYTES + 1 bytes are
+// ever held; the extra byte proves the descriptor is over the bound.
+async function readDescriptor(path, rel, afterStat = () => {}) {
   const stat = await fsLstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) {
     fail(rel, `is ${kindOf(stat)} — packs may contain only regular files and directories`);
@@ -355,16 +371,24 @@ async function readDescriptor(path, rel) {
   if (stat.size > LIMITS.MAX_DESCRIPTOR_BYTES) {
     fail(rel, `is ${stat.size} bytes — descriptors are bounded at ${LIMITS.MAX_DESCRIPTOR_BYTES} (MAX_DESCRIPTOR_BYTES)`);
   }
+  afterStat(path);
   const handle = await fsOpen(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const held = await handle.stat();
     if (!held.isFile() || held.dev !== stat.dev || held.ino !== stat.ino) {
       fail(rel, 'changed while the gate read it — validate a stable pack');
     }
-    const bytes = await handle.readFile();
-    if (bytes.length > LIMITS.MAX_DESCRIPTOR_BYTES) {
-      fail(rel, `is ${bytes.length} bytes — descriptors are bounded at ${LIMITS.MAX_DESCRIPTOR_BYTES} (MAX_DESCRIPTOR_BYTES)`);
+    const buffer = Buffer.alloc(LIMITS.MAX_DESCRIPTOR_BYTES + 1);
+    let filled = 0;
+    while (filled < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
     }
+    if (filled > LIMITS.MAX_DESCRIPTOR_BYTES) {
+      fail(rel, `is more than ${LIMITS.MAX_DESCRIPTOR_BYTES} bytes — descriptors are bounded at ${LIMITS.MAX_DESCRIPTOR_BYTES} (MAX_DESCRIPTOR_BYTES)`);
+    }
+    const bytes = buffer.subarray(0, filled);
     if (bytes.subarray(0, LFS_SIG.length).equals(LFS_SIG)) {
       throw new Error(`${rel} is a Git LFS pointer; v1 themes must contain materialized files`);
     }
@@ -434,7 +458,7 @@ async function preflight(root, { candidatePath, pack, descriptorBytes }) {
 
 The ancestor message keeps the asset-root wording (`sprites: is a symlink — it lies on a member's asset-root and must be a directory`): it tells the author why `sprites` was examined at all. The test's `/^Error: sprites: is a symlink/` matches it, because `assert.rejects` tests a RegExp against the error's `toString()`.
 
-4. Thread the seam through `validateThemePackWithLoader`: add `afterDescriptorRead = () => {}` to its options and pass it to `validateResolved(root, candidatePath, loadAnimation, afterDescriptorRead)`.
+4. Thread the seams through `validateThemePackWithLoader`: add `afterDescriptorStat = () => {}` and `afterDescriptorRead = () => {}` to its options and pass both to `validateResolved(root, candidatePath, loadAnimation, { afterDescriptorStat, afterDescriptorRead })`. Give `validateResolved` that fourth parameter in the same shape.
 5. In `validateResolved`, replace `const found = await preflight(root, { candidatePath, isCandidate });` and the `loadThemePack` call with:
 
 ```js
@@ -444,7 +468,7 @@ The ancestor message keeps the asset-root wording (`sprites: is a symlink — it
       throw new Error('candidate descriptor must be a regular non-symlink file');
     }
   }
-  const descriptorBytes = await readDescriptor(candidatePath, 'theme.yaml');
+  const descriptorBytes = await readDescriptor(candidatePath, 'theme.yaml', afterDescriptorStat);
   afterDescriptorRead(candidatePath);
   const descriptorText = descriptorBytes.toString('utf8');
   const parsed = parseThemePack(descriptorText, root, { descriptorLabel: 'theme.yaml' });
