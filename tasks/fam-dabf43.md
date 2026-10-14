@@ -1,15 +1,16 @@
 ---
 id: fam-dabf43
 title: Confirm CI passes the worktree identity work on its first push
-status: doing
+status: done
 priority: 2
 size: xs
 complexity: low
 process: direct
 owner: main
 created: 2026-10-08T10:54:48Z
-updated: 2026-10-14T15:40:44Z
+updated: 2026-10-14T15:52:05Z
 started: 2026-10-14T15:30:43Z
+completed: 2026-10-14T15:52:05Z
 depends: []
 parent: fam-74f6e9
 tags: [identity]
@@ -28,4 +29,8 @@ main carries the worktree pin inheritance merge (e84b89d) and has not been pushe
 - 2026-10-14T15:34:13Z (main): parked (waiting on user, approval): user approves pushing main (12 commits incl. 62878c9 CI fix); then watch the run: Ubuntu 22/26 fast+slow, macOS fast + linked smoke; close if green, else fix the failure with a reproducing test
   provenance: {"harness_session":"claude-code:b5ecf18c-f43a-46e9-b421-14c9ea7f96d4","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-14T15:40:44Z (main): resumed
+  provenance: {"harness_session":"claude-code:b5ecf18c-f43a-46e9-b421-14c9ea7f96d4","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:52:05Z (main): done
+  provenance: {"harness_session":"claude-code:b5ecf18c-f43a-46e9-b421-14c9ea7f96d4","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-14T15:52:05Z (main): CI green on main (run 38592774672, 6667436): zsh + kitty-terminfo on Ubuntu, hook fixture's faked agent now answers recordOf with a deviceless Darwin tty; setup-just, the real just bench-hook recipe and the macOS real-Git identity tests all pass
   provenance: {"harness_session":"claude-code:b5ecf18c-f43a-46e9-b421-14c9ea7f96d4","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
