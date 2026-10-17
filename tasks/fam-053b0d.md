@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T22:34:21Z
+updated: 2026-10-17T22:34:22Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -48,3 +48,5 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T22:33:10Z (feat/project-colour): review: spec round 1 — verdict: revise; findings: Important 1; reviewer: codex
 - 2026-10-17T22:33:18Z (feat/project-colour): spec finding (Important): lines 102–106 suppress warnings on unregistered rows. Isolated tasks resolve probe: linked checkout with valid config returns resolved + color; invalid color in its overlay config returns unregistered + warning, exit 0. The proposed reader suppresses the failure and caches null. Forward warnings whenever no color is returned, including unregistered, and test this linked-project case. Review only; spec unchanged.
 - 2026-10-17T22:34:21Z (feat/project-colour): review: spec round 2 — verdict: revise; findings: must-fix 1; reviewer: human
+- 2026-10-17T22:34:22Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
