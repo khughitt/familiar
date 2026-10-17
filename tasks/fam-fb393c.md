@@ -4,8 +4,9 @@ title: Restore an installed theme from its receipt
 status: idea
 priority: 2
 created: 2026-10-16T18:37:48Z
-updated: 2026-10-16T18:37:48Z
+updated: 2026-10-17T21:13:43Z
 depends: []
+parent: fam-ebff9c
 tags: [theme]
 agent: claude-code/claude-opus-5
 ---
