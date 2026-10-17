@@ -3,8 +3,10 @@ id: fam-fb393c
 title: Restore an installed theme from its receipt
 status: idea
 priority: 2
+reviewed: true
+reviewed_at: 2026-10-17T21:13:45Z
 created: 2026-10-16T18:37:48Z
-updated: 2026-10-17T21:13:44Z
+updated: 2026-10-17T21:13:45Z
 depends: [fam-2b8fff]
 parent: fam-ebff9c
 tags: [theme]
@@ -18,3 +20,7 @@ Recovering today takes two manual steps: `theme add <url>` refuses with 'orphan 
 A `theme restore [ID]` (or teaching `theme add` to act on an orphan receipt) that reinstalls at the receipt's recorded commit would make this one command, and would make a new host's first setup the same command.
 
 Observed on europa, 2026-10-16: receipt present at commit 08942fa, ~/.config/familiar/themes/ empty. Related: fam-2b8fff (update an installed theme in place).
+
+## Notes
+
+- 2026-10-17T21:13:45Z (main): scope: briefed; reproduced the bare realpath ENOENT (shipped-themes fallback, absent since the split) and split its legible error out as fam-7e9440; restore shares fam-2b8fff's staged swap plus a pinned-commit acquire (cloneSource clones head only), so it waits on fam-2b8fff, whose spec should cover restore as the not-installed case; open: verb shape, force-pushed commit, local receipts, installedAt, and whether restore goes before update; parented under fam-ebff9c; brief: docs/notes/2026-10-17-host-install-recovery-brief.md
