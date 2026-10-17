@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: planned
 created: 2026-10-07T19:49:48Z
-updated: 2026-10-07T19:49:48Z
+updated: 2026-10-17T21:13:45Z
 depends: []
 tags: [theme]
 agent: claude-code/claude-opus-5-5
@@ -16,3 +16,7 @@ agent: claude-code/claude-opus-5-5
 Shipping new art for an installed theme (cats matte-v1, 2026-10-07) has no command: theme add refuses an installed id ('already installed at … — remove it first'), there is no theme remove, and the receipt must go too or add refuses an orphan receipt. The person hand-deletes ~/.config/familiar/themes/<id> and theme-receipts/<id>.json, re-adds, then reruns familiar install pets once per Codex home (CODEX_HOME=~/.codex and ~/.codex-work here), since pets are compiled copies under $CODEX_HOME/pets.
 
 Wanted: an update (or add --replace) that stages and validates the new pack, then swaps theme dir and receipt atomically, and either refreshes compiled Codex pets for every known Codex home or names each one still stale. Claude Code needs nothing more: its hooks and status line read the theme dir at render time.
+
+## Notes
+
+- 2026-10-17T21:13:45Z (main): fam-fb393c (restore an installed theme from its receipt) now depends on this task. Its brief, docs/notes/2026-10-17-host-install-recovery-brief.md, proposes that this spec cover restore as the case where no theme dir exists: the same staged swap, with acquisition pinned to the receipt's commit.
