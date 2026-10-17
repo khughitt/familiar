@@ -75,6 +75,12 @@ Measured on this host, 2026-10-17, `tasks` 0.4.0:
 - `tasks resolve` reads every registered project's config to build its index; a
   project whose config fails adds a warning and does not fail the command, so
   one broken project cannot break another's colour.
+- A linked project whose config fails (an invalid `color`, say) is left out of
+  the index entirely, so its code checkout resolves `unregistered`, not
+  `resolved`; the only sign is the warning `<prefix>: its checkout is not matched
+  and its color is not reported (…)` (reproduced at spec review, round 2). A
+  colourless answer can therefore hide a configuration failure whatever its
+  status.
 - Of the 13 slot pins whose path resolves to a registered project, all 13 already
   name the slot the mapping below derives from that project's colour. The other 7
   pins name unregistered directories and are unaffected. `ops-40f2a6` kept pinned
@@ -87,23 +93,29 @@ Measured on this host, 2026-10-17, `tasks` 0.4.0:
 ### 1. Reading the colour
 
 A new module (my call: `src/bus/project-color.js`) exports one function that takes
-a directory and returns `{ prefix, color }` (the colour `'#rrggbb'` or `null`), or
-`null` when the directory belongs to no project:
+a directory and returns `{ prefix, color, warnings }`: `prefix` is the project's or
+`null`, `color` is `'#rrggbb'` or `null`, and `warnings` is the list to pass on.
 
 - Spawn `tasks resolve <dir>` with `execFile`, bounded like Git discovery: a 2 s
   timeout and `SIGKILL` (its own named constant; the Git one stays Git's).
-- Spawn fails with `ENOENT`: tasks is not installed. Return `null`.
-- Exit 0 with exactly one row whose `status` is `unregistered`: return `null`.
-- Exit 0 with exactly one `resolved` row: return its `prefix` and its `color`,
-  which must match `^#[0-9a-f]{6}$` when present; absent means `null`.
+- Spawn fails with `ENOENT`: tasks is not installed. Prefix and colour `null`, no
+  warnings.
+- Exit 0 with exactly one row whose `status` is `unregistered`: prefix and colour
+  `null`.
+- Exit 0 with exactly one `resolved` row: its `prefix` and its `color`, which must
+  match `^#[0-9a-f]{6}$` when present; absent means `null`.
 - Anything else is an error that names the directory and what came back: a
   non-zero exit, a timeout, output that is not JSON, a row count other than one,
   any other `status` (`ambiguous`, `invalid`), or a `color` in another form.
-- `warnings` are ignored when the row carries a colour or is unregistered: they
-  can be about any registered project. When a `resolved` row has no colour, they
-  are passed on to stderr, one `familiar: tasks: <warning>` line each, so a
-  project whose config tasks could not read is reported rather than silently
-  drawn in slot colours. Familiar does not parse their text.
+- **Warnings: forwarded whenever no colour is returned**, for an `unregistered` row
+  as much as a colourless `resolved` one, because either can be a project whose
+  config tasks could not read (Evidence, last bullet). The caller writes each to
+  stderr as one `familiar: tasks: <warning>` line. When a colour is returned, the
+  warnings are dropped: they can be about any registered project, and this one's
+  answer is complete. Familiar never parses their text.
+
+A colourless answer is still cached on the record (§2), so its warnings are
+written on the event that spawned `tasks`, not on every event after it.
 
 Which directory: the checkout root (`repoRoot`). Outside a Git repository there is
 no project colour and no spawn (my call: every registered project is a Git
@@ -230,6 +242,10 @@ niri accent, opencode) reads the stops it reads today. `theme show` and
 - **`install pets --sync-projects`**: `planCodexProjectForPath` resolves the colour
   for each target root, so the Codex pet it selects is the one hooks would.
 
+Every entry point that spawns `tasks` (the hook, `whoami`, `projects`, the Codex
+sync) writes the forwarded warnings to stderr as §1 says; JSON output on stdout
+stays unchanged by them.
+
 ### 7. Latency
 
 The hook adds no spawn in steady state. `just bench-hook compare` against the
@@ -243,8 +259,11 @@ a linked one, and the plan updates them.
 
 ## Tests
 
-Registered (colour → slot, ramp, exact label), unregistered, colour-less project
-(with and without warnings passed on), tasks absent (`ENOENT`), and tasks failure
+Registered (colour → slot, ramp, exact label), unregistered, colour-less project,
+and the warning rule: warnings forwarded for an `unregistered` row and a colourless
+`resolved` row, dropped when a colour is returned, and the linked checkout whose
+project config fails (an `unregistered` row with that project's warning: colour
+`null`, warning on stderr, hook still written); tasks absent (`ENOENT`), and tasks failure
 (non-zero exit, timeout, malformed JSON, row count, `ambiguous` and `invalid`
 status, malformed colour) paths; the command spawned is `tasks resolve` with the
 checkout root; the slot table rules (grey cut, tie, wrap at 0°/360°,
@@ -274,6 +293,12 @@ the coupling choice, since both are tasks' public JSON. Its smaller points are
 folded in: the reader returns the prefix `whoami` prints, colourless `projects`
 rows keep the `base` swatch, and the benchmark's spawn expectations need updating.
 It reproduced both tables and the 13 agreeing pins independently.
+
+User review, round 2, one must-fix: the draft dropped warnings on `unregistered`
+rows, but a linked checkout whose project config fails resolves `unregistered`
+with only a warning, so a configuration failure would silently turn into slot
+colours. Warnings are now forwarded whenever no colour is returned (§1), and the
+tests cover that linked case.
 
 ## Left to the builder
 
