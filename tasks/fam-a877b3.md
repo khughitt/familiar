@@ -1,12 +1,11 @@
 ---
 id: fam-a877b3
 title: "identities.yaml lives in familiar's config dir, not state"
-status: idea
+status: dropped
 priority: 2
-reviewed: true
-reviewed_at: 2026-10-17T21:03:59Z
 created: 2026-09-12T10:23:31Z
-updated: 2026-10-17T21:03:59Z
+updated: 2026-10-17T21:08:42Z
+closed: 2026-10-17T21:08:42Z
 depends: [fam-090b35]
 parent: fam-74f6e9
 tags: [dotfiles]
@@ -33,3 +32,7 @@ Should the catalog be one file shared by every host, or a separate file on each?
 - 2026-10-17T20:34:26Z (main): scope: question; rerun after fam-090b35's finding; body records the established facts (read-only engine, authored catalog, live catalog pins only ~/d paths) and one open question: one synced catalog (lean, dotfiles tracks it, no engine work) or a per-host catalog via FAMILIAR_IDENTITIES_FILE; brief: docs/notes/2026-10-07-project-identity-brief.md
 - 2026-10-17T21:02:32Z (main): answer (user, 2026-10-17): shared — one identities.yaml for every host
 - 2026-10-17T21:03:59Z (main): scope: drop; user answered shared (2026-10-17); no engine work remains: the catalog stays in familiar's config dir and dotfiles tracks it instead of ignoring it; filed dots-13aa63 for that change (gitignore, Dropbox mark, setup data and tests, cross-host reconcile); proposal: drop — superseded by dots-13aa63 on the user's shared-catalog decision; the state-relocation premise was already refuted by fam-090b35
+- 2026-10-17T21:08:42Z (main): dropped
+  provenance: {"harness_session":"claude-code:d524b980-a44c-4c01-8e83-aa5eabf2f835","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T21:08:42Z (main): user approved 2026-10-17: superseded by dots-13aa63 (shared catalog tracked by dotfiles)
+  provenance: {"harness_session":"claude-code:d524b980-a44c-4c01-8e83-aa5eabf2f835","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
