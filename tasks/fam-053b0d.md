@@ -6,9 +6,9 @@ priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:09:21Z
+updated: 2026-10-17T21:09:52Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -37,4 +37,6 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T21:02:33Z (main): answer (user, 2026-10-17): label and pet colour should be the same; one project colour source of truth used everywhere. Avoid tight coupling of familiar to ops (or whoever owns project colour assignment): either familiar optionally consumes colours from the owner, or the owner generates familiar's colour config
 - 2026-10-17T21:04:23Z (main): scope: scoped; user answer (single project colour SoT, label and pet agree, loose coupling) applied: chose familiar optionally consuming tasks' public colour over the owner generating familiar config; retitled; body records the constraints (sprites untinted, so the pet matches by slot family) and what the design must settle; todo, m, high, planned
 - 2026-10-17T21:09:21Z (main): started
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T21:09:52Z (feat/project-colour): resumed
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
