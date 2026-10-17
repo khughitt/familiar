@@ -3,11 +3,8 @@ id: fam-053b0d
 title: Paint familiar's project label in the project's tasks colour
 status: idea
 priority: 2
-reviewed: true
-awaiting_user: true
-reviewed_at: 2026-10-17T20:34:47Z
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T20:34:47Z
+updated: 2026-10-17T21:02:33Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
@@ -30,3 +27,4 @@ Do you want the project label (HUD/status line, `whoami`, `projects`) painted in
 ## Notes
 
 - 2026-10-17T20:34:47Z (main): scope: question; body keeps the original text and records the established facts (tasks where ~10 ms, null for unregistered; label computed in transaction.js:170 and cacheable on the agent record) and one taste question: label in the tasks colour beside the slot-hued pet, yes or no; related to fam-60d716's drop and fam-74f6e9 (kept unparented, no goal created for one question); brief: docs/notes/2026-10-07-project-identity-brief.md
+- 2026-10-17T21:02:33Z (main): answer (user, 2026-10-17): label and pet colour should be the same; one project colour source of truth used everywhere. Avoid tight coupling of familiar to ops (or whoever owns project colour assignment): either familiar optionally consumes colours from the owner, or the owner generates familiar's colour config
