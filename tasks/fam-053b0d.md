@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T22:34:22Z
+updated: 2026-10-17T22:35:16Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -50,3 +50,4 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T22:34:21Z (feat/project-colour): review: spec round 2 — verdict: revise; findings: must-fix 1; reviewer: human
 - 2026-10-17T22:34:22Z (feat/project-colour): resumed
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T22:35:16Z (feat/project-colour): spec revised for round 2: warnings forwarded whenever no colour is returned (unregistered rows included, the linked-project config-failure case), forwarded by every entry point; linked case added to tests
