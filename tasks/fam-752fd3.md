@@ -7,7 +7,7 @@ size: m
 complexity: low
 process: direct
 created: 2026-10-16T18:38:02Z
-updated: 2026-10-17T21:13:08Z
+updated: 2026-10-17T21:13:09Z
 depends: []
 parent: fam-ebff9c
 tags: [hooks]
@@ -29,3 +29,7 @@ Done:
 3. A `just setup` recipe per the ops template (templates/justfile in ops: setup_cmd, recorded through tt), running `npm ci`, so a fresh worktree or a new host has a named hydration step; follow the template's work-link and Dropbox-ignore lines as ops-9c7dab's notes describe. That closes familiar's gap in ops-9c7dab's list (filed there, not here).
 
 Where: src/deps.js, bin/familiar, bin/familiar-opencode, test/deps.test.js, justfile. Brief: docs/notes/2026-10-17-host-install-recovery-brief.md.
+
+## Notes
+
+- 2026-10-17T21:13:08Z (main): scope: scoped; chose the src/deps.js launcher preflight (fb4b929) over a hook-level catch; compare version+resolved against node_modules/.package-lock.json (0.4 ms; titan differs by commit f1ec639 vs pinned 4e876bc at same 0.3.0); folded in just setup per ops template; parented under fam-ebff9c; brief: docs/notes/2026-10-17-host-install-recovery-brief.md
