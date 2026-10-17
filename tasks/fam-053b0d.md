@@ -1,10 +1,10 @@
 ---
 id: fam-053b0d
 title: Paint familiar's project label in the project's tasks colour
-status: idea
+status: todo
 priority: 2
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:02:33Z
+updated: 2026-10-17T21:04:22Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
