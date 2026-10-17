@@ -284,3 +284,16 @@ Members: fam-60d716, fam-a877b3, plus the related fam-053b0d (unparented).
   ~10 ms (null for unregistered directories); the transaction computes the
   label per event (`src/bus/transaction.js:170`), so the colour can be carried on the
   agent record while `repoRoot` is unchanged. If the answer is yes, it becomes a direct, small task.
+
+User answers, same day:
+
+- fam-a877b3 — shared. One catalog for every host, tracked by dotfiles:
+  filed `dots-13aa63`; fam-a877b3 is proposed for drop as superseded.
+- fam-053b0d — the label and the pet must agree, from one project colour
+  source, without tight coupling. Chosen: familiar optionally consumes
+  the colour from its owner, tasks, via `tasks where` JSON. Rejected: the owner
+  generating familiar's config, because slots carry only 12 hues, the generator
+  would bake familiar's slot table into ops, and a generated file would collide
+  with the authored catalog. Sprites are untinted art, so the pet matches by slot family; chrome
+  takes the exact hue. Now a planned `todo` whose design settles slot
+  mapping, pin semantics for registered projects, and entry points.
