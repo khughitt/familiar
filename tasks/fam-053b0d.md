@@ -3,8 +3,11 @@ id: fam-053b0d
 title: Paint familiar's project label in the project's tasks colour
 status: idea
 priority: 2
+reviewed: true
+awaiting_user: true
+reviewed_at: 2026-10-17T20:34:47Z
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T20:34:46Z
+updated: 2026-10-17T20:34:47Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
@@ -23,3 +26,7 @@ Open: whether the label should take the project colour while the pet keeps its i
 ## Open questions
 
 Do you want the project label (HUD/status line, `whoami`, `projects`) painted in the project's tasks colour while the pet, the rule and the branch keep the slot hue, so one status line carries two hues? Yes makes this a direct, small task on the lean above; no drops it.
+
+## Notes
+
+- 2026-10-17T20:34:47Z (main): scope: question; body keeps the original text and records the established facts (tasks where ~10 ms, null for unregistered; label computed in transaction.js:170 and cacheable on the agent record) and one taste question: label in the tasks colour beside the slot-hued pet, yes or no; related to fam-60d716's drop and fam-74f6e9 (kept unparented, no goal created for one question); brief: docs/notes/2026-10-07-project-identity-brief.md
