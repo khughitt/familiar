@@ -1,28 +1,33 @@
 ---
 id: fam-053b0d
-title: Paint familiar's project label in the project's tasks colour
+title: Derive familiar's identity colour from the project's tasks colour
 status: todo
 priority: 2
+size: m
+complexity: high
+process: planned
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:04:22Z
+updated: 2026-10-17T21:04:23Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
 ---
 
-Why: every registered project now has one authored colour, exposed by the tasks CLI as color on tasks where / tasks resolve / tasks projects JSON (ops-30b965). familiar shows a project label (basename of repo root or cwd, src/bus/identity.js:184-186) in the HUD/status line (src/render/term/statusfields.js:62, hud.js:102-108, the project: pen at hud.js:92) and in familiar whoami / familiar projects (bin/familiar.js:741-758,781,803; cells.js), coloured from its own slot ramp, never the project colour.
+Why: one project colour, used everywhere (user, 2026-10-17). Every registered project has one authored colour, the `color` key in its committed tasks/.config.toml (ops-b31634, assigned by ops-40f2a6 with ops bin/project-colors; familiar-pinned projects were kept within 18° of their slot hue), exposed by the tasks CLI as color on tasks where / tasks resolve / tasks projects JSON (ops-30b965, which depends on this task). tasks pretty output and hq sessions already paint it. familiar instead colours everything (pet member, HUD rule/label/branch, OSC 11 backdrop, whoami/projects) from its own slot of 12 (src/protocol/slot-hues.js → src/theme/ramp.js identityColors), chosen by pin or autoSlot(projectKey) in src/bus/resolve.js. The user wants the label and the pet to agree with the project colour, without tightly coupling familiar to whoever assigns colours.
 
-Open: whether the label should take the project colour while the pet keeps its identity hue (the slot ramp is a separate concept and stays); how to map a repo root to a prefix (tasks where <path>) and read the colour without a CLI call on every hook-bus render (cache, or resolve at session start); what an unregistered directory shows.
+Approach (decided 2026-10-17, over "the owner generates familiar's colour config"): familiar optionally consumes the colour from its owner, tasks, through the public `tasks where <repoRoot>` JSON (~10 ms; `{"project":null}`, exit 0, when unregistered; a linked worktree resolves to its project). Rejected alternative: ops/tasks writing identities.yaml pins — slots carry only 12 discrete hues, so the label could not show the exact colour without a new hex field; the generator would bake familiar's frozen slot table into ops; and a generated file would collide with the authored, dotfiles-tracked catalog (fam-a877b3 → dots-13aa63). Reading tasks/.config.toml directly is rejected too: it couples familiar to tasks' private file format.
 
-## Established (scope, 2026-10-17)
+Established constraints:
+- Pet sprites are per-member art, not tinted: the pet's colour is its slot's family (12), so with 33 projects over 12 slots the pet can match the project colour only by family (nearest slot), while chrome (label, rule, branch, backdrop) can take the project hue exactly.
+- The label is computed per hook event in src/bus/transaction.js:170 and carried on the agent record into intent (bin/familiar.js:1055-1059); a colour resolved there can ride the record and be carried forward while repoRoot is unchanged, so only a session's first event or a cwd move pays the spawn. `just bench-hook` measures hook latency.
+- familiar must run without tasks installed (project identity brief constraints); unregistered or tasks-absent keeps today's slot behaviour; any other tasks failure surfaces rather than being swallowed.
+- Identity owns colour (src/protocol/intent.js:12-13): the project colour is identity, not state.
 
-- Mapping is cheap and public: `tasks where <path>` returns `project.color` (`#bc8369` here) in ~10 ms, and `{"project":null}` with exit 0 for an unregistered directory. The colour is authored in each project's committed tasks/.config.toml, so a linked worktree resolves to its project too.
-- The label is computed in the hook transaction (src/bus/transaction.js:170, `project: displayProject(...)`) on every event, beside the per-event Git discovery, and carried on the agent record into intent (bin/familiar.js:1055-1059). A colour resolved there can ride the record and be carried forward while `repoRoot` is unchanged, so only a session's first event (or a cwd move) pays the spawn; `just bench-hook` measures it.
-- Consistent with the intent invariant (src/protocol/intent.js:12-13, identity owns colour): the project colour is identity, not state. Technical lean: unregistered → today's slot-ramp pen; `tasks` not installed (ENOENT) → the same, as familiar must run without tasks; any other `tasks` failure is surfaced, not swallowed.
+Design must settle: how a project colour picks the pet's slot (nearest hue, low-chroma → slot 11) and whether familiar's ramp derives from the project hex or the label uses the hex itself (legible at 3:1 on dark and light per ops-40f2a6); what an identities.yaml slot pin means for a registered project once the colour is the single source (error on disagreement, ignore, or pins keep only member choice and unregistered projects); which entry points consume it (hooks/statusline, whoami, projects, codex install).
 
-## Open questions
+Done: for a registered project, familiar's label shows the project colour and its pet is the slot family the design maps that colour to, in the HUD, status line, whoami and projects; unregistered and tasks-absent checkouts behave as today; no measurable steady-state hook slowdown on `just bench-hook`; tests cover registered, unregistered, tasks-absent and tasks-failure paths. Then note ops-30b965.
 
-Do you want the project label (HUD/status line, `whoami`, `projects`) painted in the project's tasks colour while the pet, the rule and the branch keep the slot hue, so one status line carries two hues? Yes makes this a direct, small task on the lean above; no drops it.
+Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ramp.js, src/protocol/slot-hues.js, src/render/term/hud.js and statusfields.js, bin/familiar.js (whoami/projects), src/install/codex.js; brief docs/notes/2026-10-07-project-identity-brief.md (rerun sections).
 
 ## Notes
 
