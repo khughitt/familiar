@@ -7,8 +7,8 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-17T23:34:35Z
-updated: 2026-10-17T23:34:35Z
-depends: []
+updated: 2026-10-17T23:34:57Z
+depends: [fam-0b2c16]
 parent: fam-053b0d
 tags: []
 agent: claude-code/claude-opus-5-5
