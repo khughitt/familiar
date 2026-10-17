@@ -263,3 +263,24 @@ lasting paired benchmark. The same-sitting comparison against the pre-change cod
 showed no consistent main-checkout slowdown (paired median +0.7 ms) and linked
 overhead matching the one verification spawn (+2.4 ms median, probe 3.4 ms); the
 raw report and disposition are attached to `fam-f3d48e`.
+
+## Scope rerun — 2026-10-17
+
+Members: fam-60d716, fam-a877b3, plus the related fam-053b0d (unparented).
+
+- fam-60d716 — proposed drop. `ops-b31634` found nothing to standardize between
+  project and thought identity, and found that project colour is one authored `#rrggbb` in
+  each project's `tasks/.config.toml`. Ops `identity.toml` (`ops-22af0d`)
+  carries names and aliases only. Familiar therefore has no ops-hub source
+  to read; its one remaining consumer need, the project colour, is fam-053b0d.
+- fam-a877b3 — question to the user. The storage result above stands: the
+  catalog is authored, read-only to the engine, and the live one pins only
+  `~/d/...` paths, which the dotfiles convention makes portable. Lean: one
+  catalog tracked by dotfiles (drop its ignore and Dropbox mark), which
+  needs no engine work. Alternative: per-host catalogs via the
+  `FAMILIAR_IDENTITIES_FILE` contract above.
+- fam-053b0d — question to the user (taste): paint the project label in the
+  tasks colour beside the slot-hued pet. `tasks where` resolves the colour in
+  ~10 ms (null for unregistered directories); the transaction computes the
+  label per event (`src/bus/transaction.js:170`), so the colour can be carried on the
+  agent record while `repoRoot` is unchanged. If the answer is yes, it becomes a direct, small task.
