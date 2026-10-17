@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:30:17Z
+updated: 2026-10-17T21:30:31Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -42,3 +42,4 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T21:09:52Z (feat/project-colour): resumed
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T21:30:17Z (feat/project-colour): design: spec drafted at docs/specs/2026-10-17-project-colour-design.md; builder check raised one question (tasks where reads a worktree's checked-out config: 38 of 49 worktrees report no colour), settled by switching to tasks resolve (registered colour, the one tasks paints); slot rule = nearest HSL slot hue, OKLCH chroma < 0.05 → slot 11, reproduces all 13 pins on registered projects; strict pin rule (disagreeing slot pin faults); awaiting user spec review
+- 2026-10-17T21:30:31Z (feat/project-colour): review: spec round 1 — verdict: revise; findings: blocking 1, minor 3; reviewer: claude-code
