@@ -1,6 +1,6 @@
 # Project colour from tasks
 
-Draft for review, 2026-10-17. Task: `fam-053b0d`; source:
+Accepted by the user, 2026-10-17 (round 3). Task: `fam-053b0d`; source:
 `docs/notes/2026-10-07-project-identity-brief.md` (scope rerun, 2026-10-17).
 Engine baseline: `8019302`. Related: `ops-30b965` (every tool that names a project
 shows its one colour), `ops-40f2a6` (assigned the colours).
