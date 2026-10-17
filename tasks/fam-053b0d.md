@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T23:35:12Z
+updated: 2026-10-17T23:35:13Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -59,3 +59,5 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T23:24:04Z (feat/project-colour): resumed
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-17T23:35:12Z (feat/project-colour): plan: docs/plans/2026-10-17-project-colour.md, six steps fam-e0c282 → fam-577d64 → fam-e13178 → fam-0b2c16 → fam-a4f5d5 → fam-1b0712 (chained deps); suite insulated from host tasks via test/fixtures/fake-tasks on the runner PATH; reader passes --json explicitly (TASKS_FORMAT=pretty); awaiting user plan review and execution choice
+- 2026-10-17T23:35:13Z (feat/project-colour): parked (waiting on user, review): user reviews docs/plans/2026-10-17-project-colour.md in .worktrees/project-colour and picks subagent-driven (recommended) or native execution; then the agent starts fam-e0c282 there, running the worktree baseline (just test-fast) before the first code change
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
