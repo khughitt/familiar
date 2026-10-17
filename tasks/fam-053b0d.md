@@ -7,7 +7,7 @@ size: m
 complexity: high
 process: planned
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:04:23Z
+updated: 2026-10-17T21:04:24Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
@@ -33,3 +33,4 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 
 - 2026-10-17T20:34:47Z (main): scope: question; body keeps the original text and records the established facts (tasks where ~10 ms, null for unregistered; label computed in transaction.js:170 and cacheable on the agent record) and one taste question: label in the tasks colour beside the slot-hued pet, yes or no; related to fam-60d716's drop and fam-74f6e9 (kept unparented, no goal created for one question); brief: docs/notes/2026-10-07-project-identity-brief.md
 - 2026-10-17T21:02:33Z (main): answer (user, 2026-10-17): label and pet colour should be the same; one project colour source of truth used everywhere. Avoid tight coupling of familiar to ops (or whoever owns project colour assignment): either familiar optionally consumes colours from the owner, or the owner generates familiar's colour config
+- 2026-10-17T21:04:23Z (main): scope: scoped; user answer (single project colour SoT, label and pet agree, loose coupling) applied: chose familiar optionally consuming tasks' public colour over the owner generating familiar config; retitled; body records the constraints (sprites untinted, so the pet matches by slot family) and what the design must settle; todo, m, high, planned
