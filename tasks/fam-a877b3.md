@@ -3,8 +3,11 @@ id: fam-a877b3
 title: "identities.yaml lives in familiar's config dir, not state"
 status: idea
 priority: 2
+reviewed: true
+awaiting_user: true
+reviewed_at: 2026-10-17T20:34:26Z
 created: 2026-09-12T10:23:31Z
-updated: 2026-10-17T20:34:25Z
+updated: 2026-10-17T20:34:26Z
 depends: [fam-090b35]
 parent: fam-74f6e9
 tags: [dotfiles]
@@ -28,3 +31,4 @@ Should the catalog be one file shared by every host, or a separate file on each?
 
 - 2026-10-07T13:06:42Z (main): scope: briefed; retained original report; engine only reads the pin catalog, and dots-85a593 identifies atomic editor saves as the writer; fam-090b35 will distinguish authored choices from machine paths before relocation; brief: docs/notes/2026-10-07-project-identity-brief.md
 - 2026-10-07T13:18:13Z (investigate/pin-storage): finding: fam-090b35 traced a read-only authored catalog: slots/member overrides and remote/project selectors are portable choices; path selectors are host bindings. Recommend one catalog with optional explicit file-location override for local configuration, not blanket state relocation or merged catalogs. Detailed evidence and conflict/copy/verify/cutover/rollback contract are in docs/notes/2026-10-07-project-identity-brief.md; no relocation implemented. Re-scope this idea from that result.
+- 2026-10-17T20:34:26Z (main): scope: question; rerun after fam-090b35's finding; body records the established facts (read-only engine, authored catalog, live catalog pins only ~/d paths) and one open question: one synced catalog (lean, dotfiles tracks it, no engine work) or a per-host catalog via FAMILIAR_IDENTITIES_FILE; brief: docs/notes/2026-10-07-project-identity-brief.md
