@@ -5,8 +5,8 @@ status: idea
 priority: 3
 reviewed: true
 created: 2026-09-18T11:32:35Z
-updated: 2026-10-12T18:19:09Z
-depends: []
+updated: 2026-10-17T13:01:53Z
+depends: [fam-2b371b]
 parent: fam-361178
 tags: [tmux]
 agent: "claude-code/claude-opus-5[1m]"
