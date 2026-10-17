@@ -8,12 +8,13 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T23:24:04Z
+updated: 2026-10-17T23:34:32Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
 spec: docs/specs/2026-10-17-project-colour-design.md
+plan: docs/plans/2026-10-17-project-colour.md
 ---
 
 Why: one project colour, used everywhere (user, 2026-10-17). Every registered project has one authored colour, the `color` key in its committed tasks/.config.toml (ops-b31634, assigned by ops-40f2a6 with ops bin/project-colors; familiar-pinned projects were kept within 18° of their slot hue), exposed by the tasks CLI as color on tasks where / tasks resolve / tasks projects JSON (ops-30b965, which depends on this task). tasks pretty output and hq sessions already paint it. familiar instead colours everything (pet member, HUD rule/label/branch, OSC 11 backdrop, whoami/projects) from its own slot of 12 (src/protocol/slot-hues.js → src/theme/ramp.js identityColors), chosen by pin or autoSlot(projectKey) in src/bus/resolve.js. The user wants the label and the pet to agree with the project colour, without tightly coupling familiar to whoever assigns colours.
