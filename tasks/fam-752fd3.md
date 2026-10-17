@@ -1,10 +1,10 @@
 ---
 id: fam-752fd3
 title: Report stale dependencies instead of failing with a module-resolution stack trace
-status: idea
+status: todo
 priority: 2
 created: 2026-10-16T18:38:02Z
-updated: 2026-10-16T18:38:02Z
+updated: 2026-10-17T21:13:07Z
 depends: []
 tags: [hooks]
 agent: claude-code/claude-opus-5
