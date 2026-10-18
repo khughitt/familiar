@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: feat/project-colour
 created: 2026-10-17T23:34:35Z
-updated: 2026-10-18T09:59:02Z
+updated: 2026-10-18T09:59:40Z
 started: 2026-10-18T09:56:37Z
 depends: [fam-e13178]
 parent: fam-053b0d
@@ -23,3 +23,5 @@ step: "Task 4: Resolve the colour on the hook and carry it on the record"
 - 2026-10-18T09:56:37Z (feat/project-colour): started
   provenance: {"harness_session":"codex:01a14e70-b388-7a52-959e-22e71042dd8b","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-18T09:59:02Z (feat/project-colour): Implemented same-session checkout colour carry, pre-lock lookup and hook warning forwarding. RED just test-fast: 10 expected failures; GREEN: 1121 passed, 5 skipped, zero failures. just check passed with no task warnings.
+- 2026-10-18T09:59:40Z (feat/project-colour): parked (waiting on agent): Controller: review commit 0217eaf and task-4-report.md, then close the child in .worktrees/project-colour after acceptance
+  provenance: {"harness_session":"codex:01a14e70-b388-7a52-959e-22e71042dd8b","harness_session_source":"CODEX_THREAD_ID"}
