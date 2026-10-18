@@ -298,4 +298,10 @@ User answers, same day:
   takes the exact hue. Now a planned `todo` whose design settles slot
   mapping, pin semantics for registered projects, and entry points.
 
-Implemented 2026-10-18 (`fam-053b0d`): the [project colour spec](../specs/2026-10-17-project-colour-design.md) now supplies the registered colour via `tasks resolve`, carries it per checkout, and maps the label, chrome and pet consistently; latency review and user visual acceptance remain pending.
+Implemented 2026-10-18 (`fam-053b0d`): the [project colour
+spec](../specs/2026-10-17-project-colour-design.md) now supplies the registered
+colour via `tasks resolve`, carries it per checkout, and maps the label, chrome
+and pet consistently. The user accepted the measured main paired median
+overhead of +1.664/+2.264 ms (about 1–2%) on 2026-10-18; no additional
+steady-state tasks spawn remains required. User visual acceptance remains
+pending.

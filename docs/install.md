@@ -124,6 +124,8 @@ Unregistered checkouts, projects without a colour, and hosts without `tasks`
 returns no colour, its warnings appear as `familiar: tasks:` lines. Familiar
 reads the colour once per session and checkout: an edit in tasks reaches a
 running session at its next checkout change or next session.
+Use `familiar --color auto projects` for coloured swatches in a TTY; the CLI
+defaults to plain output.
 
 ### Measuring hook latency
 

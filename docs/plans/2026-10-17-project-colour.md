@@ -18,8 +18,12 @@ at runtime), Python 3 `tools/tt`, just. No new package dependency.
 **Spec:** `docs/specs/2026-10-17-project-colour-design.md`, accepted by the user
 2026-10-17 (round 3). Task: `fam-053b0d`. Engine baseline: `8019302`.
 
-**Plan status:** accepted by the user, 2026-10-18 (review round 2). Execution:
-superpowers:subagent-driven-development, in a fresh session.
+**Plan status:** accepted by the user, 2026-10-18 (review round 2); implementation
+and benchmark documentation landed through Task 6 Step 6 using
+superpowers:subagent-driven-development. The user accepted the measured main
+paired median overhead of +1.664/+2.264 ms (about 1–2%) on 2026-10-18;
+no additional steady-state `tasks` spawn remains required. User visual
+acceptance (Step 7) and closeout remain pending.
 
 ## Global Constraints
 
@@ -842,9 +846,11 @@ just bench-hook compare ../colour-bench-baseline "$PWD" "$bench_fixture" 30 5 4
 
 Expected: the same structural verdicts over every batch; timing status
 `review-required`. Attach both reports to the Task 6 record (`tasks attach`, the
-pilot's captioned as the minimal comparison), and note a disposition: no
-consistent steady-state slowdown on either context, judged from paired medians,
-order breakdown and p95 tails, as `fam-f3d48e` was. For the first-event cost
+pilot's captioned as the minimal comparison), and record the measured paired
+medians, order breakdown and p95 tails. The completed sittings showed main
+paired median increases of +1.664/+2.264 ms (about 1–2%), accepted by the user
+on 2026-10-18. Preserve that measured result and its reports; no additional
+steady-state `tasks` spawn remains required. For the first-event cost
 of real tasks, time 20 runs of `tasks resolve --json ~/d/familiar` on this host
 and note their median beside the disposition. If the sitting is disturbed or
 contradictory, analyse it, then repeat in a fresh fixture. Remove the baseline
@@ -875,11 +881,19 @@ git commit -m "docs(identity): document the project colour source and rules"
 
 - [ ] **Step 7: The user judges the result**
 
-Ask the user to run, from the main checkout,
-`! .worktrees/project-colour/bin/familiar projects ~/d/familiar ~/d/ops ~/d/tasks ~/d/crew ~/d/flows ~/d/lit ~/d/natural-systems`
-(any registered checkouts they like) and judge whether each swatch, name and pet
-agree. This needs their eye: park `--waiting-on user --reason review` until they
-answer. A rejection that changes the colour rule returns to the spec.
+Ask the user to run, from the main checkout:
+
+```sh
+.worktrees/project-colour/bin/familiar --color always projects . ../ops ../tasks ../crew ../flows ../lit ../natural-systems
+```
+
+The CLI defaults to plain output, so the original command printed hex values;
+`--color always` explicitly requests coloured swatches for this visual check.
+For normal TTY use, `--color auto` or `FAMILIAR_COLOR=auto` opts into colour.
+The user may choose any registered checkouts and judges whether each swatch,
+name and pet agree. Visual acceptance remains pending: park
+`--waiting-on user --reason review` until they answer. A rejection that changes
+the colour rule returns to the spec.
 
 - [ ] **Step 8: Close out on the branch, then integrate**
 

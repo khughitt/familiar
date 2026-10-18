@@ -1,6 +1,7 @@
 # Project colour from tasks
 
-Implemented 2026-10-18; latency review and user visual acceptance pending.
+Implemented 2026-10-18; measured latency accepted by the user the same day;
+user visual acceptance pending.
 
 Accepted by the user, 2026-10-17 (round 3). Task: `fam-053b0d`; source:
 `docs/notes/2026-10-07-project-identity-brief.md` (scope rerun, 2026-10-17).
@@ -40,7 +41,8 @@ predates its project's colour commit reports no colour (builder check, below).
   `whoami`, `projects`, and the Codex pet selection.
 - Unregistered directories, projects without a colour, and hosts without `tasks`
   behave exactly as today.
-- No measurable steady-state hook slowdown.
+- No additional steady-state `tasks` spawn; measured hook overhead accepted
+  by the user on 2026-10-18 (§7).
 
 ## Non-goals
 
@@ -250,14 +252,22 @@ stays unchanged by them.
 
 ### 7. Latency
 
-The hook adds no spawn in steady state. `just bench-hook compare` against the
-baseline must show no consistent steady-state slowdown on either context, as the
-worktree change was judged (`fam-f3d48e`). The benchmark's instrumented `execFile`
-also counts `tasks` spawns and requires zero after the first event of a batch; the
-plan decides how the first-event cost (one spawn, ~8 ms) is reported. Its
-hard-coded Git spawn expectations describe the change before the worktree work;
-against this baseline both sides make two spawns on a main checkout and three on
-a linked one, and the plan updates them.
+The hook adds no `tasks` spawn once this session carries the colour for its
+current checkout. The benchmark's instrumented `execFile` requires exactly one
+candidate lookup on the first event per context in the sitting and none on any
+later event, including later batches; the baseline spawns no `tasks`. Both
+versions make two Git spawns on a main checkout and three on a linked one.
+
+The two full paired comparisons against `8019302` passed these structural
+checks. Main-checkout paired median increases were **+1.664 ms** and
+**+2.264 ms** (about **1–2%**); linked results and p95 tails varied between
+sittings. Both reports, the disturbed same-code control and bounded component
+profile remain attached to `fam-1b0712` or recorded in its implementation report.
+On **2026-10-18 the user accepted this measured overhead**, revising the original
+no-measurable-slowdown goal. This acceptance preserves the observed timing
+result; the no-additional-steady-state-lookup requirement remains in force.
+Twenty real `tasks resolve` runs measured a first-lookup median of **6.155 ms**
+(p95 **7.801 ms**), separately from the benchmark's fixture spawn cost.
 
 ## Tests
 
