@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T09:37:24Z
+updated: 2026-10-18T09:45:15Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -75,3 +75,4 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-18T09:37:24Z (feat/project-colour): resumed
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T09:45:15Z (feat/project-colour): execution: Task 2 fake tasks exposed the host identity hook in synthetic Git commits; permit only test-fixture commit invocations to disable that host-specific hook, without changing checkout or host hooks.
