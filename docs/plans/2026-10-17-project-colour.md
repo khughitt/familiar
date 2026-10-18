@@ -18,6 +18,9 @@ at runtime), Python 3 `tools/tt`, just. No new package dependency.
 **Spec:** `docs/specs/2026-10-17-project-colour-design.md`, accepted by the user
 2026-10-17 (round 3). Task: `fam-053b0d`. Engine baseline: `8019302`.
 
+**Plan status:** accepted by the user, 2026-10-18 (review round 2). Execution:
+superpowers:subagent-driven-development, in a fresh session.
+
 ## Global Constraints
 
 - The reader spawns exactly `tasks resolve --json <repoRoot>` with `execFile`, a
