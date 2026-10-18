@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
+import { fg } from '../src/render/term/sgr.js';
 import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { adapterFor } from '../src/adapters/index.js';
 import { projectKeyFor, displayProject } from '../src/bus/identity.js';
@@ -1519,4 +1520,37 @@ test('projects with no directories lists path pins only, never their worktrees',
   const { main } = worktreeLayout(t);
   const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`);
   assert.deepEqual(projectsJson(e, []).map((p) => p.project), ['api']);
+});
+
+test('the hook writes tasks warnings to stderr and still records the session', (t) => {
+  const { main } = worktreeLayout(t);
+  const e = { ...pinned('identities: []\n'),
+    FAKE_TASKS_OUTPUT: JSON.stringify({ results: [{ input: main, kind: 'path', status: 'unregistered' }],
+      warnings: ['nexc: its checkout is not matched and its color is not reported (bad)'] }) };
+  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+    cwd: main, encoding: 'utf8', env: e, input: JSON.stringify({ session_id: 'warn', cwd: main }) });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr,
+    'familiar: tasks: nexc: its checkout is not matched and its color is not reported (bad)\n');
+  const agents = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), 'utf8'));
+  assert.equal(agents.warn.projectColor, null);
+});
+
+test('the status line paints the label in the colour its record carries', () => {
+  const e = pinned('identities: []\n');
+  e.FAKE_TASKS_LOG = join(e.FAMILIAR_STATE_DIR, 'tasks.log');
+  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
+    s1: {
+      sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
+      repoRoot: null, repositoryRoot: null, projectColor: '#317d01', cwd: '/tmp/api', pid: process.pid, starttime: 1,
+      state: 'working', updatedAt: 1,
+    },
+  }));
+  const r = spawnSync(process.execPath, [bin, 'statusline'], {
+    input: JSON.stringify({ session_id: 's1' }), encoding: 'utf8', env: e,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  assert.ok(r.stdout.includes(fg('#317d01') + 'api'));
+  assert.equal(existsSync(e.FAKE_TASKS_LOG), false);
 });

@@ -909,11 +909,12 @@ async function main({ command, args: rest, color, mode }) {
     const ctx = await context();
     const stdin = await readStdin();
 
-    const { prev, next, seq, intent, evicted } = await applyHookEvent({
+    const { prev, next, seq, intent, evicted, warnings } = await applyHookEvent({
       event: positionals[0],
       stdin,
       deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
     });
+    for (const warning of warnings) process.stderr.write(`familiar: tasks: ${warning}\n`);
     reportEvictions(evicted);
     if (values.trace !== undefined) {
       appendHookTrace(values.trace, {

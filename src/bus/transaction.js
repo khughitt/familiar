@@ -5,6 +5,7 @@ import { pruneDead } from './prune.js';
 import { defaultProcessOps } from './proc.js';
 import { gitContext as defaultGitContext, projectKeyFor, displayProject } from './identity.js';
 import { resolveAll } from './resolve.js';
+import { lookupProjectColor as defaultLookupProjectColor } from './project-color.js';
 import { assertState } from 'familiar-theme';
 
 // Resolve, then write BOTH files. The single-writer point of the system:
@@ -87,6 +88,11 @@ async function commit({
   return { intent, evicted };
 }
 
+export function carriedProjectColor(record, repoRoot) {
+  return record && record.repoRoot === repoRoot && Object.hasOwn(record, 'projectColor')
+    ? record.projectColor : undefined;
+}
+
 // There is no resolver daemon. The CLI process handling a hook event does
 // everything in one locked transaction.
 //
@@ -101,6 +107,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
   const {
     paths, tone, motionPolicy, prepareSprites, adapter,
     gitContext = defaultGitContext,
+    lookupProjectColor = defaultLookupProjectColor,
     now = () => Date.now(),
   } = deps;
   const processOps = deps.processOps ?? defaultProcessOps;
@@ -122,6 +129,21 @@ export async function applyHookEvent({ event, stdin, deps }) {
   // shared state, so there is nothing to protect.
   const context = level === null ? null : await gitContext(cwd);
   const pid = level === null ? null : resolveAgentPid();
+
+  let projectColor = null;
+  let warnings = [];
+  if (level !== null && context.repoRoot !== null) {
+    // Atomic renames make this unlocked read safe; a race costs one redundant
+    // spawn, never a wrong colour. Another session's carried colour may be stale,
+    // so only this session's record can avoid a fresh lookup.
+    const agents = (await readJson(paths.agentsPath)) ?? {};
+    projectColor = carriedProjectColor(agents[sessionId], context.repoRoot);
+    if (projectColor === undefined) {
+      const result = await lookupProjectColor(context.repoRoot);
+      projectColor = result.color;
+      warnings = result.warnings;
+    }
+  }
 
   // Stamped at WRITE time, next to the pid it qualifies. A pid alone is a number
   // the kernel reuses; the pair is a process. Without it a record could never be
@@ -171,7 +193,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
         remote,
         repoRoot,
         repositoryRoot,
-        projectColor: null,
+        projectColor,
         cwd,
         pid,
         starttime,
@@ -190,7 +212,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
       paths, agents, tone, motionPolicy, prepareSprites,
       required: level === null ? null : sessionId,
     });
-    return { prev, next, seq, intent, evicted };
+    return { prev, next, seq, intent, evicted, warnings };
   }, {
     startTimeOf: processOps.startTimeOf,
     isAlive: processOps.lockHolderAlive,
