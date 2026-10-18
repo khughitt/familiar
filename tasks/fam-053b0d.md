@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T01:59:38Z
+updated: 2026-10-18T09:37:24Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -73,3 +73,5 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-18T01:59:37Z (feat/project-colour): plan accepted (round 2); execution chosen: superpowers:subagent-driven-development in a fresh session
 - 2026-10-18T01:59:38Z (feat/project-colour): parked (waiting on agent, session): a fresh session opens .worktrees/project-colour, runs tasks start fam-053b0d, the worktree baseline (just test-fast), then executes docs/plans/2026-10-17-project-colour.md with superpowers:subagent-driven-development, starting fam-e0c282 (Task 1)
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T09:37:24Z (feat/project-colour): resumed
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
