@@ -28,6 +28,8 @@ const tempRoot = (t, prefix) => {
 // patches, and what the bin then sees, says which checkout's modules were actually loaded.
 function standIn(root, binBody) {
   mkdirSync(join(root, 'bin'), { recursive: true });
+  mkdirSync(join(root, 'tasks'), { recursive: true });
+  writeFileSync(join(root, 'tasks/.config.toml'), 'prefix = "fixture"\n');
   mkdirSync(join(root, 'src/bus'), { recursive: true });
   writeFileSync(join(root, 'package.json'),
     JSON.stringify({ name: 'stand-in', version: '0.0.0', type: 'module' }));

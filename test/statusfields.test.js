@@ -70,7 +70,7 @@ const git = (dir, ...args) =>
   execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
 const commit = (dir) =>
-  git(dir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
+  git(dir, '-c', 'hook.identity-check.enabled=false', '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
 
 test('gitBranch reads the branch of a real repository', () => {
   repo((dir) => {
