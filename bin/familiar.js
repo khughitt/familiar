@@ -732,7 +732,7 @@ export function sheetRowCaptions(rows, tone) {
   return rows.map((row, index) => {
     // slots[0] is the member's primary identity — the same first-declared-wins
     // rule as bySlot, read from the member's end instead of the slot's.
-    const swatch = cliSwatch(identityColors(row.member.slots[0], tone).base);
+    const swatch = cliSwatch(identityColors({ slot: row.member.slots[0], projectColor: null }, tone).base);
     return `  ${slotText[index].padStart(width)}  ${swatch}  `
       + `${row.member.label.padEnd(20)}${row.id}\n`;
   });
@@ -758,7 +758,7 @@ async function identityResolver() {
       const project = displayProject({ repoRoot, cwd });
       const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
       const identity = resolveIdentity({
-        projectKey, project, remote, repoRoot, repositoryRoot, catalog, pack,
+        projectKey, project, remote, repoRoot, repositoryRoot, projectColor: null, catalog, pack,
       });
       assetsFor(pack, identity.member, tone.mode);
       return { identity, pin };
@@ -862,7 +862,7 @@ async function main({ command, args: rest, color, mode }) {
 
     const useColor = cliColor({ color });
     const cells = resolved.map(({ identity, pin }) => {
-      const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color: useColor });
+      const swatch = cliSwatch(identityColors(identity, resolver.tone).base, { color: useColor });
       const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
       // resolve() proved the member's assets exist. Idle is what a roster shows,
       // as it is for `theme show`; --state asks for another pose.
@@ -1512,12 +1512,12 @@ async function main({ command, args: rest, color, mode }) {
     // also what surfaces a gap as a gap rather than a shorter list.
     const useColor = cliColor({ color });
     for (let slot = 0; slot < SLOT_COUNT; slot++) {
-      // A REAL SWATCH, not the text "hue 22/62". identityColors(slot, tone) is
+      // A REAL SWATCH, not the text "hue 22/62". identityColors({ slot, projectColor: null }, tone) is
       // the same ramp every other surface paints this slot with, so the strip
       // shows the colour the bar and the border actually use rather than a
       // second opinion computed here. sgr.js exports fg(hex) and no background
       // setter, hence a block glyph rather than a filled cell.
-      const swatch = cliSwatch(identityColors(slot, ctxTone).base, { color: useColor });
+      const swatch = cliSwatch(identityColors({ slot, projectColor: null }, ctxTone).base, { color: useColor });
 
       // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
       // precisely when this view earns its keep — so the gap is caught, labelled,

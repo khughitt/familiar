@@ -14,12 +14,12 @@ import { parseThemePack, assetsFor } from 'familiar-theme';
 // REAL ramp output for slot 6 dark, not invented hexes. A fixture in the file
 // whose job is to lock the color model must not contain numbers the color model
 // would never produce.
-const COLOR = identityColors(6, { mode: 'dark', satScale: 1 });   // base #5990cf, backdrop #15191e
+const COLOR = identityColors({ slot: 6, projectColor: null }, { mode: 'dark', satScale: 1 });   // base #5990cf, backdrop #15191e
 
 const intentAt = (state) => ({
   sessionId: 's1',
   pid: 4242,
-  identity: { projectKey: 'k', project: 'api', slot: 6, member: 'schrodingers-cat', label: "Schrodinger's Cat" },
+  identity: { projectKey: 'k', project: 'api', slot: 6, projectColor: null, source: 'auto', member: 'schrodingers-cat', label: "Schrodinger's Cat" },
   state,
   urgency: state === 'needs-input' ? 'demand' : 'none',
   motion: 'pulse',
@@ -96,7 +96,7 @@ const section = (overrides = {}) => ({
 });
 
 const agentAt = (state, { pid = 4242, starttime = 987654 } = {}) => ({
-  sessionId: 's1', state, pid, starttime,
+  sessionId: 's1', projectColor: null, state, pid, starttime,
 });
 
 const clipsSet = Object.freeze({

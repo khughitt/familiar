@@ -80,7 +80,8 @@ export function truncMiddle(text, cap) {
 }
 
 // IDENTITY OWNS HUE, STATE OWNS URGENCY -- src/protocol/intent.js:12-13, and the reason the ramp is indexed
-// by the member's slot while only the STOP is chosen by urgency. A null ramp paints nothing:
+// by identity hue and slot saturation while urgency picks its stop. The project label uses
+// the project's exact colour when assigned. A null ramp paints nothing:
 // no identity means no hue, and inventing one would be a lie about which project this is.
 function penFor(color, urgency) {
   if (!color) {
@@ -89,7 +90,7 @@ function penFor(color, urgency) {
   const wrap = (stop) => (s) => fg(color[stop]) + s + RESET;
   return {
     rule: (urgency === 'demand' ? BOLD + fg(color.highlight) : fg(color.base)) + RULE + RESET,
-    project: wrap('light'),
+    project: wrap('project'),
     dim: wrap('shadow'),
     base: wrap('base'),
     state: (s) => (urgency === 'demand'

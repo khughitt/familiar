@@ -171,6 +171,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
         remote,
         repoRoot,
         repositoryRoot,
+        projectColor: null,
         cwd,
         pid,
         starttime,

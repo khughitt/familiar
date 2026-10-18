@@ -88,6 +88,7 @@ test('writes the bus AND the resolved intent in one transaction', async () => {
     remote: 'github.com/me/api',
     repoRoot: '/home/k/d/api',
     repositoryRoot: '/home/k/d/api',
+    projectColor: null,
     cwd: '/home/k/d/api',
     pid: 4242,
     starttime: 987_654,
@@ -114,6 +115,7 @@ test('one Darwin process table serves an N-record transaction', async () => {
     remote: null,
     repoRoot: `/projects/${sessionId}`,
     repositoryRoot: `/projects/${sessionId}`,
+    projectColor: null,
     cwd: `/projects/${sessionId}`,
     pid,
     starttime: started,
@@ -518,7 +520,7 @@ test('a pre-anchor record is evicted once and re-admitted by its next hook', asy
   writeFileSync(paths.agentsPath, JSON.stringify({
     s2: {
       sessionId: 's2', projectKey: 'github.com/me/other', project: 'other',
-      remote: 'github.com/me/other', repoRoot: '/home/k/d/other', cwd: '/home/k/d/other',
+      projectColor: null, remote: 'github.com/me/other', repoRoot: '/home/k/d/other', cwd: '/home/k/d/other',
       pid: 4242, starttime: 987_654, seq: 1, state: 'working', updatedAt: 999_000,
     },
   }));

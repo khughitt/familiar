@@ -126,7 +126,7 @@ export async function planCodexProjectForPath({
   const member = givenMember ?? resolveIdentity({
     projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
     project: displayProject({ repoRoot, cwd: path }),
-    remote, repoRoot, repositoryRoot, catalog, pack,
+    remote, repoRoot, repositoryRoot, projectColor: null, catalog, pack,
   }).member;
 
   if (isTracked) {

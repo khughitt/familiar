@@ -159,8 +159,8 @@ test('hook trace appends lifecycle metadata without prompt or tool contents', (t
       session_id: 's1', turn_id: 't1', hook_event_name: 'SessionStart', source: 'compact',
       prompt: 'secret prompt', tool_input: { command: 'secret command' },
     }),
-    prev: { state: 'working' },
-    next: { state: 'idle' },
+    prev: { projectColor: null, state: 'working' },
+    next: { projectColor: null, state: 'idle' },
   });
 
   assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
@@ -202,7 +202,7 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
   let targetError;
   await assert.rejects(emitHookTransition({
     prev: null,
-    next: { sessionId: 's1', pid: 42 },
+    next: { sessionId: 's1', projectColor: null, pid: 42 },
     seq: 1,
     paths: paths(env()),
     intent: { s1: { current: {} } },
@@ -547,7 +547,7 @@ test('off statusline renders the HUD without familiar cells and gives wrapped te
   writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
     s1: {
       sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, repositoryRoot: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
+      repoRoot: null, repositoryRoot: null, projectColor: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
       state: 'working', updatedAt: 1,
     },
   }));
@@ -1217,6 +1217,7 @@ function seedBus(e, sessionId, { state = 'working', cwd = process.cwd() } = {}) 
     remote: null,
     repoRoot: cwd,
     repositoryRoot: cwd,
+    projectColor: null,
     cwd,
     pid: process.pid,
     starttime: startTimeOf(process.pid),
