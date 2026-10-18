@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T10:38:24Z
+updated: 2026-10-18T17:12:37Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -80,4 +80,6 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-18T10:19:28Z (feat/project-colour): benchmark: two full sittings pass structural gates (one colour lookup per context, none later) but main paired medians rise about 1–2 ms; latency acceptance remains open. Preserve reports and run bounded same-code control/profiling before any performance claim or product change.
 - 2026-10-18T10:37:12Z (feat/project-colour): review: impl round 1 — verdict: revise; findings: Important 1, minor 1; reviewer: codex/gpt-6-astra
 - 2026-10-18T10:38:24Z (feat/project-colour): parked (waiting on user, review): User reviews the .worktrees/project-colour projects display and decides the latency requirement (accept observed +1.7/+2.3 ms main-hook overhead or request continued investigation); controller resumes fam-1b0712, records approved spec disposition, closes both tasks before local integration when all gates pass.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:12:37Z (feat/project-colour): resumed
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
