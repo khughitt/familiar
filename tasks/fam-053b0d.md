@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T00:39:16Z
+updated: 2026-10-18T01:17:33Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -63,3 +63,5 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-18T00:39:09Z (feat/project-colour): review: plan round 1 — verdict: revise; findings: Important 1, minor 1; reviewer: codex
 - 2026-10-18T00:39:16Z (feat/project-colour): plan findings: Important — Task 6 leaves prepareFixture/workerEnv with an empty tasks registry (suite fake also defaults to unregistered), so cached projectColor stays null and the registered slotForColor/hexToHsl steady-state work is never measured. Supply a controlled registered colour, assert the candidate actually carries it and performs one initial lookup then none, and run a minimal comparison with a warmup and later sample before the full sitting (the existing 1-sample/0-warmup pilot does not exercise warmed comparison gates). Minor — Task 6 Step 8 closes records after integration; close Task 6 and the parent on the branch after review/visual acceptance and before merging, as repository instructions require. Review only; plan unchanged.
+- 2026-10-18T01:17:33Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
