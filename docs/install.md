@@ -71,9 +71,10 @@ hook commands through.
 
 ## Project identity and Git worktrees
 
-Every project gets a familiar from a hash of its identity; `~/.config/familiar/identities.yaml`
-pins one deliberately by `remote:`, `path:` or `project:` (basename). A Git
-worktree follows its repository: a pin on the main checkout applies to every
+A registered project's colour chooses its familiar as described below. Without
+a project colour, a hash of the project's identity chooses its familiar;
+`~/.config/familiar/identities.yaml` pins one deliberately by `remote:`, `path:`
+or `project:` (basename). A Git worktree follows its repository: a pin on the main checkout applies to every
 worktree of it, including one stored outside the checkout or reached through a
 symlink, while an unrelated repository nested inside it never inherits. The
 pin that wins is the first matching entry of the first tier that matches:
@@ -105,10 +106,24 @@ and its `members:` map.
   (session-end hooks skip discovery). Metadata stored in a directory named
   `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
   `store` and is not always detectable: declare `core.worktree` there too.
-- **After upgrading.** Sessions already on the bus were recorded without a
-  repository anchor. The next hook evicts them once, naming the missing field,
-  and each session's own next hook re-admits it; a status line may show no
-  identity until then. Pins are untouched.
+- **After upgrading.** Records from before the identity upgrades may lack a
+  repository anchor or `projectColor`. They leave the bus until each session's
+  next hook re-admits it; a status line may show no identity until then. Pins
+  are untouched.
+
+### Project colour
+
+A registered project's colour comes from `tasks resolve`, so every Git worktree
+shows the registered colour. The project label uses that exact colour, the
+chrome uses its hue, and the pet uses the nearest hue slot (greys use the grey
+familiar). A matching pin on a registered project with a colour must name that
+slot; a conflict is an error naming both the pinned slot and the colour's slot.
+
+Unregistered checkouts, projects without a colour, and hosts without `tasks`
+(or with `tasks` off the hook's `PATH`) keep pins and the hash. When tasks
+returns no colour, its warnings appear as `familiar: tasks:` lines. Familiar
+reads the colour once per session and checkout: an edit in tasks reaches a
+running session at its next checkout change or next session.
 
 ### Measuring hook latency
 
@@ -123,9 +138,12 @@ checkout and context, `batches.jsonl` (appended as each batch completes) and
 `report.json`. A sample counts only when the hook exited cleanly with no output
 and left a fresh working agent record and intent. `pilot` mode accepts the same
 checkout twice and proves the tool; `compare` needs two distinct revisions and
-enforces the Git spawn counts (two on a main checkout; three on a linked one,
-two before worktree identity). Timing is never judged automatically: the report
-gives medians, p95, each pair's difference and the probe's own cost for review.
+enforces the Git spawn counts (two on a main checkout; three on a linked one).
+The candidate resolves a controlled registered colour on its first event per
+context and carries it for the rest of the sitting; the baseline spawns no
+`tasks`. The tasks executable is a fixture stand-in, so its measured lookup
+time is the stand-in's spawn cost rather than real tasks latency. Timing is
+never judged automatically: the report gives medians, p95, each pair's difference and the probe's own cost for review.
 Each batch is recorded by `tools/tt` as `bench-hook-<context>-<version>`. It
 needs Linux; the measurement covers the hook process, not a live agent.
 
@@ -170,8 +188,8 @@ pet = "custom:familiar-ginger"
 
 For a project-specific pet, use `familiar whoami <project>` to find the assigned
 member (`familiar projects <dir>...` draws several at once, each sprite over its
-name, and says whether a pin or the project's hash chose each slot), then set
-`pet = "custom:familiar-<member>"` in that trusted project's `.codex/config.toml`.
+name, and says whether the project colour, a pin or the project's hash chose
+each slot), then set `pet = "custom:familiar-<member>"` in that trusted project's `.codex/config.toml`.
 Restart an existing Codex session after syncing.
 
 ### OpenCode

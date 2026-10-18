@@ -297,3 +297,5 @@ User answers, same day:
   with the authored catalog. Sprites are untinted art, so the pet matches by slot family; chrome
   takes the exact hue. Now a planned `todo` whose design settles slot
   mapping, pin semantics for registered projects, and entry points.
+
+Implemented 2026-10-18 (`fam-053b0d`): the [project colour spec](../specs/2026-10-17-project-colour-design.md) now supplies the registered colour via `tasks resolve`, carries it per checkout, and maps the label, chrome and pet consistently; latency review and user visual acceptance remain pending.
