@@ -1,4 +1,5 @@
 import { SLOT_COUNT, assertSlot } from 'familiar-theme';
+import { assertHexColor, hexToHsl, oklchChroma } from './color.js';
 
 // The twelve canonical slots' colours. FROZEN, and theme-independent by design:
 // a project pinned to slot 0 is a ginger tabby under `cats` and an ember under
@@ -33,4 +34,30 @@ if (SLOTS.length !== SLOT_COUNT) {
 
 export function slotSpec(slot) {
   return { ...SLOTS[assertSlot(slot)] };
+}
+
+// The grey cutoff and hue boundaries are frozen with the table: changing either reassigns pets.
+export const GREY_CHROMA = 0.05;
+export const GREY_SLOT = 11;
+
+export function nearestSlotForHue(hue) {
+  let nearest = 0;
+  let distance = Infinity;
+  for (const spec of SLOTS) {
+    if (spec.slot === GREY_SLOT) continue;
+    const difference = Math.abs(hue - spec.hue) % 360;
+    const circular = Math.min(difference, 360 - difference);
+    if (circular < distance) {
+      nearest = spec.slot;
+      distance = circular;
+    }
+  }
+  return nearest;
+}
+
+export function slotForColor(hex) {
+  assertHexColor(hex);
+  return oklchChroma(hex) < GREY_CHROMA
+    ? GREY_SLOT
+    : nearestSlotForHue(hexToHsl(hex).h);
 }
