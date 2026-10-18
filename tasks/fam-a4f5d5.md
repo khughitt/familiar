@@ -1,15 +1,17 @@
 ---
 id: fam-a4f5d5
 title: "Show the colour in whoami, projects and the Codex sync"
-status: doing
+status: done
 priority: 2
 size: m
 complexity: mid
 process: direct
 owner: feat/project-colour
 created: 2026-10-17T23:34:35Z
-updated: 2026-10-18T10:08:30Z
+updated: 2026-10-18T10:08:31Z
 started: 2026-10-18T10:01:54Z
+completed: 2026-10-18T10:08:31Z
+closed: 2026-10-18T10:08:31Z
 depends: [fam-0b2c16]
 parent: fam-053b0d
 tags: []
@@ -29,3 +31,7 @@ step: "Task 5: Show the colour in whoami, projects and the Codex sync"
 - 2026-10-18T10:08:29Z (feat/project-colour): resumed
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-18T10:08:30Z (feat/project-colour): review: impl round 1 — verdict: accept; findings: minor 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-18T10:08:31Z (feat/project-colour): done
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T10:08:31Z (feat/project-colour): Exposed project colour/source in whoami and projects, aligned Codex sync and warning paths; independent review approved.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
