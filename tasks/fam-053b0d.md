@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T17:12:38Z
+updated: 2026-10-18T17:12:39Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -84,3 +84,4 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-18T17:12:37Z (feat/project-colour): resumed
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-18T17:12:38Z (feat/project-colour): review: impl round 2 — verdict: revise; findings: visual 1; reviewer: human
+- 2026-10-18T17:12:39Z (feat/project-colour): user accepted measured main-hook latency overhead (+1.7/+2.3 ms) on 2026-10-18. Visual review screenshot shows plain hex fallback because projects CLI defaults to color never; corrected validation command must request --color always (or FAMILIAR_COLOR=auto).
