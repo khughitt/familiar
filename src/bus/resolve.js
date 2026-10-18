@@ -1,6 +1,8 @@
 import { presentationFor, ttlFor, decayTo } from '../protocol/intent.js';
 import { identityColors } from '../theme/ramp.js';
 import { assertState, defaultMemberForSlot, memberOrThrow } from 'familiar-theme';
+import { assertHexColor } from '../protocol/color.js';
+import { slotForColor } from '../protocol/slot-hues.js';
 import { autoSlot } from './identity.js';
 import { matchPin, pinnedMember } from './pins.js';
 import { MOTION_POLICIES } from '../animation/program.js';
@@ -13,11 +15,22 @@ import { MOTION_POLICIES } from '../animation/program.js';
 // `path:` pin could never match a repo that also has a remote. Silently ignoring a
 // pin the user wrote is exactly the failure this system exists to avoid.
 export function resolveIdentity({
-  projectKey, project, remote, repoRoot, repositoryRoot, catalog, pack,
+  projectKey, project, remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
 }) {
+  if (projectColor === undefined) {
+    throw new Error('resolveIdentity: projectColor must be a #rrggbb string or null');
+  }
+  if (projectColor !== null) assertHexColor(projectColor);
   const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
 
-  const slot = pin ? pin.slot : autoSlot(projectKey);
+  const slot = projectColor === null ? (pin ? pin.slot : autoSlot(projectKey)) : slotForColor(projectColor);
+  const source = projectColor !== null ? 'colour' : pin ? 'pin' : 'auto';
+  if (projectColor !== null && pin && pin.slot !== slot) {
+    throw new Error(
+      `pin declares slot ${pin.slot}, but project colour ${projectColor} (from tasks) maps to slot ${slot}: `
+      + "remove the pin or change the project's colour",
+    );
+  }
 
   const pinned = pinnedMember(pin, pack.id);
   let memberId;
@@ -41,6 +54,8 @@ export function resolveIdentity({
     slot,
     member: memberId,
     label: memberOrThrow(pack, memberId).label,
+    projectColor,
+    source,
   };
 }
 
@@ -59,7 +74,7 @@ export function resolveIntent({
       `resolveIntent: animationFor must be a function (found ${typeof animationFor})`,
     );
   }
-  const color = identityColors(identity.slot, tone);
+  const color = identityColors(identity, tone);
   const animation = animationFor(identity.member);
 
   const intentFor = (state) => ({
@@ -123,12 +138,16 @@ export function resolveIdentities({ agents, catalog, pack }) {
       if (!Object.hasOwn(record, 'repositoryRoot')) {
         throw new Error('session record lacks repositoryRoot; wait for its next hook');
       }
+      if (!Object.hasOwn(record, 'projectColor')) {
+        throw new Error('session record lacks projectColor; wait for its next hook');
+      }
       identities.set(sessionId, resolveIdentity({
         projectKey: record.projectKey,
         project: record.project,
         remote: record.remote,
         repoRoot: record.repoRoot,
         repositoryRoot: record.repositoryRoot,
+        projectColor: record.projectColor,
         catalog,
         pack,
       }));

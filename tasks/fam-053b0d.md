@@ -1,18 +1,22 @@
 ---
 id: fam-053b0d
 title: Derive familiar's identity colour from the project's tasks colour
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
-owner: main
+owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-17T21:09:21Z
+updated: 2026-10-18T17:38:56Z
 started: 2026-10-17T21:09:21Z
+completed: 2026-10-18T17:38:56Z
+closed: 2026-10-18T17:38:56Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
+spec: docs/specs/2026-10-17-project-colour-design.md
+plan: docs/plans/2026-10-17-project-colour.md
 ---
 
 Why: one project colour, used everywhere (user, 2026-10-17). Every registered project has one authored colour, the `color` key in its committed tasks/.config.toml (ops-b31634, assigned by ops-40f2a6 with ops bin/project-colors; familiar-pinned projects were kept within 18° of their slot hue), exposed by the tasks CLI as color on tasks where / tasks resolve / tasks projects JSON (ops-30b965, which depends on this task). tasks pretty output and hq sessions already paint it. familiar instead colours everything (pet member, HUD rule/label/branch, OSC 11 backdrop, whoami/projects) from its own slot of 12 (src/protocol/slot-hues.js → src/theme/ramp.js identityColors), chosen by pin or autoSlot(projectKey) in src/bus/resolve.js. The user wants the label and the pet to agree with the project colour, without tightly coupling familiar to whoever assigns colours.
@@ -38,3 +42,59 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
 - 2026-10-17T21:04:23Z (main): scope: scoped; user answer (single project colour SoT, label and pet agree, loose coupling) applied: chose familiar optionally consuming tasks' public colour over the owner generating familiar config; retitled; body records the constraints (sprites untinted, so the pet matches by slot family) and what the design must settle; todo, m, high, planned
 - 2026-10-17T21:09:21Z (main): started
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T21:09:52Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T21:30:17Z (feat/project-colour): design: spec drafted at docs/specs/2026-10-17-project-colour-design.md; builder check raised one question (tasks where reads a worktree's checked-out config: 38 of 49 worktrees report no colour), settled by switching to tasks resolve (registered colour, the one tasks paints); slot rule = nearest HSL slot hue, OKLCH chroma < 0.05 → slot 11, reproduces all 13 pins on registered projects; strict pin rule (disagreeing slot pin faults); awaiting user spec review
+- 2026-10-17T21:30:31Z (feat/project-colour): review: spec round 1 — verdict: revise; findings: blocking 1, minor 3; reviewer: claude-code
+- 2026-10-17T21:30:32Z (feat/project-colour): parked (waiting on user, review): user reviews docs/specs/2026-10-17-project-colour-design.md in .worktrees/project-colour (calls to check: strict pin rule, label exact hex with chrome at slot saturation, 19 pets change); on acceptance the agent writes the plan at docs/plans/2026-10-17-project-colour.md with writing-plans
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T22:33:10Z (feat/project-colour): review: spec round 1 — verdict: revise; findings: Important 1; reviewer: codex
+- 2026-10-17T22:33:18Z (feat/project-colour): spec finding (Important): lines 102–106 suppress warnings on unregistered rows. Isolated tasks resolve probe: linked checkout with valid config returns resolved + color; invalid color in its overlay config returns unregistered + warning, exit 0. The proposed reader suppresses the failure and caches null. Forward warnings whenever no color is returned, including unregistered, and test this linked-project case. Review only; spec unchanged.
+- 2026-10-17T22:34:21Z (feat/project-colour): review: spec round 2 — verdict: revise; findings: must-fix 1; reviewer: human
+- 2026-10-17T22:34:22Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T22:35:16Z (feat/project-colour): spec revised for round 2: warnings forwarded whenever no colour is returned (unregistered rows included, the linked-project config-failure case), forwarded by every entry point; linked case added to tests
+- 2026-10-17T22:35:25Z (feat/project-colour): parked (waiting on user, review): user re-reviews the round-2 fix in docs/specs/2026-10-17-project-colour-design.md §1 (warnings forwarded whenever no colour is returned) in .worktrees/project-colour; on acceptance the agent writes docs/plans/2026-10-17-project-colour.md with writing-plans
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T23:22:43Z (feat/project-colour): review: spec round 3 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-17T23:24:03Z (feat/project-colour): review: spec round 3 — verdict: accept; findings: none; reviewer: human
+- 2026-10-17T23:24:04Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-17T23:35:12Z (feat/project-colour): plan: docs/plans/2026-10-17-project-colour.md, six steps fam-e0c282 → fam-577d64 → fam-e13178 → fam-0b2c16 → fam-a4f5d5 → fam-1b0712 (chained deps); suite insulated from host tasks via test/fixtures/fake-tasks on the runner PATH; reader passes --json explicitly (TASKS_FORMAT=pretty); awaiting user plan review and execution choice
+- 2026-10-17T23:35:13Z (feat/project-colour): parked (waiting on user, review): user reviews docs/plans/2026-10-17-project-colour.md in .worktrees/project-colour and picks subagent-driven (recommended) or native execution; then the agent starts fam-e0c282 there, running the worktree baseline (just test-fast) before the first code change
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T00:39:09Z (feat/project-colour): review: plan round 1 — verdict: revise; findings: Important 1, minor 1; reviewer: codex
+- 2026-10-18T00:39:16Z (feat/project-colour): plan findings: Important — Task 6 leaves prepareFixture/workerEnv with an empty tasks registry (suite fake also defaults to unregistered), so cached projectColor stays null and the registered slotForColor/hexToHsl steady-state work is never measured. Supply a controlled registered colour, assert the candidate actually carries it and performs one initial lookup then none, and run a minimal comparison with a warmup and later sample before the full sitting (the existing 1-sample/0-warmup pilot does not exercise warmed comparison gates). Minor — Task 6 Step 8 closes records after integration; close Task 6 and the parent on the branch after review/visual acceptance and before merging, as repository instructions require. Review only; plan unchanged.
+- 2026-10-18T01:17:33Z (feat/project-colour): resumed
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T01:17:33Z (feat/project-colour): correction: my notes 'review: spec round 2 … reviewer: human' (22:34) and 'review: spec round 3 … reviewer: human' (23:24) duplicate the codex reviewer's own notes for the same reviews (22:33 round 1, 23:22 round 3); count those, not mine
+- 2026-10-18T01:19:06Z (feat/project-colour): plan revised for round 1: bench answers a controlled registered colour (#317d01) via the fake tasks, proves it on the candidate record and intent, requires one lookup per context then none, runs a 1-warmup 1-sample compare before the full sitting; closeout moved before integration; checked tasks resolve resolves an external worktree (via git)
+- 2026-10-18T01:19:07Z (feat/project-colour): parked (waiting on user, review): user re-reviews the round-1 revisions in docs/plans/2026-10-17-project-colour.md (Task 6 Interfaces, Steps 1-5 and 8) in .worktrees/project-colour and picks subagent-driven (recommended) or native execution; then the agent starts fam-e0c282 there, running the worktree baseline (just test-fast) first
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T01:25:42Z (feat/project-colour): review: plan round 2 — verdict: accept; findings: none; reviewer: codex
+- 2026-10-18T01:59:37Z (feat/project-colour): plan accepted (round 2); execution chosen: superpowers:subagent-driven-development in a fresh session
+- 2026-10-18T01:59:38Z (feat/project-colour): parked (waiting on agent, session): a fresh session opens .worktrees/project-colour, runs tasks start fam-053b0d, the worktree baseline (just test-fast), then executes docs/plans/2026-10-17-project-colour.md with superpowers:subagent-driven-development, starting fam-e0c282 (Task 1)
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-18T09:37:24Z (feat/project-colour): resumed
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T09:45:15Z (feat/project-colour): execution: Task 2 fake tasks exposed the host identity hook in synthetic Git commits; permit only test-fixture commit invocations to disable that host-specific hook, without changing checkout or host hooks.
+- 2026-10-18T10:13:50Z (feat/project-colour): benchmark baseline: hydrated detached 8019302 fast suite has one branch-sensitive statusline assertion failure (two Git calls on detached HEAD), 1082 pass/5 skip; proceed with prescribed detached baseline because benchmark measures separate branch fixture checkouts.
+- 2026-10-18T10:19:28Z (feat/project-colour): benchmark: two full sittings pass structural gates (one colour lookup per context, none later) but main paired medians rise about 1–2 ms; latency acceptance remains open. Preserve reports and run bounded same-code control/profiling before any performance claim or product change.
+- 2026-10-18T10:37:12Z (feat/project-colour): review: impl round 1 — verdict: revise; findings: Important 1, minor 1; reviewer: codex/gpt-6-astra
+- 2026-10-18T10:38:24Z (feat/project-colour): parked (waiting on user, review): User reviews the .worktrees/project-colour projects display and decides the latency requirement (accept observed +1.7/+2.3 ms main-hook overhead or request continued investigation); controller resumes fam-1b0712, records approved spec disposition, closes both tasks before local integration when all gates pass.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:12:37Z (feat/project-colour): resumed
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:12:38Z (feat/project-colour): review: impl round 2 — verdict: revise; findings: visual 1; reviewer: human
+- 2026-10-18T17:12:39Z (feat/project-colour): user accepted measured main-hook latency overhead (+1.7/+2.3 ms) on 2026-10-18. Visual review screenshot shows plain hex fallback because projects CLI defaults to color never; corrected validation command must request --color always (or FAMILIAR_COLOR=auto).
+- 2026-10-18T17:17:24Z (feat/project-colour): review: impl round 3 — verdict: accept; findings: minor 1; reviewer: codex/gpt-6.1-sol
+- 2026-10-18T17:17:28Z (feat/project-colour): parked (waiting on user, review): User judges coloured swatches and pet/name agreement using the corrected --color always command; controller resumes fam-1b0712 and closes both records before local integration once visual acceptance arrives. Latency acceptance is settled.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:36:53Z (feat/project-colour): resumed
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:36:54Z (feat/project-colour): review: impl round 4 — verdict: accept; findings: none; reviewer: human
+- 2026-10-18T17:36:55Z (feat/project-colour): user accepted the corrected coloured display on 2026-10-18; latency and visual gates are both settled. Complete branch closeout and local integration.
+- 2026-10-18T17:38:56Z (feat/project-colour): done
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:38:56Z (feat/project-colour): Familiar consumes registered tasks colours across hooks, HUD, CLI and Codex; user accepted latency and visuals, independent review settled, minor diagnostics deferred to fam-5ecf74.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}

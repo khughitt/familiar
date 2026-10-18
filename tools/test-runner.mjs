@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 
+const FAKE_TASKS = fileURLToPath(new URL('../test/fixtures/fake-tasks', import.meta.url));
 const OWNER = '.familiar-suite-owner.json';
 const OWNER_KIND = 'familiar-test-suite';
 const SUITE_LEASE = '\0familiar-test-suite';
@@ -204,7 +205,7 @@ export async function runSuite(files, {
         process.execPath, '--test', ...files,
       ], {
         stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
-        env: { ...process.env, TMPDIR: scratch },
+        env: { ...process.env, TMPDIR: scratch, PATH: `${FAKE_TASKS}:${process.env.PATH ?? ''}` },
       });
       const spawned = new Promise((resolveSpawn, rejectSpawn) => {
         child.once('spawn', resolveSpawn);

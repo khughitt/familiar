@@ -212,11 +212,11 @@ const LIGHT = { mode: 'light', satScale: 1 };
 const intentFor = (state, slot, tone) => ({
   state,
   urgency: presentationFor(state).urgency,
-  color: identityColors(slot, tone),
+  color: identityColors({ slot, projectColor: null }, tone),
 });
 
 test('the hue is the member\'s and does not move when the state does', () => {
-  const ember = identityColors(0, DARK);
+  const ember = identityColors({ slot: 0, projectColor: null }, DARK);
   const stops = [ember.base, ember.light, ember.highlight].map((hex) => fg(hex));
   for (const state of STATES) {
     const rule = hudLines({ intent: intentFor(state, 0, DARK), fields: FIELDS })[0];
@@ -232,7 +232,7 @@ test('two members with different slots differ in paint but not in text', () => {
 });
 
 test('urgency picks the stop: demand is highlight and bold', () => {
-  const ember = identityColors(0, DARK);
+  const ember = identityColors({ slot: 0, projectColor: null }, DARK);
 
   const demand = hudLines({ intent: intentFor('error', 0, DARK), fields: FIELDS });
   assert.ok(demand[0].includes(BOLD), 'demand should embolden the rule');
@@ -277,4 +277,12 @@ test('colour never survives sanitisation being skipped', () => {
   for (const line of lines) {
     assert.ok(!line.replace(own, '').includes('\x1b'), 'a foreign escape survived');
   }
+});
+
+test('the project name is painted with the project stop, not the light stop', () => {
+  const color = identityColors({ slot: 3, projectColor: '#317d01' }, DARK);
+  const [identity] = hudLines({ intent: { color, urgency: 'none', state: 'idle' },
+    fields: { project: 'ns', branch: null, model: null, usedPercent: null }, rows: 4 });
+  assert.ok(identity.includes(fg('#317d01') + 'ns'));
+  assert.ok(!identity.includes(fg(color.light) + 'ns'));
 });

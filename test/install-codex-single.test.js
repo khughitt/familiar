@@ -152,3 +152,60 @@ test('bulk sync plans the pinned main checkout and the current worktree, and no 
   applyCodexProjectSync(plan);
   assert.equal(existsSync(join(sibling, '.codex/config.toml')), false);
 });
+
+
+test('the Codex sync selects the pet the colour decides and reports warnings', async (t) => {
+  const mine = repo(t, 'mine');
+  const lookupProjectColor = async () => ({ prefix: 'api', color: '#317d01', warnings: [] });
+  const plan = await planCodexProjectForPath({ path: mine, pinned: false,
+    catalog: { identities: [] }, pack: THEME, lookupProjectColor });
+  assert.equal(plan.member, 'alpha');
+  assert.deepEqual(plan.warnings, []);
+  const grey = await planCodexProjectForPath({ path: mine, pinned: false,
+    catalog: { identities: [] }, pack: THEME,
+    lookupProjectColor: async () => ({ prefix: 'api', color: '#808080', warnings: [] }) });
+  assert.equal(grey.member, 'gamma', 'a neutral colour overrides the hashed alpha slot');
+  const warned = await planCodexProjectSync({
+    catalog: { identities: [{ path: mine, slot: 7 }] }, pack: THEME, cwd: mine,
+    lookupProjectColor: async () => ({ prefix: null, color: null, warnings: ['w2', 'w1', 'w2'] }),
+  });
+  assert.deepEqual(warned.warnings, ['w2', 'w1']);
+});
+
+test('a supplied member is never looked up', async (t) => {
+  const planned = await planCodexProjectForPath({ path: repo(t, 'mine'), pinned: false,
+    catalog: { identities: [] }, pack: THEME, member: 'beta',
+    lookupProjectColor: async () => { throw new Error('unexpected lookup'); } });
+  assert.equal(planned.member, 'beta');
+  assert.deepEqual(planned.warnings, []);
+});
+
+test('Codex tracked and conflicting config outcomes carry tasks warnings', async (t) => {
+  const mine = repo(t, 'mine');
+  const target = join(mine, '.codex/config.toml');
+  mkdirSync(join(mine, '.codex'));
+  writeFileSync(target, 'hand written\n');
+  const options = { path: mine, pinned: false, catalog: { identities: [] }, pack: THEME,
+    lookupProjectColor: async () => ({ prefix: null, color: null, warnings: ['w'] }) };
+  const conflict = await planCodexProjectForPath(options);
+  assert.equal(conflict.conflict, target);
+  assert.deepEqual(conflict.warnings, ['w']);
+  git(mine, ['add', '-f', '.codex/config.toml']);
+  const manual = await planCodexProjectForPath(options);
+  assert.equal(manual.manual.path, target);
+  assert.deepEqual(manual.warnings, ['w']);
+});
+
+test('Codex does not look up a missing path or a directory outside a repository', async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-codex-no-repo-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const options = { catalog: { identities: [] }, pack: THEME,
+    lookupProjectColor: async () => { throw new Error('unexpected lookup'); } };
+  assert.deepEqual(await planCodexProjectForPath({ ...options, path: join(root, 'missing'), pinned: true }),
+    { missing: join(root, 'missing') });
+  const skip = await planCodexProjectForPath({ ...options, path: root, pinned: false });
+  assert.equal(skip.skip.reason, 'not a Git repository');
+  const pinned = await planCodexProjectForPath({ ...options, path: root, pinned: true });
+  assert.ok(pinned.config);
+  assert.deepEqual(pinned.warnings, []);
+});

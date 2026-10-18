@@ -9,11 +9,11 @@ import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term
 import { identityColors } from '../src/theme/ramp.js';
 import { encodeRgba } from 'familiar-theme';
 
-const COLOR = identityColors(6, { mode: 'dark', satScale: 1 });
+const COLOR = identityColors({ slot: 6, projectColor: null }, { mode: 'dark', satScale: 1 });
 const PNG = encodeRgba({ w: 200, h: 400, buf: new Uint8Array(200 * 400 * 4) });
 const intentAt = (state) => ({
   sessionId: 's1', pid: 4242,
-  identity: { projectKey: 'k', project: 'api', slot: 6, member: 'm', label: 'M' },
+  identity: { projectKey: 'k', project: 'api', slot: 6, projectColor: null, source: 'auto', member: 'm', label: 'M' },
   state, urgency: 'none', motion: 'pulse', motionPolicy: 'full', animation: { kind: 'static' },
   color: COLOR, sprite: { terminal: '/c/x.png', rows: 8 },
 });
@@ -29,8 +29,8 @@ test('two concurrent sections for one session serialize under the real lock and 
   let inside = 0;
   let overlap = 0;
   const run = (seq, state) => emit({
-    prev: { sessionId: 's1', state: 'idle', pid: 4242, starttime: 1 },
-    next: { sessionId: 's1', state, pid: 4242, starttime: 1 },
+    prev: { sessionId: 's1', projectColor: null, state: 'idle', pid: 4242, starttime: 1 },
+    next: { sessionId: 's1', projectColor: null, state, pid: 4242, starttime: 1 },
     intent: intentAt(state), seq, terminal, ledger, lock, ownerAlive: () => true,
     readSprite: () => PNG, readFrame: () => PNG,
     open: () => { inside += 1; if (inside > 1) overlap += 1; return 7; },

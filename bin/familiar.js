@@ -23,6 +23,7 @@ import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
+import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
@@ -134,7 +135,7 @@ Usage:
 
 Explore
   whoami [PATH]                Show this project's familiar identity
-  projects [DIR...]            Show every project's familiar, pinned or hashed
+  projects [DIR...]            Show every project's familiar, coloured, pinned or hashed
   theme list                   List installed themes
   theme add SOURCE             Install a theme from an HTTPS URL or local directory
   theme validate DIR           Prove a theme directory conforms
@@ -187,8 +188,8 @@ Options:
   --state STATE   Draw that pose instead of idle
 
 Each cell draws the project's familiar over its name, member, slot, and whether a
-pin or the project's hash chose the slot. Columns fill the terminal width; a pipe
-gets one, and a terminal without kitty graphics gets the captions alone.
+project colour, a pin or the project's hash chose the slot. Columns fill the terminal
+width; a pipe gets one, and a terminal without kitty graphics gets the captions alone.
 
 Examples:
   familiar projects
@@ -732,10 +733,14 @@ export function sheetRowCaptions(rows, tone) {
   return rows.map((row, index) => {
     // slots[0] is the member's primary identity — the same first-declared-wins
     // rule as bySlot, read from the member's end instead of the slot's.
-    const swatch = cliSwatch(identityColors(row.member.slots[0], tone).base);
+    const swatch = cliSwatch(identityColors({ slot: row.member.slots[0], projectColor: null }, tone).base);
     return `  ${slotText[index].padStart(width)}  ${swatch}  `
       + `${row.member.label.padEnd(20)}${row.id}\n`;
   });
+}
+
+function reportTasksWarnings(warnings) {
+  for (const warning of new Set(warnings)) process.stderr.write(`familiar: tasks: ${warning}\n`);
 }
 
 // The identity pipeline whoami and projects share: config -> pack -> pin catalog,
@@ -757,11 +762,14 @@ async function identityResolver() {
       const projectKey = projectKeyFor({ remote, repositoryRoot, cwd });
       const project = displayProject({ repoRoot, cwd });
       const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
+      const { color: projectColor, prefix, warnings } = repoRoot
+        ? await lookupProjectColor(repoRoot)
+        : NO_PROJECT;
       const identity = resolveIdentity({
-        projectKey, project, remote, repoRoot, repositoryRoot, catalog, pack,
+        projectKey, project, remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
       });
       assetsFor(pack, identity.member, tone.mode);
-      return { identity, pin };
+      return { identity, pin, prefix, warnings };
     },
   };
 }
@@ -782,13 +790,16 @@ async function main({ command, args: rest, color, mode }) {
     const { positionals } = parseLeaf(rest, leafOptions);
     const cwd = positionals[0] ?? process.cwd();
     const resolver = await identityResolver();
-    const { identity } = await resolver.resolve(cwd);
+    const { identity, prefix, warnings } = await resolver.resolve(cwd);
+    reportTasksWarnings(warnings);
     const { hue } = slotSpec(identity.slot);
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         project: identity.project,
         theme: resolver.themeId,
         slot: identity.slot,
+        color: identity.projectColor,
+        source: identity.source,
         hue,
         member: { id: identity.member, label: identity.label },
       })}\n`);
@@ -798,6 +809,7 @@ async function main({ command, args: rest, color, mode }) {
       `${identity.project}\n` +
       `  theme   ${resolver.themeId}\n` +
       `  slot    ${identity.slot} · hue ${hue}°\n` +
+      (identity.projectColor ? `  colour  ${identity.projectColor} · ${prefix}\n` : '') +
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'projects') {
@@ -820,6 +832,7 @@ async function main({ command, args: rest, color, mode }) {
       return stat.isDirectory();
     });
     const resolved = await Promise.all(dirs.map((dir) => resolver.resolve(dir)));
+    reportTasksWarnings(resolved.flatMap(({ warnings }) => warnings));
     resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
 
     // The same view control, the same bounds, and the same reason as `theme show`.
@@ -836,12 +849,13 @@ async function main({ command, args: rest, color, mode }) {
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         theme: resolver.pack.id,
-        projects: resolved.map(({ identity, pin }) => ({
+        projects: resolved.map(({ identity }) => ({
           project: identity.project,
           member: identity.member,
           label: identity.label,
           slot: identity.slot,
-          source: pin ? 'pin' : 'auto',
+          color: identity.projectColor,
+          source: identity.source,
         })),
       })}\n`);
       return;
@@ -861,8 +875,9 @@ async function main({ command, args: rest, color, mode }) {
     }
 
     const useColor = cliColor({ color });
-    const cells = resolved.map(({ identity, pin }) => {
-      const swatch = cliSwatch(identityColors(identity.slot, resolver.tone).base, { color: useColor });
+    const cells = resolved.map(({ identity }) => {
+      const colors = identityColors(identity, resolver.tone);
+      const swatch = cliSwatch(identity.projectColor ?? colors.base, { color: useColor });
       const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
       // resolve() proved the member's assets exist. Idle is what a roster shows,
       // as it is for `theme show`; --state asks for another pose.
@@ -872,7 +887,7 @@ async function main({ command, args: rest, color, mode }) {
       return {
         lines: [
           `  ${swatch}  ${name}`,
-          `      ${identity.label} · slot ${identity.slot} · ${pin ? 'pin' : 'auto'}`,
+          `      ${identity.label} · slot ${identity.slot} · ${identity.source}`,
         ],
         png,
         cols: png ? boxFor(png, viewRows).cols : 0,
@@ -909,11 +924,12 @@ async function main({ command, args: rest, color, mode }) {
     const ctx = await context();
     const stdin = await readStdin();
 
-    const { prev, next, seq, intent, evicted } = await applyHookEvent({
+    const { prev, next, seq, intent, evicted, warnings } = await applyHookEvent({
       event: positionals[0],
       stdin,
       deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
     });
+    for (const warning of warnings) process.stderr.write(`familiar: tasks: ${warning}\n`);
     reportEvictions(evicted);
     if (values.trace !== undefined) {
       appendHookTrace(values.trace, {
@@ -1096,6 +1112,7 @@ async function main({ command, args: rest, color, mode }) {
     const projectSync = values['sync-projects']
       ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack, cwd: process.cwd() })
       : null;
+    if (projectSync) reportTasksWarnings(projectSync.warnings);
 
     let written = 0;
     for (const [memberId, member] of ctx.pack.members) {
@@ -1512,12 +1529,12 @@ async function main({ command, args: rest, color, mode }) {
     // also what surfaces a gap as a gap rather than a shorter list.
     const useColor = cliColor({ color });
     for (let slot = 0; slot < SLOT_COUNT; slot++) {
-      // A REAL SWATCH, not the text "hue 22/62". identityColors(slot, tone) is
+      // A REAL SWATCH, not the text "hue 22/62". identityColors({ slot, projectColor: null }, tone) is
       // the same ramp every other surface paints this slot with, so the strip
       // shows the colour the bar and the border actually use rather than a
       // second opinion computed here. sgr.js exports fg(hex) and no background
       // setter, hence a block glyph rather than a filled cell.
-      const swatch = cliSwatch(identityColors(slot, ctxTone).base, { color: useColor });
+      const swatch = cliSwatch(identityColors({ slot, projectColor: null }, ctxTone).base, { color: useColor });
 
       // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
       // precisely when this view earns its keep — so the gap is caught, labelled,

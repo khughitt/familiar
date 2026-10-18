@@ -31,16 +31,16 @@ test('ramp() itself rejects a malformed tone — it does not paint #NaNNaNNaN', 
   );
 });
 
-test('slot 0 in a dark scheme is the ginger ramp', () => {
-  assert.deepEqual(identityColors(0, DARK), {
+test('without a project colour the ramp is the slot\'s and the label is its light stop', () => {
+  assert.deepEqual(identityColors({ slot: 0, projectColor: null }, DARK), {
     shadow: '#954d23', base: '#d68251', light: '#e5af8f',
-    highlight: '#f1d5c5', backdrop: '#1f1814',
+    highlight: '#f1d5c5', backdrop: '#1f1814', project: '#e5af8f',
   });
 });
 
 test('a light scheme deepens the same hue rather than changing it', () => {
-  const dark = identityColors(6, DARK);
-  const light = identityColors(6, LIGHT);
+  const dark = identityColors({ slot: 6, projectColor: null }, DARK);
+  const light = identityColors({ slot: 6, projectColor: null }, LIGHT);
   assert.equal(light.base, '#3571b6');
   assert.equal(light.backdrop, '#edf0f3');   // near-white, faintly blue
   assert.notEqual(dark.base, light.base);    // tone differs...
@@ -62,5 +62,19 @@ test('satScale scales saturation and clamps at 100', () => {
 });
 
 test('slot 11 is near-greyscale by design — the witches familiar', () => {
-  assert.equal(identityColors(11, DARK).base, '#9a8d8d');
+  assert.equal(identityColors({ slot: 11, projectColor: null }, DARK).base, '#9a8d8d');
+});
+
+test('a project colour supplies the hue; the slot supplies saturation; the label is exact', () => {
+  assert.deepEqual(identityColors({ slot: 3, projectColor: '#317d01' }, DARK), {
+    shadow: '#547f39', base: '#8bbd6b', light: '#b4d4a0',
+    highlight: '#d8e9ce', backdrop: '#191d16', project: '#317d01',
+  });
+  assert.equal(identityColors({ slot: 3, projectColor: '#317d01' }, LIGHT).base, '#6ba249');
+  assert.equal(identityColors({ slot: 3, projectColor: '#317d01' }, LIGHT).project, '#317d01');
+  assert.equal(identityColors({ slot: 1, projectColor: '#8d6803' }, DARK).base, '#d2b156');
+});
+
+test('identityColors refuses a missing projectColor', () => {
+  assert.throws(() => identityColors({ slot: 0 }, DARK), /projectColor must be a #rrggbb string or null/);
 });

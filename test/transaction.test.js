@@ -5,6 +5,8 @@ import { mkdtempSync, readFileSync, existsSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import * as transaction from '../src/bus/transaction.js';
+import { NO_PROJECT } from '../src/bus/project-color.js';
 import { readJson } from '../src/bus/store.js';
 import { resolveIdentities } from '../src/bus/resolve.js';
 import { parseIdentities } from '../src/bus/pins.js';
@@ -55,6 +57,7 @@ function harness(over = {}) {
         spriteFor: (m, s) => ({ terminal: `/c/${m}/${s}.png`, rows: 12 }),
         animationFor: () => ({ kind: 'static' }),
       }),
+      lookupProjectColor: async () => NO_PROJECT,
       gitContext: async () => ({
         remote: 'github.com/me/api', repoRoot: '/home/k/d/api', repositoryRoot: '/home/k/d/api',
       }),
@@ -76,6 +79,128 @@ function harness(over = {}) {
 
 const stdin = JSON.stringify({ session_id: 's1', cwd: '/home/k/d/api' });
 
+test('carriedProjectColor uses only an own colour on the same checkout record', () => {
+  const carry = transaction.carriedProjectColor;
+  assert.equal(carry(undefined, '/api'), undefined);
+  assert.equal(carry({ repoRoot: '/web', projectColor: '#317d01' }, '/api'), undefined);
+  assert.equal(carry({ repoRoot: '/api' }, '/api'), undefined);
+  assert.equal(carry(Object.assign(Object.create({ projectColor: '#317d01' }), { repoRoot: '/api' }), '/api'), undefined);
+  assert.equal(carry({ repoRoot: '/api', projectColor: null }, '/api'), null);
+  assert.equal(carry({ repoRoot: '/api', projectColor: '#317d01' }, '/api'), '#317d01');
+});
+
+test('the first event looks the colour up once; later events in the checkout carry it', async () => {
+  const calls = [];
+  const lookupProjectColor = async (dir) => { calls.push(dir); return { prefix: 'api', color: '#317d01', warnings: [] }; };
+  const { paths, deps } = harness({ lookupProjectColor });
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.deepEqual(calls, ['/home/k/d/api']);
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.s1.projectColor, '#317d01');
+  const intent = await readJson(paths.intentPath);
+  assert.equal(intent.s1.current.identity.slot, 3);
+  assert.equal(intent.s1.current.color.project, '#317d01');
+});
+
+test('a null colour is carried too', async () => {
+  const calls = [];
+  const { paths, deps } = harness({
+    lookupProjectColor: async (dir) => { calls.push(dir); return NO_PROJECT; },
+  });
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.deepEqual(calls, ['/home/k/d/api']);
+  assert.equal((await readJson(paths.agentsPath)).s1.projectColor, null);
+});
+
+test('a change of checkout looks again; a subdirectory does not', async () => {
+  const calls = [];
+  let repoRoot = '/home/k/d/api';
+  const { paths, deps } = harness({
+    lookupProjectColor: async (dir) => {
+      calls.push(dir);
+      return { prefix: 'project', color: dir.endsWith('/api') ? '#317d01' : '#ff0000', warnings: [] };
+    },
+    gitContext: async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot }),
+  });
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  repoRoot = '/home/k/d/web';
+  await applyHookEvent({ event: 'PreToolUse', stdin: JSON.stringify({ session_id: 's1', cwd: repoRoot }), deps });
+  await applyHookEvent({ event: 'PreToolUse', stdin: JSON.stringify({ session_id: 's1', cwd: `${repoRoot}/src` }), deps });
+  assert.deepEqual(calls, ['/home/k/d/api', '/home/k/d/web']);
+  assert.equal((await readJson(paths.agentsPath)).s1.projectColor, '#ff0000');
+});
+
+test('a session never borrows another session\'s colour', async () => {
+  const calls = [];
+  const { paths, deps } = harness({
+    lookupProjectColor: async (dir) => { calls.push(dir); return NO_PROJECT; },
+  });
+  await applyHookEvent({
+    event: 'UserPromptSubmit', stdin: JSON.stringify({ session_id: 's2', cwd: '/home/k/d/api' }),
+    deps: { ...deps, lookupProjectColor: async () => ({ prefix: 'api', color: '#317d01', warnings: [] }) },
+  });
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  assert.deepEqual(calls, ['/home/k/d/api']);
+  const agents = await readJson(paths.agentsPath);
+  assert.equal(agents.s1.projectColor, null);
+  assert.equal(agents.s2.projectColor, '#317d01');
+});
+
+test('outside a repository and on SessionEnd nothing is looked up', async () => {
+  const calls = [];
+  const { paths, deps } = harness({
+    lookupProjectColor: async (dir) => { calls.push(dir); return NO_PROJECT; },
+    gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
+  });
+  const outside = await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  assert.equal((await readJson(paths.agentsPath)).s1.projectColor, null);
+  assert.deepEqual(outside.warnings, []);
+  const ended = await applyHookEvent({ event: 'SessionEnd', stdin, deps });
+  assert.deepEqual(calls, []);
+  assert.deepEqual(ended.warnings, []);
+  assert.deepEqual(await readJson(paths.agentsPath), {});
+});
+
+test('warnings come back only from the event that looked', async () => {
+  const { deps } = harness({
+    lookupProjectColor: async () => ({ prefix: null, color: null, warnings: ['w'] }),
+  });
+  const first = await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
+  const second = await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.deepEqual(first.warnings, ['w']);
+  assert.deepEqual(second.warnings, []);
+});
+
+test('a tasks failure aborts before anything is written', async () => {
+  const { paths, deps } = harness({
+    lookupProjectColor: async () => { throw new Error('tasks resolve /home/k/d/api: exited 1: x'); },
+  });
+  await assert.rejects(applyHookEvent({ event: 'UserPromptSubmit', stdin, deps }), {
+    message: 'tasks resolve /home/k/d/api: exited 1: x',
+  });
+  for (const path of [paths.agentsPath, paths.intentPath, paths.seqPath, paths.lockPath]) {
+    assert.equal(existsSync(path), false);
+  }
+});
+
+test('an old record without projectColor is looked up and rewritten', async () => {
+  const calls = [];
+  const { paths, deps } = harness({
+    lookupProjectColor: async (dir) => { calls.push(dir); return { prefix: 'api', color: '#317d01', warnings: [] }; },
+  });
+  await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps: { ...deps, lookupProjectColor: async () => NO_PROJECT } });
+  const agents = await readJson(paths.agentsPath);
+  delete agents.s1.projectColor;
+  writeFileSync(paths.agentsPath, JSON.stringify(agents));
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.deepEqual(calls, ['/home/k/d/api']);
+  const rewritten = (await readJson(paths.agentsPath)).s1;
+  assert.equal(Object.hasOwn(rewritten, 'projectColor'), true);
+  assert.equal(rewritten.projectColor, '#317d01');
+});
+
 test('writes the bus AND the resolved intent in one transaction', async () => {
   const { paths, deps } = harness();
   await applyHookEvent({ event: 'UserPromptSubmit', stdin, deps });
@@ -88,6 +213,7 @@ test('writes the bus AND the resolved intent in one transaction', async () => {
     remote: 'github.com/me/api',
     repoRoot: '/home/k/d/api',
     repositoryRoot: '/home/k/d/api',
+    projectColor: null,
     cwd: '/home/k/d/api',
     pid: 4242,
     starttime: 987_654,
@@ -114,6 +240,7 @@ test('one Darwin process table serves an N-record transaction', async () => {
     remote: null,
     repoRoot: `/projects/${sessionId}`,
     repositoryRoot: `/projects/${sessionId}`,
+    projectColor: null,
     cwd: `/projects/${sessionId}`,
     pid,
     starttime: started,
@@ -518,7 +645,7 @@ test('a pre-anchor record is evicted once and re-admitted by its next hook', asy
   writeFileSync(paths.agentsPath, JSON.stringify({
     s2: {
       sessionId: 's2', projectKey: 'github.com/me/other', project: 'other',
-      remote: 'github.com/me/other', repoRoot: '/home/k/d/other', cwd: '/home/k/d/other',
+      projectColor: null, remote: 'github.com/me/other', repoRoot: '/home/k/d/other', cwd: '/home/k/d/other',
       pid: 4242, starttime: 987_654, seq: 1, state: 'working', updatedAt: 999_000,
     },
   }));

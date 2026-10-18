@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+// A tasks that returns controlled resolve results, keeping tests off the host's registry.
+// The test runner puts this directory first on PATH.
+import { appendFileSync } from 'node:fs';
+
+const env = process.env;
+if (env.FAKE_TASKS_LOG !== undefined) appendFileSync(env.FAKE_TASKS_LOG, `${process.argv.slice(2).join(' ')}\n`);
+console.log(env.FAKE_TASKS_OUTPUT ?? JSON.stringify({
+  results: [{ input: process.argv.at(-1), kind: 'path', status: 'unregistered' }],
+  warnings: [], fake: true,
+}));
+if (env.FAKE_TASKS_STDERR !== undefined) console.error(env.FAKE_TASKS_STDERR);
+process.exitCode = Number(env.FAKE_TASKS_EXIT ?? 0);

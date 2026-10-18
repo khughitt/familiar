@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveIdentity, resolveIdentities, resolveIntent, resolveAll } from '../src/bus/resolve.js';
+import { autoSlot } from '../src/bus/identity.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { TTL_DONE_MS, TTL_ERROR_MS } from '../src/protocol/intent.js';
 import { parseThemePack, STATES } from 'familiar-theme';
@@ -65,6 +66,7 @@ const record = (over = {}) => ({
   project: 'api',
   cwd: '/home/k/d/api',
   repositoryRoot: '/home/k/d/api',
+  projectColor: null,
   pid: 4242,
   state: 'working',
   updatedAt: 1_000_000,
@@ -80,6 +82,7 @@ const ctx = {
   remote: 'github.com/me/api',
   repoRoot: '/home/k/d/api',
   repositoryRoot: '/home/k/d/api',
+  projectColor: null,
 };
 
 test('an unpinned project is hashed to a slot and gets that slot default member', () => {
@@ -90,6 +93,8 @@ test('an unpinned project is hashed to a slot and gets that slot default member'
     slot: 3,                      // frozen: autoSlot('github.com/me/api')
     member: 'dog-in-disguise',    // slot 3's only member, therefore its default
     label: 'Dog in Disguise',
+    projectColor: null,
+    source: 'auto',
   });
 });
 
@@ -175,7 +180,7 @@ test('a member pin unknown to its own theme is an error', () => {
   );
 });
 
-const identity = { projectKey: 'k', project: 'api', slot: 0, member: 'ginger-tabby', label: 'Ginger Tabby' };
+const identity = { projectKey: 'k', project: 'api', slot: 0, projectColor: null, source: 'auto', member: 'ginger-tabby', label: 'Ginger Tabby' };
 
 test('a persistent state has no expiry and no successor', () => {
   const intent = resolveIntent({
@@ -375,7 +380,7 @@ test('an old record faults while own null and healthy anchors resolve', () => {
 // theme-scoped member map, validated exactly as any other pin's.
 const WORKTREE = {
   projectKey: '/fixture/api', project: 'fix-api', remote: null,
-  repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
+  repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api', projectColor: null,
 };
 
 test('a worktree inherits its repository path pin with the pin\'s member', () => {
@@ -434,4 +439,59 @@ test('resolveAll takes the identity map rather than recomputing it — one pin-m
     }),
     /no resolved identity for session "s2"/
   );
+});
+
+test('a project colour decides the slot', () => {
+  const id = resolveIdentity({ ...ctx, projectColor: '#317d01', catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([id.slot, id.member, id.source, id.projectColor], [3, 'dog-in-disguise', 'colour', '#317d01']);
+  const blue = resolveIdentity({ ...ctx, projectColor: '#058dfa', catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([blue.slot, blue.member, blue.source], [6, 'schrodingers-cat', 'colour']);
+});
+
+test('an agreeing pin keeps its member choice under a colour', () => {
+  const catalog = parseIdentities(`identities:\n  - path: ${ctx.repoRoot}\n    slot: 6\n    members:\n      cats: maine-coon\n`);
+  const id = resolveIdentity({ ...ctx, projectColor: '#058dfa', catalog, pack: PACK });
+  assert.deepEqual([id.slot, id.member, id.source, id.projectColor], [6, 'maine-coon', 'colour', '#058dfa']);
+});
+
+test('a pin that disagrees with the colour is a fault naming both', () => {
+  const catalog = parseIdentities(`identities:\n  - path: ${ctx.repoRoot}\n    slot: 4\n`);
+  assert.throws(() => resolveIdentity({ ...ctx, projectColor: '#317d01', catalog, pack: PACK }), {
+    message: "pin declares slot 4, but project colour #317d01 (from tasks) maps to slot 3: "
+      + "remove the pin or change the project's colour",
+  });
+});
+
+test('without a colour the pin, then the hash, decide as before', () => {
+  const catalog = parseIdentities(`identities:\n  - path: ${ctx.repoRoot}\n    slot: 6\n`);
+  const pinned = resolveIdentity({ ...ctx, catalog, pack: PACK });
+  assert.deepEqual([pinned.slot, pinned.source, pinned.projectColor], [6, 'pin', null]);
+  const automatic = resolveIdentity({ ...ctx, catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([automatic.slot, automatic.source, automatic.projectColor], [autoSlot(ctx.projectKey), 'auto', null]);
+});
+
+test('projectColor is required and validated', () => {
+  assert.throws(() => resolveIdentity({ ...ctx, projectColor: undefined, catalog: NO_PINS, pack: PACK }),
+    /resolveIdentity: projectColor must be a #rrggbb string or null/);
+  assert.throws(() => resolveIdentity({ ...ctx, projectColor: '#BC8369', catalog: NO_PINS, pack: PACK }),
+    /not a #rrggbb colour/);
+});
+
+test('a record without its own projectColor faults until its next hook', () => {
+  const old = record();
+  delete old.projectColor;
+  const inherited = Object.assign(Object.create({ projectColor: '#317d01' }), old);
+  const agents = { old, inherited, current: record({ sessionId: 'current', projectColor: null }) };
+  const result = resolveIdentities({ agents, catalog: NO_PINS, pack: PACK });
+  assert.deepEqual([...result.faults], [
+    ['old', 'session record lacks projectColor; wait for its next hook'],
+    ['inherited', 'session record lacks projectColor; wait for its next hook'],
+  ]);
+  assert.deepEqual([...result.identities.keys()], ['current']);
+});
+
+test('the intent carries the exact colour as its project stop', () => {
+  const identity = resolveIdentity({ ...ctx, projectColor: '#317d01', catalog: NO_PINS, pack: PACK });
+  const intent = resolveIntent({ record: record(), identity, tone: DARK, spriteFor, animationFor, motionPolicy });
+  assert.equal(intent.current.color.project, '#317d01');
 });

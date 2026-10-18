@@ -1,3 +1,4 @@
+import { hexToHsl } from '../protocol/color.js';
 import { slotSpec } from '../protocol/slot-hues.js';
 
 // An identity owns a HUE; the active colorscheme owns TONE. Ember stays
@@ -50,7 +51,12 @@ export function ramp(hue, sat, tone) {
   };
 }
 
-export function identityColors(slot, tone) {
+export function identityColors({ slot, projectColor }, tone) {
+  if (projectColor === undefined) {
+    throw new Error('identityColors: projectColor must be a #rrggbb string or null');
+  }
   const spec = slotSpec(slot);
-  return ramp(spec.hue, spec.sat, tone);
+  const hue = projectColor === null ? spec.hue : hexToHsl(projectColor).h;
+  const colors = ramp(hue, spec.sat, tone);
+  return { ...colors, project: projectColor ?? colors.light };
 }
