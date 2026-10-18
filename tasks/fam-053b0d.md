@@ -1,15 +1,17 @@
 ---
 id: fam-053b0d
 title: Derive familiar's identity colour from the project's tasks colour
-status: doing
+status: done
 priority: 2
 size: m
 complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T17:36:55Z
+updated: 2026-10-18T17:38:56Z
 started: 2026-10-17T21:09:21Z
+completed: 2026-10-18T17:38:56Z
+closed: 2026-10-18T17:38:56Z
 depends: []
 tags: []
 agent: claude-code/claude-opus-5-5
@@ -92,3 +94,7 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-18T17:36:54Z (feat/project-colour): review: impl round 4 — verdict: accept; findings: none; reviewer: human
 - 2026-10-18T17:36:55Z (feat/project-colour): user accepted the corrected coloured display on 2026-10-18; latency and visual gates are both settled. Complete branch closeout and local integration.
+- 2026-10-18T17:38:56Z (feat/project-colour): done
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T17:38:56Z (feat/project-colour): Familiar consumes registered tasks colours across hooks, HUD, CLI and Codex; user accepted latency and visuals, independent review settled, minor diagnostics deferred to fam-5ecf74.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
