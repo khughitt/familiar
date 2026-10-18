@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import {
-  summarize, batchOrder, pairedComparison, proveHook, parseSettings, requireDistinctSources,
+  summarize, batchOrder, pairedComparison, proveHook, parseSettings, requireDistinctSources, structuralChecks,
 } from '../tools/bench-hook.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -127,7 +127,7 @@ test('an exit-zero diagnostic cannot be a successful sample', () => {
   const agents = { [id]: { pid: 42, repoRoot: '/fixture/api', state: 'working' } };
   const intents = { [id]: { current: { state: 'working' } } };
   assert.throws(() => proveHook({ status: 0, stdout: '', stderr: 'familiar: failed\n' },
-    agents, intents, id, 42, '/fixture/api'), /cleanly|diagnostic/);
+    agents, intents, id, 42, '/fixture/api', null), /cleanly|diagnostic/);
 });
 
 test('a sample proves its working record, owner and checkout', () => {
@@ -135,7 +135,7 @@ test('a sample proves its working record, owner and checkout', () => {
   const clean = { status: 0, signal: null, stdout: '', stderr: '' };
   const agents = { [id]: { pid: 42, repoRoot: '/fixture/api', state: 'working' } };
   const intents = { [id]: { current: { state: 'working' } } };
-  assert.equal(proveHook(clean, agents, intents, id, 42, '/fixture/api'), 'working');
+  assert.equal(proveHook(clean, agents, intents, id, 42, '/fixture/api', null), 'working');
 
   const rejects = [
     [{ ...clean, error: new Error('spawn ENOENT') }, agents, intents, 42, '/fixture/api', /spawn/],
@@ -150,8 +150,42 @@ test('a sample proves its working record, owner and checkout', () => {
     [clean, agents, { [id]: { current: { state: 'done' } } }, 42, '/fixture/api', /intent/],
   ];
   for (const [result, a, i, pid, checkout, pattern] of rejects) {
-    assert.throws(() => proveHook(result, a, i, id, pid, checkout), pattern);
+    assert.throws(() => proveHook(result, a, i, id, pid, checkout, null), pattern);
   }
+});
+
+test('the candidate looks its colour up once per context and then carries it', () => {
+  const batch = (first, later) => ({ samples: [{ hookMs: 1, git: [] }], tasksSpawns: { first, later } });
+  const pairs = (candidate) => [0, 1].map((index) => ({ index, contexts: Object.fromEntries(
+    ['main', 'linked'].map((c) => [c, { baseline: batch([], 0), candidate: candidate(index) }])) }));
+  const once = [{ args: ['resolve', '--json', '/r'], ms: 3, exit: 0, signal: null }];
+  assert.equal(structuralChecks(pairs((i) => batch(i === 0 ? once : [], 0)), 'compare').failures
+    .filter((f) => /tasks/.test(f.check)).length, 0);
+  assert.ok(structuralChecks(pairs(() => batch([], 0)), 'compare').failures
+    .some((f) => f.check === 'candidate tasks lookups 0 on the first event, expected 1'));
+  assert.ok(structuralChecks(pairs((i) => batch(i === 0 ? once : [], i)), 'compare').failures
+    .some((f) => f.check === 'tasks spawns 1 after the first lookup'));
+  assert.ok(structuralChecks(pairs(() => batch(once, 0)), 'compare').failures
+    .some((f) => f.check === 'tasks spawns 1 after the first lookup'));
+  const baselineLookup = pairs((i) => batch(i === 0 ? once : [], 0));
+  baselineLookup[0].contexts.main.baseline.tasksSpawns.first = once;
+  assert.ok(structuralChecks(baselineLookup, 'compare').failures
+    .some((f) => f.check === 'baseline spawned tasks 1 times'));
+  assert.equal(structuralChecks(pairs(() => batch(once, 0)), 'pilot').failures.length, 0);
+});
+
+test('proveHook requires the expected colour on the candidate record and intent', () => {
+  const id = 'bench-main';
+  const clean = { status: 0, signal: null, stdout: '', stderr: '' };
+  const agents = { [id]: { pid: 42, repoRoot: '/fixture/api', state: 'working', projectColor: '#317d01' } };
+  const intents = { [id]: { current: { state: 'working', color: { project: '#317d01' } } } };
+  const prove = (a, i, expected = '#317d01') => proveHook(clean, a, i, id, 42, '/fixture/api', expected);
+  assert.equal(prove(agents, intents), 'working');
+  const noColor = { [id]: { ...agents[id], projectColor: null } };
+  assert.throws(() => prove(noColor, intents), /agent record carries colour null, not #317d01/);
+  assert.throws(() => prove(agents, { [id]: { current: { state: 'working', color: { project: '#ffffff' } } } }),
+    /intent.*colour.*#ffffff.*#317d01/);
+  assert.equal(prove(noColor, { [id]: { current: { state: 'working' } } }, null), 'working');
 });
 
 test('settings refuse malformed modes, counts and source paths', (t) => {
@@ -289,9 +323,14 @@ test('the real just recipe forwards paths and records paired hooks', LINUX, (t) 
   assert.equal(report.timingStatus, 'pilot-only');
   for (const context of ['main', 'linked']) {
     for (const version of ['baseline', 'candidate']) {
-      const sample = report.pairs[0].contexts[context][version].samples[0];
+      const batch = report.pairs[0].contexts[context][version];
+      const sample = batch.samples[0];
       assert.ok(Number.isFinite(sample.hookMs) && sample.hookMs > 0);
       assert.equal(sample.provedState, 'working');
+      assert.equal(sample.projectColor, '#317d01');
+      assert.ok(Array.isArray(sample.tasks));
+      assert.equal(batch.tasksSpawns.first.length, 1);
+      assert.equal(batch.tasksSpawns.later, 0);
       assert.ok(sample.git.length >= 2);
     }
   }

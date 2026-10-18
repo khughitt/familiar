@@ -37,13 +37,15 @@ const THEME = join(DRIVER_ROOT, 'test/fixtures/theme-pack');
 const MODES = ['pilot', 'compare'];
 const CONTEXTS = ['main', 'linked'];
 const SAMPLE_TIMEOUT_MS = 10_000;
-// Discovery spawns per hook: the code before worktree identity, and after it.
-const EXPECTED_GIT = { baseline: { main: 2, linked: 2 }, candidate: { main: 2, linked: 3 } };
+// Both versions already discover worktree identity with the same Git spawns.
+const BENCH_PROJECT_COLOR = '#317d01';
+const EXPECTED_GIT = { baseline: { main: 2, linked: 3 }, candidate: { main: 2, linked: 3 } };
 const BOUNDARY = 'One `familiar hook PreToolUse --agent claude-code` process per sample, timed by '
   + 'the worker from spawn to exit: node startup, CLI import, Git discovery, the locked bus '
   + 'transaction and emission to a private pipe. Run through test/fixtures/bench-hook-cli.mjs '
   + '(fixture process lookup, instrumented real execFile) with real Git on this host. Not a '
-  + 'live-agent latency and not a Darwin measurement.';
+  + 'live-agent latency and not a Darwin measurement. Tasks is a fixture stand-in answering '
+  + 'one registered colour, so a lookup measures the stand-in spawn, not real tasks latency.';
 
 const USAGE = 'usage: bench-hook.mjs MODE BASELINE CANDIDATE FIXTURE [SAMPLES [WARMUPS [PAIRS]]]';
 
@@ -106,7 +108,7 @@ function assertClean(result) {
   }
 }
 
-export function proveHook(result, agents, intents, id, workerPid, checkout) {
+export function proveHook(result, agents, intents, id, workerPid, checkout, expectedColor) {
   assertClean(result);
   const agent = agents?.[id];
   if (!agent) throw new Error(`hook wrote no agent record for ${id}`);
@@ -119,6 +121,15 @@ export function proveHook(result, agents, intents, id, workerPid, checkout) {
   }
   const state = intents?.[id]?.current?.state;
   if (state !== 'working') throw new Error(`intent for ${id} is ${state ?? 'absent'}, not working`);
+  if (typeof expectedColor === 'string') {
+    if (agent.projectColor !== expectedColor) {
+      throw new Error(`agent record carries colour ${agent.projectColor}, not ${expectedColor}`);
+    }
+    const found = intents[id].current.color?.project;
+    if (found !== expectedColor) {
+      throw new Error(`intent carries colour ${found}, not ${expectedColor}`);
+    }
+  }
   return state;
 }
 
@@ -251,7 +262,11 @@ function prepareFixture(fixture) {
 function workerEnv(fx, version, context) {
   const { config, bus } = fx.state[`${version}-${context}`];
   return {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    PATH: `${join(DRIVER_ROOT, 'test/fixtures/fake-tasks')}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+    FAKE_TASKS_OUTPUT: JSON.stringify({
+      results: [{ input: fx.projects[context], kind: 'path', status: 'resolved', prefix: 'api', color: BENCH_PROJECT_COLOR }],
+      warnings: [],
+    }),
     HOME: fx.home,
     XDG_CONFIG_HOME: join(fx.home, '.config'),
     XDG_STATE_HOME: join(fx.home, '.local/state'),
@@ -273,6 +288,7 @@ async function measureBatch({ index, order, context, version, source, fx, settin
   const target = `bench-hook-${context}-${version}`;
   const spec = {
     measuredBin: source.bin,
+    expectedColor: version === 'candidate' ? BENCH_PROJECT_COLOR : null,
     wrapper: WRAPPER,
     projectRoot: fx.projects[context],
     sessionId: `bench-${context}-${version}`,
@@ -280,6 +296,7 @@ async function measureBatch({ index, order, context, version, source, fx, settin
     samples: settings.samples,
     env: workerEnv(fx, version, context),
     gitLogPath: join(fx.root, 'runs', `${id}.git.json`),
+    tasksLogPath: join(fx.root, 'runs', `${id}.tasks.json`),
     resultPath: join(fx.root, 'runs', `${id}.result.json`),
   };
   const specPath = join(fx.root, 'runs', `${id}.spec.json`);
@@ -330,16 +347,39 @@ async function measureBatch({ index, order, context, version, source, fx, settin
     tt: { target, exit: code },
     warmups: result.warmups.length,
     samples: result.samples,
+    tasksSpawns: {
+      first: [...result.warmups, ...result.samples][0].tasks,
+      later: [...result.warmups, ...result.samples].slice(1).reduce((n, event) => n + event.tasks.length, 0),
+    },
   };
 }
 
-function structuralChecks(pairs, mode) {
+export function structuralChecks(pairs, mode) {
   const failures = [];
+  const seenCandidate = new Set();
   const observed = {};
   for (const pair of pairs) {
     for (const context of CONTEXTS) {
       for (const version of ['baseline', 'candidate']) {
-        for (const [n, sample] of pair.contexts[context][version].samples.entries()) {
+        const batch = pair.contexts[context][version];
+        const { first, later } = batch.tasksSpawns;
+        const where = { pair: pair.index, context, version };
+        if (mode === 'compare') {
+          if (version === 'baseline') {
+            const n = first.length + later;
+            if (n !== 0) failures.push({ ...where, check: `baseline spawned tasks ${n} times` });
+          } else if (!seenCandidate.has(context)) {
+            if (first.length !== 1) {
+              failures.push({ ...where, check: `candidate tasks lookups ${first.length} on the first event, expected 1` });
+            }
+            if (later !== 0) failures.push({ ...where, check: `tasks spawns ${later} after the first lookup` });
+          } else {
+            const n = first.length + later;
+            if (n !== 0) failures.push({ ...where, check: `tasks spawns ${n} after the first lookup` });
+          }
+        }
+        if (version === 'candidate') seenCandidate.add(context);
+        for (const [n, sample] of batch.samples.entries()) {
           const spawns = sample.git.length;
           const key = `${version}-${context}`;
           observed[key] = [...new Set([...(observed[key] ?? []), spawns])].sort();
@@ -356,6 +396,7 @@ function structuralChecks(pairs, mode) {
   }
   return {
     gitSpawnsEnforced: mode === 'compare',
+    tasksSpawnsEnforced: mode === 'compare',
     expectedGitSpawns: mode === 'compare' ? EXPECTED_GIT : null,
     observedGitSpawns: observed,
     failures,
@@ -528,24 +569,29 @@ async function worker(specPath) {
   let lastSeq = -Infinity;
   for (let n = 0; n < spec.warmups + spec.samples; n++) {
     rmSync(spec.gitLogPath, { force: true });
+    rmSync(spec.tasksLogPath, { force: true });
     const started = performance.now();
     const result = await runOwnedChild(process.execPath, [spec.wrapper, spec.measuredBin,
       'hook', 'PreToolUse', '--agent', 'claude-code'], {
       cwd: spec.projectRoot,
-      env: { ...spec.env, BENCH_GIT_LOG: spec.gitLogPath },
+      env: { ...spec.env, BENCH_GIT_LOG: spec.gitLogPath, BENCH_TASKS_LOG: spec.tasksLogPath },
       input: JSON.stringify({ session_id: spec.sessionId, cwd: spec.projectRoot }),
     }, active);
     const hookMs = performance.now() - started;
     assertClean(result);
     const agents = readJson(join(bus, 'agents.json'));
     const provedState = proveHook(result, agents, readJson(join(bus, 'intent.json')),
-      spec.sessionId, process.pid, spec.projectRoot);
+      spec.sessionId, process.pid, spec.projectRoot, spec.expectedColor);
     const { seq } = agents[spec.sessionId];
     if (!(seq > lastSeq)) throw new Error(`hook left a stale record (seq ${seq} after ${lastSeq})`);
     lastSeq = seq;
     const git = readJson(spec.gitLogPath);
     if (!Array.isArray(git)) throw new Error('the wrapper recorded no Git metrics');
-    (n < spec.warmups ? warmups : samples).push({ hookMs, provedState, seq, git });
+    const tasks = readJson(spec.tasksLogPath);
+    if (!Array.isArray(tasks)) throw new Error('the wrapper recorded no tasks metrics');
+    const projectColor = Object.hasOwn(agents[spec.sessionId], 'projectColor')
+      ? agents[spec.sessionId].projectColor : 'absent';
+    (n < spec.warmups ? warmups : samples).push({ hookMs, provedState, seq, git, tasks, projectColor });
   }
   writeFileSync(spec.resultPath, JSON.stringify({ complete: true, warmups, samples }));
 }

@@ -4,7 +4,7 @@
 // module is resolved from the MEASURED bin, never from this file's checkout: importing this
 // checkout's proc.js would patch a different module instance from the one a detached baseline
 // checkout loads. And it instruments the real execFile, so the benchmark can count and time
-// the hook's Git children without changing what they return.
+// the hook's Git and tasks children without changing what they return.
 //
 // The agent lookup is the one thing faked: the parent (the benchmark worker) stands in for a
 // `claude` process with a terminal, so the hook resolves a live, stable owner. Test machinery
@@ -34,10 +34,11 @@ const agent = {
 defaultProcessOps.recordOf = (pid) => (pid === agent.pid ? agent : realRecordOf(pid));
 defaultProcessOps.ancestors = () => [realRecordOf(process.pid), agent];
 
-// Children are tracked so a cancelled wrapper reaps what it started; Git runs are recorded
+// Children are tracked so a cancelled wrapper reaps what it started; Git and tasks runs are recorded
 // for the benchmark. The promisified form keeps execFile's own stdout/stderr/error shape.
 const children = new Set();
 const gitRuns = [];
+const tasksRuns = [];
 const childProcess = createRequire(import.meta.url)('node:child_process');
 const realExecFile = childProcess.execFile;
 const realPromised = realExecFile[promisify.custom];
@@ -56,8 +57,10 @@ execFile[promisify.custom] = (file, argv, options) => {
   const promise = realPromised(file, argv, options);
   own(promise.child);
   const settle = (exit, signal) => {
-    if (basename(String(file)) !== 'git') return;
-    gitRuns.push({
+    const command = basename(String(file));
+    const runs = command === 'git' ? gitRuns : command === 'tasks' ? tasksRuns : null;
+    if (runs === null) return;
+    runs.push({
       args: Array.isArray(argv) ? [...argv] : [],
       ms: performance.now() - started,
       exit,
@@ -86,6 +89,9 @@ for (const [name, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
 process.on('exit', () => {
   if (!interrupted && process.env.BENCH_GIT_LOG) {
     writeFileSync(process.env.BENCH_GIT_LOG, JSON.stringify(gitRuns));
+  }
+  if (!interrupted && process.env.BENCH_TASKS_LOG) {
+    writeFileSync(process.env.BENCH_TASKS_LOG, JSON.stringify(tasksRuns));
   }
 });
 
