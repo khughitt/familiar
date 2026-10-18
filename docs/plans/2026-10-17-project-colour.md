@@ -23,8 +23,9 @@ and benchmark documentation landed through Task 6 Step 6 using
 superpowers:subagent-driven-development. The user accepted the measured main
 paired median overhead of +1.664/+2.264 ms (about 1–2%) on 2026-10-18;
 no additional steady-state `tasks` spawn remains required. The user also
-accepted the corrected coloured display (Step 7) on 2026-10-18. Task closeout
-and local integration remain for the controller.
+accepted the corrected coloured display (Step 7) on 2026-10-18. Implementation,
+verification and acceptance are complete; the task records and Git history
+record closeout and integration.
 
 ## Global Constraints
 
