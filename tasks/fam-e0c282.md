@@ -1,15 +1,17 @@
 ---
 id: fam-e0c282
 title: Map a colour to a slot
-status: doing
+status: done
 priority: 2
 size: s
 complexity: low
 process: direct
 owner: feat/project-colour
 created: 2026-10-17T23:34:32Z
-updated: 2026-10-18T09:42:00Z
+updated: 2026-10-18T09:42:01Z
 started: 2026-10-18T09:38:59Z
+completed: 2026-10-18T09:42:01Z
+closed: 2026-10-18T09:42:01Z
 depends: []
 parent: fam-053b0d
 tags: []
@@ -28,3 +30,7 @@ step: "Task 1: Map a colour to a slot"
 - 2026-10-18T09:41:59Z (feat/project-colour): resumed
   provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-18T09:42:00Z (feat/project-colour): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-18T09:42:01Z (feat/project-colour): done
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-18T09:42:01Z (feat/project-colour): Mapped lowercase project colours to frozen nearest slots; conversion and appendix tests pass, independent review clean.
+  provenance: {"harness_session":"codex:01a14e5e-a1bf-7173-bc44-fd20cb8a1e30","harness_session_source":"CODEX_THREAD_ID"}
