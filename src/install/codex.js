@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gitContext, projectKeyFor, displayProject } from '../bus/identity.js';
 import { resolveIdentity } from '../bus/resolve.js';
+import { lookupProjectColor as defaultLookupProjectColor, NO_PROJECT } from '../bus/project-color.js';
 import { writeAtomicSync } from './atomic.js';
 
 const MANAGED_HEADER = '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.';
@@ -96,6 +97,7 @@ export const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member
 // before this split, and must stay reported once.
 export async function planCodexProjectForPath({
   path, pinned, catalog, pack, member: givenMember = null,
+  lookupProjectColor = defaultLookupProjectColor,
 }) {
   if (!existsSync(path)) return { missing: path };
   if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
@@ -105,11 +107,11 @@ export async function planCodexProjectForPath({
   // command from a home directory would aim at `~/.codex/config.toml` -- the user-wide Codex
   // config -- and rewrite it as a Familiar-managed file. A pinned path stays exempt: pinning
   // is an explicit choice about a specific directory.
-  if (!pinned && !repoRoot) return { skip: { path, reason: 'not a Git repository' } };
+  if (!pinned && !repoRoot) return { skip: { path, reason: 'not a Git repository' }, warnings: [] };
 
   const root = repoRoot ?? path;
   if (!pinned && join(root, EXCLUDE) === join(codexHome(), 'config.toml')) {
-    return { skip: { path: root, reason: 'its Codex config is the user-wide one' } };
+    return { skip: { path: root, reason: 'its Codex config is the user-wide one' }, warnings: [] };
   }
 
   const target = join(root, EXCLUDE);
@@ -123,19 +125,22 @@ export async function planCodexProjectForPath({
   // this function resolved its own, the gate and the write could name different
   // members -- verifying one pet's art and selecting another, which is the exact
   // broken selection the gate exists to prevent.
+  const { color: projectColor, warnings } = givenMember === null && repoRoot
+    ? await lookupProjectColor(repoRoot)
+    : NO_PROJECT;
   const member = givenMember ?? resolveIdentity({
     projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
     project: displayProject({ repoRoot, cwd: path }),
-    remote, repoRoot, repositoryRoot, projectColor: null, catalog, pack,
+    remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
   }).member;
 
   if (isTracked) {
-    return { target, member, manual: { path: target, setting: selectionText(member) } };
+    return { target, member, warnings, manual: { path: target, setting: selectionText(member) } };
   }
 
   const current = readIfPresent(target);
   if (current !== null && !MANAGED_CONFIG.test(current)) {
-    return { target, member, conflict: target };
+    return { target, member, warnings, conflict: target };
   }
 
   let exclude = null;
@@ -148,6 +153,7 @@ export async function planCodexProjectForPath({
   return {
     target,
     member,
+    warnings,
     config: {
       root,
       path: target,
@@ -166,7 +172,10 @@ export async function planCodexProjectForPath({
 // nothing on exactly the machines that have never selected one. The current project is
 // therefore a target too, and takes the same route as a pin: same refusals, same conflict
 // rules, same exclusion. Pins are processed first, so an explicit pin still wins.
-export async function planCodexProjectSync({ catalog, pack, cwd = null }) {
+export async function planCodexProjectSync({
+  catalog, pack, cwd = null, lookupProjectColor = defaultLookupProjectColor,
+}) {
+  const warnings = new Set();
   const configs = [];
   const excludes = [];
   const manual = [];
@@ -182,9 +191,10 @@ export async function planCodexProjectSync({ catalog, pack, cwd = null }) {
   let unpinnedSkip = null;
 
   for (const { path, pinned } of targets) {
-    const planned = await planCodexProjectForPath({ path, pinned, catalog, pack });
+    const planned = await planCodexProjectForPath({ path, pinned, catalog, pack, lookupProjectColor });
 
     if (planned.missing) { missing.push(planned.missing); continue; }
+    for (const warning of planned.warnings) warnings.add(warning);
     if (planned.skip) { if (!pinned) unpinnedSkip = planned.skip; continue; }
 
     // DEDUPE BEFORE DISPATCH, not after. A repository that is both pinned and
@@ -206,7 +216,7 @@ export async function planCodexProjectSync({ catalog, pack, cwd = null }) {
   if (conflicts.length) {
     throw new Error(`refusing unmanaged project config ${conflicts.join(', ')}`);
   }
-  return { configs, excludes, manual, missing, unpinnedSkip };
+  return { configs, excludes, manual, missing, unpinnedSkip, warnings: [...warnings] };
 }
 
 export function applyCodexProjectSync(plan) {

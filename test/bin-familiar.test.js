@@ -843,6 +843,20 @@ test('pets --sync-projects selects a pet in the current repository with no ident
   );
 });
 
+test('pets --sync-projects writes each tasks warning once in text and JSON modes', (t) => {
+  const { runEnv, project } = unpinnedSyncFixture(t);
+  runEnv.FAKE_TASKS_OUTPUT = resolvedAs(null, ['w2', 'w1', 'w2']);
+  for (const flags of [[], ['--json']]) {
+    const r = spawnSync(process.execPath, [bin, ...flags, 'install', 'pets', '--sync-projects'], {
+      cwd: project, encoding: 'utf8', env: runEnv,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stderr, 'familiar: tasks: w2\nfamiliar: tasks: w1\n');
+    if (flags.length) assert.equal(JSON.parse(r.stdout).sync.configs, 1);
+    else assert.match(r.stdout, /synced 1 project pet config/);
+  }
+});
+
 test('pets --sync-projects counts a pinned project once when it is also the current directory', (t) => {
   const { runEnv, project, codexHome } = codexProjectSyncFixture(t);
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
@@ -1471,6 +1485,84 @@ function hookIdentity(e, dir) {
   return intent[`cli-parity-${basenameOf(dir)}`].current.identity;
 }
 const basenameOf = (dir) => dir.split('/').at(-1);
+
+const resolvedAs = (color, warnings = []) => JSON.stringify({
+  results: [{ input: 'x', kind: 'path', status: 'resolved', prefix: 'api', ...(color ? { color } : {}) }],
+  warnings,
+});
+
+test('a registered colour reaches whoami, projects and the hook on every worktree', (t) => {
+  const { main, internal, external } = worktreeLayout(t);
+  const e = { ...pinned('identities: []\n'), FAKE_TASKS_OUTPUT: resolvedAs('#317d01') };
+  for (const dir of [main, internal, external]) {
+    const w = whoami(e, dir);
+    assert.deepEqual([w.slot, w.color, w.source], [3, '#317d01', 'colour']);
+  }
+  assert.deepEqual(projectsJson(e, [main, internal]).map((p) => [p.slot, p.color, p.source]),
+    [[3, '#317d01', 'colour'], [3, '#317d01', 'colour']]);
+  const hooked = hookIdentity(e, internal);
+  assert.deepEqual([hooked.slot, hooked.projectColor, hooked.source], [3, '#317d01', 'colour']);
+});
+
+test('whoami refuses a pin that disagrees with the colour', (t) => {
+  const { main } = worktreeLayout(t);
+  const e = { ...pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`),
+    FAKE_TASKS_OUTPUT: resolvedAs('#317d01') };
+  const r = spawnSync(process.execPath, [bin, 'whoami', main], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /pin declares slot 7, but project colour #317d01 \(from tasks\) maps to slot 3/);
+});
+
+test('without tasks on PATH whoami behaves as before', (t) => {
+  const { temp, main } = worktreeLayout(t);
+  const onlyGit = join(temp, 'bin');
+  mkdirSync(onlyGit);
+  const gitPath = spawnSync('which', ['git'], { encoding: 'utf8' });
+  assert.equal(gitPath.status, 0, gitPath.stderr);
+  symlinkSync(gitPath.stdout.trim(), join(onlyGit, 'git'));
+  const r = spawnSync(process.execPath, [bin, '--json', 'whoami', main], {
+    encoding: 'utf8', env: { ...pinned('identities: []\n'), PATH: onlyGit },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  const w = JSON.parse(r.stdout);
+  assert.deepEqual([w.color, w.source], [null, 'auto']);
+});
+
+test('a tasks failure is one error line naming the command', (t) => {
+  const { main } = worktreeLayout(t);
+  const e = { ...pinned('identities: []\n'), FAKE_TASKS_EXIT: '2', FAKE_TASKS_OUTPUT: '',
+    FAKE_TASKS_STDERR: "error: unrecognized subcommand 'resolve'" };
+  const r = spawnSync(process.execPath, [bin, 'whoami', main], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout, '');
+  assert.match(r.stderr, /tasks resolve .*: exited 2: error: unrecognized subcommand 'resolve'/);
+  assert.equal(r.stderr.trim().split('\n').length, 1);
+});
+
+test('projects writes each tasks warning once', (t) => {
+  const { main, internal, external } = worktreeLayout(t);
+  const e = { ...pinned('identities: []\n'), FAKE_TASKS_OUTPUT: JSON.stringify({
+    results: [{ input: 'x', kind: 'path', status: 'unregistered' }], warnings: ['w1', 'w2', 'w1'],
+  }) };
+  const r = spawnSync(process.execPath, [bin, '--json', 'projects', main, internal, external], {
+    encoding: 'utf8', env: e,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, 'familiar: tasks: w1\nfamiliar: tasks: w2\n');
+  assert.deepEqual(JSON.parse(r.stdout).projects.map((p) => [p.color, p.source]),
+    [[null, 'auto'], [null, 'auto'], [null, 'auto']]);
+});
+
+test('whoami writes distinct tasks warnings in first-seen order', (t) => {
+  const { main } = worktreeLayout(t);
+  const e = { ...pinned('identities: []\n'), FAKE_TASKS_OUTPUT: resolvedAs(null, ['w2', 'w1', 'w2']) };
+  const r = spawnSync(process.execPath, [bin, '--json', 'whoami', main], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, 'familiar: tasks: w2\nfamiliar: tasks: w1\n');
+  assert.equal(JSON.parse(r.stdout).color, null);
+});
 
 test('unpinned remote-less worktrees share the repository slot and keep their labels', (t) => {
   const { main, internal, external, link } = worktreeLayout(t);

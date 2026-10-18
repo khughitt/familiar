@@ -270,6 +270,30 @@ test('projects prints one cell per directory and says who decided the slot', (t)
   assert.doesNotMatch(globbed.stdout, /notes/);
 });
 
+test('whoami text names the project colour and its tasks project', (t) => {
+  const f = fixture(t);
+  fixtureTheme(f);
+  f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+  ], warnings: [] });
+  const r = run(['whoami', gitRepo(t)], f.env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  assert.match(r.stdout, /^  slot\s+3 · hue 95°\n  colour\s+#317d01 · api$/m);
+});
+
+test('projects shows the project colour and its source', (t) => {
+  const f = fixture(t);
+  fixtureTheme(f);
+  f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+  ], warnings: [] });
+  const r = run(['--color', 'never', 'projects', gitRepo(t)], f.env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+  assert.match(r.stdout, /^  #317d01  widget\n      .+ · slot 3 · colour$/m);
+});
+
 test('projects fills the terminal width with columns', (t) => {
   const f = fixture(t);
   fixtureTheme(f);
