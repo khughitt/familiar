@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/project-colour
 created: 2026-10-15T16:49:02Z
-updated: 2026-10-18T01:19:06Z
+updated: 2026-10-18T01:19:07Z
 started: 2026-10-17T21:09:21Z
 depends: []
 tags: []
@@ -67,3 +67,5 @@ Where: src/bus/transaction.js, src/bus/resolve.js, src/bus/pins.js, src/theme/ra
   provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-18T01:17:33Z (feat/project-colour): correction: my notes 'review: spec round 2 … reviewer: human' (22:34) and 'review: spec round 3 … reviewer: human' (23:24) duplicate the codex reviewer's own notes for the same reviews (22:33 round 1, 23:22 round 3); count those, not mine
 - 2026-10-18T01:19:06Z (feat/project-colour): plan revised for round 1: bench answers a controlled registered colour (#317d01) via the fake tasks, proves it on the candidate record and intent, requires one lookup per context then none, runs a 1-warmup 1-sample compare before the full sitting; closeout moved before integration; checked tasks resolve resolves an external worktree (via git)
+- 2026-10-18T01:19:07Z (feat/project-colour): parked (waiting on user, review): user re-reviews the round-1 revisions in docs/plans/2026-10-17-project-colour.md (Task 6 Interfaces, Steps 1-5 and 8) in .worktrees/project-colour and picks subagent-driven (recommended) or native execution; then the agent starts fam-e0c282 there, running the worktree baseline (just test-fast) first
+  provenance: {"harness_session":"claude-code:65e74f70-bc90-420d-976b-bd39045ce213","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
