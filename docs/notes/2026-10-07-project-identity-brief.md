@@ -303,5 +303,5 @@ spec](../specs/2026-10-17-project-colour-design.md) now supplies the registered
 colour via `tasks resolve`, carries it per checkout, and maps the label, chrome
 and pet consistently. The user accepted the measured main paired median
 overhead of +1.664/+2.264 ms (about 1–2%) on 2026-10-18; no additional
-steady-state tasks spawn remains required. User visual acceptance remains
-pending.
+steady-state tasks spawn remains required. The user also accepted the corrected
+coloured display on 2026-10-18, completing both latency and visual acceptance.

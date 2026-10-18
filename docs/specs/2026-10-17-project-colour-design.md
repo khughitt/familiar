@@ -1,7 +1,7 @@
 # Project colour from tasks
 
-Implemented 2026-10-18; measured latency accepted by the user the same day;
-user visual acceptance pending.
+Implemented 2026-10-18; the user accepted both measured latency and the
+corrected coloured display on 2026-10-18.
 
 Accepted by the user, 2026-10-17 (round 3). Task: `fam-053b0d`; source:
 `docs/notes/2026-10-07-project-identity-brief.md` (scope rerun, 2026-10-17).

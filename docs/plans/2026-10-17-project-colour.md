@@ -22,8 +22,9 @@ at runtime), Python 3 `tools/tt`, just. No new package dependency.
 and benchmark documentation landed through Task 6 Step 6 using
 superpowers:subagent-driven-development. The user accepted the measured main
 paired median overhead of +1.664/+2.264 ms (about 1–2%) on 2026-10-18;
-no additional steady-state `tasks` spawn remains required. User visual
-acceptance (Step 7) and closeout remain pending.
+no additional steady-state `tasks` spawn remains required. The user also
+accepted the corrected coloured display (Step 7) on 2026-10-18. Task closeout
+and local integration remain for the controller.
 
 ## Global Constraints
 
@@ -879,7 +880,7 @@ git add docs/install.md docs/specs/2026-10-17-project-colour-design.md docs/note
 git commit -m "docs(identity): document the project colour source and rules"
 ```
 
-- [ ] **Step 7: The user judges the result**
+- [x] **Step 7: The user judges the result**
 
 Ask the user to run, from the main checkout:
 
@@ -891,9 +892,12 @@ The CLI defaults to plain output, so the original command printed hex values;
 `--color always` explicitly requests coloured swatches for this visual check.
 For normal TTY use, `--color auto` or `FAMILIAR_COLOR=auto` opts into colour.
 The user may choose any registered checkouts and judges whether each swatch,
-name and pet agree. Visual acceptance remains pending: park
-`--waiting-on user --reason review` until they answer. A rejection that changes
-the colour rule returns to the spec.
+name and pet agree. While awaiting their verdict, park
+`--waiting-on user --reason review`. A rejection that changes the colour rule
+returns to the spec.
+
+Outcome, 2026-10-18: the user accepted the corrected coloured display:
+“Looks good! accepted.” Both latency and visual acceptance are complete.
 
 - [ ] **Step 8: Close out on the branch, then integrate**
 
