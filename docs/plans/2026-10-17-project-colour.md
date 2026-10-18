@@ -715,35 +715,82 @@ git commit -m "feat(cli): show the project colour in whoami, projects and the Co
 - Test: `test/bench-hook.test.js`
 
 **Interfaces:**
-- Consumes: the finished hook (Task 4).
-- Produces:
+- Consumes: the finished hook (Task 4); `test/fixtures/fake-tasks/tasks` (Task 2).
+- Produces, in `tools/bench-hook.mjs` and the wrapper:
+  - `BENCH_PROJECT_COLOR = '#317d01'` (slot 3). The worker's environment puts the
+    driver checkout's `test/fixtures/fake-tasks` first on `PATH` and sets
+    `FAKE_TASKS_OUTPUT` to one `resolved` row (`prefix: 'api'`, that colour, no
+    warnings), so both contexts measure a registered project whose colour is
+    looked up once and then carried. Without it the fixture is unregistered and
+    the benchmark would measure only a carried `null`, skipping the slot and
+    colour work.
   - The wrapper records `tasks` runs like Git runs, written to `$BENCH_TASKS_LOG`
-    when set; every warmup and sample gains `tasks: [{ args, ms, exit, signal }]`.
+    when set; every warmup and sample gains `tasks: [{ args, ms, exit, signal }]`,
+    and every sample gains `projectColor` (the agent record's own value, or the
+    string `'absent'` when the record does not own one).
+  - `proveHook(result, agents, intents, id, workerPid, checkout, expectedColor)`:
+    when `expectedColor` is a string, the agent record's `projectColor` and the
+    intent's `current.color.project` must both equal it, failure text
+    `` `agent record carries colour ${found}, not ${expectedColor}` ``. The worker
+    passes `BENCH_PROJECT_COLOR` for the candidate and `null` for the baseline.
   - `EXPECTED_GIT = { baseline: { main: 2, linked: 3 }, candidate: { main: 2, linked: 3 } }`.
-  - Structural check: in each batch, the first event (first warmup, or first
-    sample when there are none) has at most one `tasks` run and every later event
-    none; failure text `tasks spawns <n> after the first event`. The report adds,
-    per batch, `firstEventTasks` (that event's `tasks` runs).
+  - Each batch in the report gains `tasksSpawns: { first: <runs of its first event>, later: <count over every other event> }`
+    (the first event is its first warmup, or its first sample when there are none).
+  - Structural check, enforced in `compare` mode like the Git counts: for each
+    context, the candidate's first batch in run order has exactly one `tasks` run
+    on its first event, and every other candidate event in the sitting has none
+    (the bus and session persist across batches, so the colour stays carried);
+    the baseline has none anywhere. Failure texts:
+    `` `candidate tasks lookups ${n} on the first event, expected 1` ``,
+    `` `tasks spawns ${n} after the first lookup` ``, and
+    `` `baseline spawned tasks ${n} times` ``. `pilot` mode reports the counts
+    without judging them, since both sides may be the candidate.
 
 - [ ] **Step 1: Write the failing tests**
 
-In `test/bench-hook.test.js`: a `structuralChecks` case where a candidate sample
-after the first carries one `tasks` run fails with
-`tasks spawns 1 after the first event`, and one where only the first event has it
-passes; the recipe smoke test additionally asserts every sample has a `tasks`
-array and `report.pairs[0].contexts.main.candidate.firstEventTasks.length <= 1`.
-Export `structuralChecks` if it is not already reachable.
+In `test/bench-hook.test.js`:
+
+```js
+test('the candidate looks its colour up once per context and then carries it', () => {
+  const batch = (first, later) => ({ samples: [{ hookMs: 1, git: [] }], tasksSpawns: { first, later } });
+  const pairs = (candidate) => [0, 1].map((index) => ({ index, contexts: Object.fromEntries(
+    ['main', 'linked'].map((c) => [c, { baseline: batch([], 0), candidate: candidate(index) }])) }));
+  const once = [{ args: ['resolve', '--json', '/r'], ms: 3, exit: 0, signal: null }];
+  assert.equal(structuralChecks(pairs((i) => batch(i === 0 ? once : [], 0)), 'compare').failures
+    .filter((f) => /tasks/.test(f.check)).length, 0);
+  assert.ok(structuralChecks(pairs((i) => batch([], 0)), 'compare').failures
+    .some((f) => f.check === 'candidate tasks lookups 0 on the first event, expected 1'));
+  assert.ok(structuralChecks(pairs((i) => batch(i === 0 ? once : [], i)), 'compare').failures
+    .some((f) => f.check === 'tasks spawns 1 after the first lookup'));
+});
+
+test('proveHook requires the expected colour on the candidate record and intent', ...);
+// agents[id].projectColor '#317d01' and intents[id].current.color.project '#317d01' → passes;
+// projectColor null → throws 'agent record carries colour null, not #317d01';
+// expectedColor null → no colour check
+```
+
+The recipe smoke test (`pilot`, 1 sample, 0 warmups, 1 pair, both sides this
+checkout) additionally asserts, for each context and version: the sample's
+`projectColor` is `'#317d01'`, its `tasks` array exists, and
+`tasksSpawns.first.length === 1` with `tasksSpawns.later === 0`. Export
+`structuralChecks` if it is not already reachable. Update the existing
+`structuralChecks` and `proveHook` cases for the new fields and parameter.
 
 - [ ] **Step 2: Run to see them fail**
 
 Run: `just test-fast`
-Expected: FAIL; samples have no `tasks`, and the check does not exist.
+Expected: FAIL; samples have no `tasks` or `projectColor`, `proveHook` ignores
+colour, and the tasks checks do not exist.
 
 - [ ] **Step 3: Implement the wrapper and driver changes**
 
 Mirror the Git recording (`basename(file) === 'tasks'`); pass
-`BENCH_TASKS_LOG` beside `BENCH_GIT_LOG` in the worker; keep the report scrubbed
-of machine paths (its scrubber already walks every value).
+`BENCH_TASKS_LOG` beside `BENCH_GIT_LOG`; add the fake-tasks `PATH` entry and
+`FAKE_TASKS_OUTPUT` to `workerEnv`. Add one sentence to `BOUNDARY`: tasks is a
+fixture stand-in answering one registered colour, so a lookup's measured time is
+the stand-in's spawn, not real tasks'. Keep the report scrubbed of machine paths
+(its scrubber already walks every value).
 
 - [ ] **Step 4: Run to see them pass, then commit**
 
@@ -752,31 +799,51 @@ Run: `just test-fast` — Expected: PASS.
 ```bash
 just check
 git add test/fixtures/bench-hook-cli.mjs tools/bench-hook.mjs test/bench-hook.test.js
-git commit -m "test(bench): count tasks spawns and require none after a session's first event"
+git commit -m "test(bench): measure a registered colour, looked up once then carried"
 ```
 
-- [ ] **Step 5: Measure baseline and candidate in one sitting**
+- [ ] **Step 5: Prepare the baseline, run the minimal comparison, then the full sitting**
 
-From the main checkout:
+From the main checkout, prepare the baseline source:
 
 ```sh
 work-link --ensure .worktrees
 git worktree add --detach .worktrees/colour-bench-baseline 8019302
 git worktree lock --reason "on WORK_ROOT storage (host: $(uname -n))" .worktrees/colour-bench-baseline
 npm --prefix .worktrees/colour-bench-baseline ci
-bench_fixture=$(mktemp -d)
+```
+
+Minimal comparison first: one warmup and one sample per batch, one pair, which
+exercises every structural check through its verdict:
+
+```sh
+pilot_fixture=$(mktemp -d)
 cd .worktrees/project-colour
+just bench-hook compare ../colour-bench-baseline "$PWD" "$pilot_fixture" 1 1 1
+```
+
+Read `$pilot_fixture/report.json` before going on. Expected: structural checks
+pass; for each context the candidate's `tasksSpawns` is `{ first: [one run], later: 0 }`
+(the lookup on the warmup, none on the sample), its sample's `projectColor` is
+`'#317d01'`, and the baseline's is `'absent'` with no `tasks` runs; Git 2/3 on
+both sides. Any failure here is fixed (with a regression test) before the full
+sitting; do not start it on a pilot that did not pass.
+
+Then the full sitting, in the foreground with a timeout that covers it (the
+2026-10-08 sitting took minutes, not hours):
+
+```sh
+bench_fixture=$(mktemp -d)
 just bench-hook compare ../colour-bench-baseline "$PWD" "$bench_fixture" 30 5 4
 ```
 
-Run it in the foreground with a timeout that covers it (the 2026-10-08 sitting
-took minutes, not hours). Expected: structural checks pass (Git 2/3 on both
-sides, no `tasks` spawn after a batch's first event); timing status
-`review-required`. Attach `$bench_fixture/report.json` to the Task 6 record
-(`tasks attach`), and note a disposition: no consistent steady-state slowdown on
-either context, judged from paired medians, order breakdown and p95 tails, as
-`fam-f3d48e` was. A first-event `tasks` run appears only in the candidate's
-`firstEventTasks`; record its duration. If the sitting is disturbed or
+Expected: the same structural verdicts over every batch; timing status
+`review-required`. Attach both reports to the Task 6 record (`tasks attach`, the
+pilot's captioned as the minimal comparison), and note a disposition: no
+consistent steady-state slowdown on either context, judged from paired medians,
+order breakdown and p95 tails, as `fam-f3d48e` was. For the first-event cost
+of real tasks, time 20 runs of `tasks resolve --json ~/d/familiar` on this host
+and note their median beside the disposition. If the sitting is disturbed or
 contradictory, analyse it, then repeat in a fresh fixture. Remove the baseline
 checkout afterwards (`git -C .worktrees/colour-bench-baseline status --ignored --porcelain`,
 `tt-report`, `git worktree unlock`, `git worktree remove`).
@@ -811,7 +878,29 @@ Ask the user to run, from the main checkout,
 agree. This needs their eye: park `--waiting-on user --reason review` until they
 answer. A rejection that changes the colour rule returns to the spec.
 
-- [ ] **Step 8: Close out**
+- [ ] **Step 8: Close out on the branch, then integrate**
 
-After the whole-branch review and integration: `tasks done` this step and
-`fam-053b0d`, then `tasks note ops-30b965 "familiar now paints a registered project's label in its tasks colour and picks its pet from the nearest slot (fam-053b0d)"`.
+Once the whole-branch review's Critical and Important findings are settled and
+the user has accepted Step 7, and before any merge, on `feat/project-colour` in
+`.worktrees/project-colour`:
+
+```sh
+tasks done fam-1b0712 "<benchmark disposition, docs, user acceptance>"
+tasks done fam-053b0d "<what landed>"
+tasks note ops-30b965 "familiar now paints a registered project's label in its tasks colour and picks its pet from the nearest slot (fam-053b0d)"
+tasks check
+```
+
+`tasks check` must report zero errors (report every warning). Only then
+integrate the branch through superpowers:finishing-a-development-branch.
+
+## Plan review
+
+Round 1 (codex, revise): the benchmark measured only a carried `null`, since its
+fixture was unregistered; it now answers a controlled registered colour, proves
+it on the candidate's record and intent, requires one lookup then none, and runs
+a one-warmup, one-sample comparison before the full sitting (Task 6). Closing the
+records moved before integration, as the repository requires (Task 6, Step 8).
+Checked while revising: `tasks resolve` also resolves a worktree stored outside
+both the project root and its `.worktrees` storage (`via: git`), so the spec's
+checkout-root query holds for every worktree shape.
