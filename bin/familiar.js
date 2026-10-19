@@ -21,7 +21,11 @@ import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
-import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import { applyHookEvent } from '../src/bus/transaction.js';
+import { reapRegistry, readSnapshot } from 'relay';
+import { reconcile } from '../src/observe/run.js';
+import { readSessions, writeSessions } from '../src/bus/sessions.js';
+import { pruneTerminalOwners } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
@@ -612,6 +616,41 @@ async function identityResolver() {
   };
 }
 
+export async function reap({ deps: given }) {
+  const deps = { renderProcess: defaultProcessOps, now: Date.now, ...given };
+  const { paths, renderProcess, now } = deps;
+  const lock = deps.lockWith ?? withLock;
+  deps.lockWith = (path, fn, options) => lock(path, fn, {
+    ...options, now, startTimeOf: renderProcess.startTimeOf,
+    isAlive: renderProcess.lockHolderAlive ?? renderProcess.ownerAlive,
+  });
+  const { reaped } = await deps.relay.reapRegistry();
+  const { awaiting, lines } = await reconcile({ deps });
+  const ended = [];
+  const ownerAlive = (pid, stamp) => renderProcess.ownerAlive(pid, stamp);
+  const sessions = await deps.lockWith(paths.presentationLockPath, async () => {
+    const current = await readSessions(paths.sessionsPath);
+    for (const [sid, record] of Object.entries(current.ended)) {
+      if (ownerAlive(record.pid, { starttime: record.starttime })) continue;
+      delete current.ended[sid];
+      ended.push(sid);
+    }
+    if (ended.length) await writeSessions(paths.sessionsPath, current);
+    return current.sessions;
+  });
+  const { removed } = await pruneLedgers({
+    transmitDir: paths.transmitDir, agents: sessions, ownerAlive,
+    startTimeOf: renderProcess.startTimeOf, lockWith: deps.lockWith, now,
+  });
+  await pruneTerminalOwners({ transmitDir: paths.transmitDir, ownerAlive, lockWith: deps.lockWith });
+  const { removed: swept } = await sweepTemps({
+    dirs: [paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals')],
+    pidExists: renderProcess.pidExists, now,
+  });
+  return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length,
+    lines: lines.map((line) => line.replace(/^familiar: observe:/, 'familiar: reap:')) };
+}
+
 async function main({ command, args: rest, color, mode }) {
   // Every leaf's options and positional bounds come from the same declared row
   // completion and the conformance test read -- one source, not a hand-kept mirror.
@@ -1044,27 +1083,21 @@ async function main({ command, args: rest, color, mode }) {
     }
   } else if (command === 'reap') {
     parseLeaf(rest, leafOptions);
-    const ctx = await context();
-    const { reaped, evicted } = await reap({
-      deps: { ...ctx, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
+    const { lines, ...result } = await reap({
+      deps: { paths: resolvePaths(), relay: { reapRegistry, readSnapshot } },
     });
-    reportEvictions(evicted);
-    const { removed } = await pruneLedgers({
-      transmitDir: ctx.paths.transmitDir,
-      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
-      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
-      startTimeOf: defaultProcessOps.startTimeOf,
-    });
-    const { removed: swept } = await sweepTemps({
-      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
-    });
+    for (const line of lines) process.stderr.write(`${line}\n`);
+    if (lines.length) process.exitCode = 1;
     if (mode === 'json') {
-      process.stdout.write(`${JSON.stringify({ reaped, pruned: removed.length, swept: swept.length })}\n`);
+      process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
+    const { reaped, awaiting, ended, pruned, swept } = result;
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
-    if (removed.length > 0) process.stdout.write(`pruned ${removed.length} transmission ledger(s)\n`);
-    if (swept.length > 0) process.stdout.write(`swept ${swept.length} orphaned temp file(s)\n`);
+    if (awaiting.length > 0) process.stdout.write(`awaiting ${awaiting.join(' ')}\n`);
+    if (ended.length > 0) process.stdout.write(`ended ${ended.join(' ')}\n`);
+    if (pruned > 0) process.stdout.write(`pruned ${pruned} transmission ledger(s)\n`);
+    if (swept > 0) process.stdout.write(`swept ${swept} orphaned temp file(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Its output is
@@ -1558,6 +1591,10 @@ export function reportCommandError(error, resolved, {
   mode = 'pretty',
 } = {}) {
   const cosmetic = COSMETIC_COMMANDS.has(resolved?.command);
+  if (resolved?.command === 'reap' && error.help === undefined) {
+    write(`familiar: reap: ${error.code ? `${error.code}: ` : ''}${error.message.replace(/[\r\n]+/g, ' ')}\n`);
+    return 1;
+  }
   if (!cosmetic && error.help === undefined && mode === 'json') {
     write(`${JSON.stringify({ error: { kind: 'familiar', detail: error.message } })}\n`);
     return 1;

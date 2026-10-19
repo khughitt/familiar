@@ -1,4 +1,8 @@
 import { emitTransition } from '../src/observe/emission.js';
+import { applyEvent, readSnapshot, reapRegistry, paths as relayPaths, createProcessOps as relayProcessOps } from 'relay';
+import { observe } from '../src/observe/run.js';
+import { readSessions } from '../src/bus/sessions.js';
+import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -54,10 +58,12 @@ const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-shipped-themes
 cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
 
 function env(over = {}) {
+  const stateDir = mkdtempSync(join(tmpdir(), 'familiar-state-'));
   return {
     ...process.env,
     FAMILIAR_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'familiar-cfg-')),
-    FAMILIAR_STATE_DIR: mkdtempSync(join(tmpdir(), 'familiar-state-')),
+    FAMILIAR_STATE_DIR: stateDir,
+    RELAY_STATE_DIR: join(stateDir, 'relay'),
     FAMILIAR_THEMES_DIR: shippedThemesFixture,
     ...over,
   };
@@ -348,7 +354,7 @@ test('reap failures are nonzero', () => {
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /^familiar: no scheme at /);
+  assert.match(result.stderr, /^familiar: reap: no scheme at /);
 });
 
 test('reap prunes a dead transmission owner absent from the bus and reports only removals', () => {
@@ -378,7 +384,7 @@ test('reap sweeps an orphaned atomic-write temp from the state dir and reports i
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   mkdirSync(p.stateDir, { recursive: true });
   // Our own pid is alive, so only the age bound can call this one an orphan.
-  const temp = `${p.lockPath}.tmp.${process.pid}.0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44`;
+  const temp = `${p.presentationLockPath}.tmp.${process.pid}.0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44`;
   writeFileSync(temp, '');
   const old = (Date.now() - 10 * 60_000) / 1000;
   utimesSync(temp, old, old);
@@ -388,6 +394,160 @@ test('reap sweeps an orphaned atomic-write temp from the state dir and reports i
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, 'swept 1 orphaned temp file(s)\n');
   assert.equal(existsSync(temp), false);
+});
+
+// Real relay publication and observer admission; only process/terminal discovery is controlled.
+function reapFixture(t) {
+  const e = env();
+  const p = paths(e);
+  const registryPaths = relayPaths(e);
+  t.after(() => {
+    rmSync(e.FAMILIAR_CONFIG_DIR, { recursive: true, force: true });
+    rmSync(e.FAMILIAR_STATE_DIR, { recursive: true, force: true });
+  });
+  writeFileSync(p.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 }));
+  const processOps = relayProcessOps();
+  const handle = processOps.handleOf(process.pid);
+  const emitted = [];
+  const deps = {
+    paths: p,
+    relay: {
+      readSnapshot: () => readSnapshot({ paths: registryPaths }),
+      reapRegistry: () => reapRegistry({ paths: registryPaths }),
+    },
+    relayProcess: processOps,
+    renderProcess: {
+      startTimeOf: () => 20, ownerAlive: () => true,
+      lockHolderAlive: () => true, pidExists: () => true,
+    },
+    adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => 84 }),
+    gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
+    emitTransition: async (args) => { emitted.push(args); return { kind: 'unchanged' }; },
+    env: {},
+  };
+  const event = (kind = 'session-start', sid = 'reap-session') => ({
+    schema: 1, kind, harness: 'claude-code',
+    nativeEvent: { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', 'session-end': 'SessionEnd' }[kind],
+    sessionId: sid, agentId: `claude-code:${sid}`, cwd: '/repo', tool: null,
+  });
+  const publish = (ev, processHandle = handle) => applyEvent(ev, {
+    paths: registryPaths,
+    processOps: { ...processOps, handleOf: () => processHandle, probe: () => ({ status: 'alive' }) },
+    resolveSessionPid: () => process.pid, gitContext: deps.gitContext,
+  });
+  const admit = async (sid) => {
+    const ev = event('session-start', sid);
+    const { snapshot } = await publish(ev);
+    const result = await observe({ text: JSON.stringify({
+      schema: 1, type: 'event', subscriber: 'familiar', event: ev,
+      registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+    }), deps });
+    assert.deepEqual(result, { exitCode: 0, lines: [] });
+  };
+  const run = async () => {
+    const { reap } = await import('../bin/familiar.js');
+    assert.equal(typeof reap, 'function', 'reap exposes the env-free presentation transaction');
+    return reap({ deps });
+  };
+  return { e, p, deps, handle, emitted, event, publish, admit, run };
+}
+
+test('reap prunes a dead relay agent and reconciles even when nothing was pruned', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  await f.publish(f.event('prompt'));
+  assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'idle');
+  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, lines: [] });
+  assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'working');
+  await f.publish(f.event('prompt'), { ...f.handle, start: String(BigInt(f.handle.start) + 1n) });
+  const result = await f.run();
+  assert.deepEqual(result.reaped, ['claude-code:reap-session']);
+  assert.deepEqual(JSON.parse(readFileSync(f.p.intentPath)), {});
+  assert.deepEqual(Object.keys((await readSessions(f.p.sessionsPath)).ended), ['reap-session']);
+});
+
+test('reap lists registry agents awaiting their first event in JSON and pretty output', async (t) => {
+  const f = reapFixture(t);
+  await f.publish(f.event());
+  for (const args of [['--json', 'reap'], ['reap']]) {
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: f.e });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    if (args[0] === '--json') assert.deepEqual(JSON.parse(result.stdout), {
+      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, swept: 0,
+    });
+    else assert.equal(result.stdout, 'awaiting reap-session\n');
+  }
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
+});
+
+test('reap drops ended evidence only for a dead terminal owner under the presentation lock', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  await f.publish(f.event('session-end'));
+  assert.deepEqual((await f.run()).ended, [], 'a live owner keeps its cleanup evidence');
+  const { entryPath } = terminalOwnerPaths(f.p.transmitDir, { pid: 84, starttime: 20 });
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(entryPath, JSON.stringify({ sessionId: 'reap-session', seq: 1 }));
+  let probes = 0;
+  f.deps.renderProcess.ownerAlive = (pid, stamp) => {
+    if (probes++ === 0) assert.equal(existsSync(f.p.presentationLockPath), true);
+    assert.deepEqual([pid, stamp], [84, { starttime: 20 }]);
+    return false;
+  };
+  const result = await f.run();
+  assert.deepEqual(result.ended, ['reap-session']);
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+  assert.equal(existsSync(entryPath), false, 'terminal ownership evidence is pruned too');
+});
+
+test('reap reports removed ended evidence in pretty output', async (t) => {
+  const f = reapFixture(t);
+  f.deps.adapterFor = () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid });
+  f.deps.renderProcess.startTimeOf = () => startTimeOf(process.pid) + 1;
+  await f.admit();
+  await f.publish(f.event('session-end'));
+  const result = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: f.e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, 'ended reap-session\n');
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+});
+
+test('reap never emits and never touches familiar old agents or lock files', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  f.emitted.length = 0;
+  writeFileSync(f.p.agentsPath, 'old familiar agents');
+  writeFileSync(f.p.lockPath, 'old familiar lock');
+  await f.publish(f.event('prompt'));
+  await f.run();
+  assert.deepEqual(f.emitted, []);
+  assert.equal(readFileSync(f.p.agentsPath, 'utf8'), 'old familiar agents');
+  assert.equal(readFileSync(f.p.lockPath, 'utf8'), 'old familiar lock');
+});
+
+test('reap rejects an existing relay directory at 0755 before changing sessions', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const before = readFileSync(f.p.sessionsPath, 'utf8');
+  chmodSync(f.e.RELAY_STATE_DIR, 0o755);
+  for (const args of [['reap'], ['--json', 'reap']]) {
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: f.e });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /^familiar: reap: IO_ERROR: [^\n]+\n$/);
+    assert.equal(readFileSync(f.p.sessionsPath, 'utf8'), before);
+  }
+});
+
+test('reap accepts an absent relay directory and reconciles to no sessions', async (t) => {
+  const f = reapFixture(t);
+  const result = spawnSync(process.execPath, [bin, '--json', 'reap'], { encoding: 'utf8', env: f.e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0 });
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
 });
 
 test('an animation asset fault is one concise cosmetic line at the CLI boundary', () => {
