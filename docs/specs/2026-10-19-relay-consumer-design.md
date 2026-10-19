@@ -385,16 +385,27 @@ The other emission rules:
 
 ### 8. Background work: relay owns the reduction
 
-The rule from `0a9e0d7` is state reduction, which the parent design's ownership table
-gives to relay, and every registry consumer wants it, not only the cat. A
-`needs-input` for an agent waiting on its own shell is wrong for a notification too. So:
-- **Relay.** `relay-fe38b1` (filed 2026-10-19): carry `background_tasks` from Claude Code's `Stop` (and
-  `SubagentStop`) as an optional additive `Agent.backgroundTasks`, carried forward
-  across events. Reduce `needs-input` to `idle` while it is above zero, and release it
-  as `v0.1.1`. Additive optional fields keep schema 2 (parent design §4).
+The rules from `0a9e0d7` and `fam-721108` are state reduction, which the parent
+design's ownership table gives to relay, and every registry consumer wants them,
+not only the cat. A `needs-input` for an agent waiting on its own shell is wrong
+for a notification too. The released contract is specified in relay's
+`docs/specs/2026-10-19-claude-background-work.md`:
+- **Relay.** `relay-fe38b1`, released as `v0.1.1`, reduces Claude Code's `Stop`
+  `background_tasks` to optional `Agent.background: { agents, other }` counts.
+  Running or pending subagents, workflows, teammates and cloud sessions count as
+  `agents`; other running or pending kinds count as `other`. Readable reports
+  replace the counts, absent reports carry them forward, and unreadable reports
+  clear them. `Stop` with `agents > 0` reduces `done` to `working`;
+  `Notification:idle_prompt` with `other > 0` reduces `needs-input` to `idle`.
+  Agent-only idle notices remain `needs-input`: Claude Code has already judged
+  that work idle, or the carried count is stale. Relay does not hook Claude Code's
+  `SubagentStop`. Additive optional fields keep schema 2 (parent design §4).
 - **Familiar.** Familiar drops its own reducer and pins the release that carries the
-  rule. It keeps a parity test: a snapshot holding the reduced state projects to
-  `idle`.
+  rules. It projects relay's state without interpreting counts or storing
+  `background` on familiar sessions. Parity tests use relay's real `applyEvent`:
+  shell `Stop` then idle notice projects `done`, `idle`; agent `Stop` then idle
+  notice projects `working`, `needs-input`; mixed agent/shell then shell-only
+  `Stop` then idle notice projects `working`, `done`, `idle`.
 
 Rejected:
 - Familiar re-deriving the count. The observer envelope has no raw payload, and adding
@@ -402,8 +413,8 @@ Rejected:
 - Landing on `v0.1.0` with the regression and a follow-up task. That ships a known
   wrong state to the operator cutover.
 
-The familiar implementation proceeds against `v0.1.0`. Only its last step, the pin bump
-plus the parity test, waits on the relay release.
+The familiar implementation proceeds against `v0.1.0`. Its last step pins the
+released `v0.1.1` and adds the parity tests above.
 
 ### 9. Module disposition
 

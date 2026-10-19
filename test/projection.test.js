@@ -5,6 +5,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { projectSnapshot } from '../src/bus/projection.js';
 import { EMPTY_SESSIONS } from '../src/bus/sessions.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { applyEvent, normalizeEvent } from 'relay';
 
 const generation = 'generation-1';
 const handle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 42, start: '123' };
@@ -257,5 +261,49 @@ test('projection keeps checkout labels and repository anchors for path and remot
     assert.equal(result.intent.a.current.identity.project, 'fix-api');
     assert.equal(result.intent.a.current.identity.member, 'pip');
     assert.equal(result.intent.a.current.identity.projectColor, null);
+  }
+});
+
+for (const { name, steps } of [
+  { name: 'a snapshot holding relay\'s shell-background-reduced state projects to idle', steps: [
+    { nativeEvent: 'Stop', types: ['shell'], state: 'done' },
+    { nativeEvent: 'Notification:idle_prompt', state: 'idle' },
+  ] },
+  { name: 'an agent Stop projects working and its agent-only idle prompt projects needs-input', steps: [
+    { nativeEvent: 'Stop', types: ['subagent'], state: 'working' },
+    { nativeEvent: 'Notification:idle_prompt', state: 'needs-input' },
+  ] },
+  { name: 'mixed work then shell-only Stop and idle prompt project working, done and idle', steps: [
+    { nativeEvent: 'Stop', types: ['subagent', 'shell'], state: 'working' },
+    { nativeEvent: 'Stop', types: ['shell'], state: 'done' },
+    { nativeEvent: 'Notification:idle_prompt', state: 'idle' },
+  ] },
+]) test(name, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'familiar-background-projection-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
+  const processHandle = { ...handle, bootId: '11111111-1111-4111-8111-111111111111' };
+  const options = {
+    paths: { stateDir: dir, agentsPath: join(dir, 'agents.json'), lockPath: join(dir, 'agents.lock') },
+    processOps: { handleOf: () => processHandle, probe: () => ({ status: 'alive' }) },
+    resolveSessionPid: () => 42, gitContext: async () => ({ repoRoot: '/repo', remote: null }),
+    now: () => 1000,
+  };
+  let previous = prior();
+  for (const { nativeEvent, types, state } of steps) {
+    const event = normalizeEvent('claude-code', nativeEvent, JSON.stringify({
+      session_id: 'a', cwd: '/repo',
+      ...(types ? { background_tasks: types.map((type, i) => ({ id: `task-${i}`, type, status: 'running', description: 'background work' })) } : {}),
+    }));
+    const { snapshot } = await applyEvent(event, options);
+    const result = await project({ snapshot, prior: previous, event,
+      prepared: { ...prepared(snapshot.agents[event.agentId]), basis: basis(snapshot.agents[event.agentId], snapshot.generation) },
+      resolveVisuals: visualResolver({ pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+    });
+    assert.deepEqual(result.faults, new Map());
+    assert.equal(result.intent.a.current.state, state, nativeEvent);
+    assert.equal(result.sessions.sessions.a.state, state, nativeEvent);
+    assert.equal(Object.hasOwn(result.sessions.sessions.a, 'background'), false);
+    previous = result.sessions;
   }
 });

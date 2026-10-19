@@ -740,20 +740,32 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 
 ### Task 10: Relay v0.1.1 and the background-work parity
 
-Waits on `relay-fe38b1` (its v0.1.1 release).
+Uses `relay-fe38b1`'s released v0.1.1, whose authoritative contract is relay's
+`docs/specs/2026-10-19-claude-background-work.md`: optional
+`Agent.background: { agents, other }`, carried across events. Familiar projects
+the reduced state without interpreting or storing those counts (spec §8).
 
 **Files:**
 - Modify: `package.json`, `package-lock.json`, `test/projection.test.js`
 
 - [ ] **Step 1: Write the failing test**
-  `a snapshot holding relay's background-reduced state projects to idle`. Drive relay's
-  `applyEvent` with a Claude `Stop` carrying one running background task, then
-  `Notification:idle_prompt`, and project. `intent[sid].current.state === 'idle'`.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL on v0.1.0 (`needs-input`).
+  Drive relay's real `normalizeEvent` and `applyEvent`, then familiar's projection
+  and visual resolver. Assert `intent[sid].current.state` and the projected session
+  state for shell `Stop` then `Notification:idle_prompt` (`done`, `idle`), agent
+  `Stop` then idle prompt (`working`, `needs-input`), and mixed agent/shell then
+  shell-only `Stop` then idle prompt (`working`, `done`, `idle`). No familiar reducer
+  or session background field.
+- [ ] **Step 2:** `just test-fast`. Expected: FAIL on v0.1.0 (shell idle prompt stays
+  `needs-input`; agent `Stop` becomes `done`).
 - [ ] **Step 3:** bump to `#v0.1.1` and `npm install`. Confirm the lockfile's commit is
   the tag's.
 - [ ] **Step 4:** `just test-fast`. Expected: PASS.
-- [ ] **Step 5:** from a clean clone of this branch with an empty npm cache and SSH
+- [ ] **Step 5:** merge current main into this branch, keeping retired modules and
+  tests deleted and retaining all task records and notes. Re-run `just test-fast`
+  and `just check`, then commit the candidate. From a clean clone of that committed
+  candidate with an empty npm cache and SSH
   disabled (`GIT_SSH_COMMAND=false`), run `npm ci` in a temp dir. Expected: it
   installs relay anonymously over https.
-- [ ] **Step 6:** `just check`, then commit `build(deps): relay v0.1.1 (background-work reduction)`.
+- [ ] **Step 6:** use commit `build(deps): relay v0.1.1 (background-work reduction)`
+  for the pin/parity candidate; record its SHA with the clean-clone install proof.
+  Overall completion remains subject to final whole-branch review.
