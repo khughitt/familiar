@@ -1,16 +1,19 @@
 # Familiar as a relay consumer
 
-Draft for review, 2026-10-19, round 3.
+Draft for review, 2026-10-19, round 4.
 - **Round 1** (codex gpt-6.1-sol) asked for revision on five findings:
   - cleanup evidence after another observer's removal;
   - stale enrichment;
   - absent intent in the emitter and status line;
   - cwd-keyed git caching;
   - the recovery promise.
-- **Round 2** asked for revision on three findings:
+- **Round 2** (codex gpt-6.1-sol) asked for revision on three findings:
   - an observer whose own ancestry predates its basis row;
   - a captured reset racing a new session's paint on the same terminal;
-  - cleanup evidence retired before the cleanup ran. Task: `fam-6e8321`. Addendum to the approved parent
+  - cleanup evidence retired before the cleanup ran.
+- **Round 3** (codex gpt-6.1-sol) asked for revision on two findings:
+  - teardown has no live row to prove;
+  - the terminal ownership sequence could move backwards. Task: `fam-6e8321`. Addendum to the approved parent
 design, ops `docs/specs/2026-09-16-relay-design.md` §3 and §6 (Familiar), which stays
 authoritative wherever this document is silent. Target: relay `v0.1.0` (tag object
 9362dde, commit 0f59660), whose `docs/api.md` is the contract cited below. Engine
@@ -55,7 +58,9 @@ reconciliation protocol) and runs one projection:
 
 1. Validate the envelope: `schema: 1`, `type` `event` or `reconcile`, and an `event`
    that is present exactly when `type` is `event`. Anything else is an error.
-2. For an `event`: **prepare enrichment outside the lock** (§4, §5).
+2. For an `event` other than `session-end`: **prepare enrichment outside the lock**
+   (§4, §5). A `session-end` takes the teardown branch instead (§6): relay removes the
+   row before dispatching its observers, so there is no live row to prove.
    - Read the snapshot once, unlocked, and take the session's row: its root row for a
      Codex worker (§7).
    - Record that row's **basis**: `{ generation, agentId, process, cwd }`, where
@@ -188,7 +193,8 @@ Concretely, A can stall before its first read. B then resumes the same session i
 another process and projects it. When A finally reads, it gets B's row, so a basis taken
 from the row alone would label A's old terminal with B's process.
 
-So before anything is resolved, the prepared basis must pass two checks:
+So before anything is resolved, the prepared basis of any event except `session-end`
+must pass two checks. Teardown has no row and is handled from stored evidence (§6):
 - **The envelope is current.** `envelope.registry.generation` equals the basis row's
   generation. An envelope from a recreated registry is obsolete.
 - **The row's process is the observer's own.** Relay's
@@ -270,6 +276,23 @@ is set on `SessionStart` as now. The emission outcomes:
 | session record or `ended` | null | n/a | today's SessionEnd: tombstone, then reset |
 | null | null | n/a | nothing: no evidence of a terminal |
 
+**Teardown.** A `session-end` event skips the ownership proof, enrichment and the full
+projection. Relay published the removal before dispatching observers, so the row is
+already gone, and another observer may already have projected that.
+
+Under the presentation lock it runs the drop-only projection (§10), then captures
+`prev`. That is the session's record, now moved to `ended`, or the `ended` entry another
+observer's projection already made. `next` is null.
+
+Cleanup then rests on the stored evidence alone:
+- the terminal's `pid` and `starttime`;
+- qualified owner liveness: the emitter's `ownerAlive` on that pair;
+- the terminal ownership record (below).
+
+It never rests on the event's row or the observer's ancestry. With no evidence there is
+nothing to reset, and the observer emits nothing. Acknowledgement follows the general
+rule below.
+
 **Cleanup evidence outlives the session record.** Whenever a projection drops an
 admitted session, for any reason, its record moves to `ended` with its terminal and
 the projection's `seq`. The reasons:
@@ -315,11 +338,18 @@ per-terminal record closes that gap.
   order.
 - **Under the terminal lock**, an operation for session S at counter value n reads the
   owner:
-  - If the owner is another session with a **higher** `seq`, the terminal is
-    superseded: no byte is written, nothing is stamped, and the outcome is
-    `{ kind: 'superseded', reason: 'terminal' }`.
-  - Otherwise S becomes the owner at n, and the operation continues into today's
-    per-session section.
+  - **The sequence never decreases, for any session, the owner's own included.** If n
+    is not above the owner's `seq`, the operation is obsolete. Its terminal is
+    superseded, and the outcome is `{ kind: 'superseded', reason: 'terminal' }`:
+    - no byte is written;
+    - the owner record is not touched;
+    - the session ledger is not stamped.
+  - Only when n is above it does S become the owner at n. The operation then continues
+    into today's per-session section.
+  - The rejection comes before ownership changes, so an operation that its own session
+    ledger would later reject can never lower the record first.
+    - Example: owner `{B, 40}`. A delayed B at 20 is refused without stamping `{B, 20}`.
+    - A delayed A at 30 then still meets B at 40, and writes nothing.
   - `settle` carries no counter value of its own. It proceeds only while S is the
     recorded owner.
 - **Both orders of the `/clear` race are covered.**
@@ -437,7 +467,11 @@ than vanishing.
     `reap`;
   - a missed **first** observer: the session stays unadmitted, `reap` lists it as
     `awaiting`, and its next event admits it;
-  - `session-end` removal and reset;
+  - `session-end` removal and reset. The row is already absent when the observer runs,
+    so teardown proves nothing against the snapshot and resets from stored evidence,
+    both:
+    - when its own drop moves the record to `ended`;
+    - when another observer's projection already did;
   - **removal by another observer:** A's `SessionEnd` is published, B's observer
     projects it first, and A's observer still emits the tombstone and reset from
     `ended`;
@@ -452,6 +486,8 @@ than vanishing.
     - A's reset is captured, A is paused, B starts in the same process and paints, then
       A resumes. A is superseded by the terminal record and writes nothing;
     - B projects first: A's drop makes no `ended` entry;
+  - **terminal sequence monotonic:** owner `B/40`, then a delayed `B/20`, then a delayed
+    `A/30`. The owner stays `B/40`, `B/20` stamps nothing, and A writes nothing;
   - **stale enrichment:** A prepares against one basis, then B projects a resumed
     process (and, separately, a new cwd, and a recreated generation). A's terminal and
     context are discarded and A emits nothing. The record keeps B's context, or
