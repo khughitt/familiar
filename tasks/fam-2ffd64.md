@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-19T16:49:42Z
-updated: 2026-10-19T16:49:42Z
+updated: 2026-10-19T16:49:47Z
 depends: []
 tags: []
 source: fam-6e8321
@@ -26,3 +26,7 @@ Scope and acceptance:
 Known upstream reports/fixes: Seroval thenable guard (patched 1.6.2) https://github.com/advisories/GHSA-p6vx-979v-rg4c; typed-array memory exhaustion (patched 1.6.3) https://github.com/advisories/GHSA-jp82-f5mq-hwhp; brace expansion DoS https://github.com/advisories/GHSA-q2hr-2g5m-vwhr and related GHSA-qhr7-859c-m2p7 / GHSA-6j4f-fj2g-mc7p; Babel source map file read https://github.com/advisories/GHSA-4x5r-pxfx-6jf8. Use released upstream fixes rather than carrying a local library patch.
 
 Process: direct because the task is bounded exposure assessment and compatible dependency maintenance, with explicit acceptance criteria.
+
+## Notes
+
+- 2026-10-19T16:49:47Z (feat/relay-identity): concerns: fam-6e8321 extension — Assess inherited dependency advisories recorded during the migration clean-install proof; these were outside the completed migration scope.
