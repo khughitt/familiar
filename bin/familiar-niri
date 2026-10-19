@@ -6,6 +6,7 @@ import { basename } from 'node:path';
 import { createInterface } from 'node:readline';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { readJson, writeJsonAtomic } from '../src/bus/store.js';
+import { readSessions } from '../src/bus/sessions.js';
 import { loadConfig } from '../src/config.js';
 import { mapSessionsToWindows, niriWindowsPath, shouldResync } from '../integrations/niri/window.js';
 import { niriHasSignals, planWindowSignals } from '../integrations/niri/signal.js';
@@ -30,8 +31,8 @@ let signalsUnsupportedSaid = false;
 async function sync() {
   const { stdout } = await exec('niri', ['msg', '-j', 'windows']);
   const windows = JSON.parse(stdout);
-  const agents = (await readJson(paths.agentsPath)) ?? {};
-  const map = mapSessionsToWindows(agents, windows);
+  const { sessions } = await readSessions(paths.sessionsPath);
+  const map = mapSessionsToWindows(sessions, windows);
 
   // WindowFocusChanged fires on every focus change — constantly. Writing an
   // identical map each time would wake workspace-awareness readers for nothing. Compare
@@ -54,7 +55,7 @@ async function sync() {
   const intent = (await readJson(paths.intentPath)) ?? {};
   const { themeId } = await loadConfig({ paths });
   const plan = planWindowSignals({
-    intent, agents, sessionWindows: map, windows, sent, states, themeId, now: Date.now(),
+    intent, sessions, sessionWindows: map, windows, sent, states, themeId, now: Date.now(),
   });
   sent = plan.sent;
   states = plan.states;
@@ -92,7 +93,7 @@ if (command === 'sync') {
     }, 100);
   };
 
-  // WATCH THE DIRECTORY, NOT THE FILE. writeJsonAtomic replaces agents.json via
+  // WATCH THE DIRECTORY, NOT THE FILE. writeJsonAtomic replaces sessions.json via
   // rename(2), which swaps the INODE — and inotify watches the inode, not the
   // path. A watch on the file itself delivers events for the first atomic write
   // and then goes permanently deaf, so no session started afterwards is ever
@@ -103,9 +104,9 @@ if (command === 'sync') {
   // this process is spawned at compositor startup, long before any agent exists.
   mkdirSync(paths.stateDir, { recursive: true });
   //
-  // intent.json is renamed in right after agents.json, and it is the file that
+  // intent.json is renamed in right after sessions.json, and it is the file that
   // carries a state change (a `done`, a decay) to the signals.
-  const watched = new Set([basename(paths.agentsPath), basename(paths.intentPath)]);
+  const watched = new Set([basename(paths.sessionsPath), basename(paths.intentPath)]);
   watch(paths.stateDir, (_event, file) => {
     if (watched.has(file)) resync();
   });

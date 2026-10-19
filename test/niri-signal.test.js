@@ -31,8 +31,8 @@ const transient = (current, after, expiresAt) => ({ current, expiresAt, after })
 const NOW = 1_000_000;
 const win = (id, sources = null) => ({ id, pid: id * 10, signal: sources && { sources } });
 
-function plan({ intent, agents = {}, sessionWindows, windows, sent = new Map(), states = new Map(), now = NOW }) {
-  return planWindowSignals({ intent, agents, sessionWindows, windows, sent, states, themeId: 'cats', now });
+function plan({ intent, sessions = {}, sessionWindows, windows, sent = new Map(), states = new Map(), now = NOW }) {
+  return planWindowSignals({ intent, sessions, sessionWindows, windows, sent, states, themeId: 'cats', now });
 }
 
 const argsOf = (result) => result.commands.map((c) => c.args);
@@ -90,7 +90,7 @@ test('two sessions in one window write ONE slot: the higher level wins, with its
       s1: persistent(working({ base: GINGER, member: 'ginger' })),
       s2: persistent(needsInput({ base: TUXEDO, member: 'tuxedo' })),
     },
-    agents: { s1: { seq: 9 }, s2: { seq: 3 } },
+    sessions: { s1: { seq: 9 }, s2: { seq: 3 } },
     sessionWindows: { s1: { windowId: 7 }, s2: { windowId: 7 } },
     windows: [win(7)],
   });
@@ -106,7 +106,7 @@ test('on a level tie the session latest on the bus wins', () => {
       s1: persistent(idle({ base: GINGER })),
       s2: persistent(idle({ base: TUXEDO, member: 'tuxedo' })),
     },
-    agents: { s1: { seq: 9 }, s2: { seq: 3 } },
+    sessions: { s1: { seq: 9 }, s2: { seq: 3 } },
     sessionWindows: { s1: { windowId: 7 }, s2: { windowId: 7 } },
     windows: [win(7)],
   });
@@ -203,4 +203,10 @@ test('a session intent.json has not caught up with is skipped, and keeps its las
 test('stock niri, with no signal key on its windows, is detected', () => {
   assert.equal(niriHasSignals([{ id: 1 }]), false);
   assert.equal(niriHasSignals([{ id: 1, signal: null }]), true);
+});
+
+test('a session with no intent key gets no slot and clears an existing slot', () => {
+  const result = plan({ intent: {}, sessions: { s1: { seq: 9 } },
+    sessionWindows: { s1: { windowId: 7 } }, windows: [win(7, ['familiar'])] });
+  assert.deepEqual(argsOf(result), [['clear-window-signal', '--id', '7', '--source', 'familiar']]);
 });

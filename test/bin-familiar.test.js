@@ -1,14 +1,15 @@
 import { emitTransition } from '../src/observe/emission.js';
 import { applyEvent, readSnapshot, reapRegistry, paths as relayPaths, createProcessOps as relayProcessOps } from 'relay';
 import { observe } from '../src/observe/run.js';
+import { loadContext } from '../src/observe/context.js';
 import { readSessions } from '../src/bus/sessions.js';
 import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
-  symlinkSync, utimesSync,
+  chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
+  openSync, symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capabi
 import { fg } from '../src/render/term/sgr.js';
 import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { adapterFor } from '../src/adapters/index.js';
-import { projectKeyFor, displayProject } from '../src/bus/identity.js';
+import { displayProject } from '../src/bus/identity.js';
 import { applyHookEvent } from '../src/bus/transaction.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
@@ -310,6 +311,9 @@ test('settleStatusline probes the terminal only for provisional evidence', async
   mkdirSync(dirname(entryPath), { recursive: true });
   const held = { transport: 'direct', capability: 'kitty-animation', id: 1, intent: { state: 'idle' } };
   let probed = 0;
+  const owner = terminalOwnerPaths(p.transmitDir, record);
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId, seq: 1 }));
   const run = () => settleStatusline({
     record, intent: {}, paths: p,
     processOps: { recordOf: () => { probed += 1; return { pid: process.pid, tty: 'ttys999' }; }, ownerAlive: () => false, startTimeOf: () => 1 },
@@ -323,6 +327,36 @@ test('settleStatusline probes the terminal only for provisional evidence', async
   writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: 1, presented: 'idle', ended: false, held: { ...held, provisional: true } }));
   assert.equal((await run()).kind, 'noop', 'a dead owner is left alone');
   assert.equal(probed, 1, 'provisional evidence reaches the terminal target and the lock');
+});
+
+test('statusline settles only for the recorded terminal owner', async () => {
+  const p = paths(env());
+  const record = { sessionId: 'old', pid: process.pid, starttime: 1 };
+  const { entryPath, lockPath } = ledgerPaths(p.transmitDir, 'old');
+  const owner = terminalOwnerPaths(p.transmitDir, record);
+  mkdirSync(dirname(entryPath), { recursive: true });
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: 1,
+    ended: false, held: { provisional: true }, presented: 'idle' }));
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'new', seq: 2 }));
+  const locks = [];
+  const { withLock } = await import('../src/bus/lock.js');
+  const args = { record, intent: {}, paths: p,
+    processOps: { recordOf: () => { throw new Error('superseded session probed the terminal'); },
+      ownerAlive: () => false, startTimeOf: () => 1 },
+    lockWith: (path, fn, options) => { locks.push(path); return withLock(path, fn, options); },
+  };
+  const before = readFileSync(entryPath, 'utf8');
+  assert.deepEqual(await settleStatusline(args), { kind: 'superseded', reason: 'terminal' });
+  assert.deepEqual(locks, [owner.lockPath]);
+  assert.equal(readFileSync(entryPath, 'utf8'), before);
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'old', seq: 2 }));
+  locks.length = 0;
+  assert.deepEqual(await settleStatusline({ ...args,
+    processOps: { ...args.processOps, recordOf: () => null },
+  }), { kind: 'noop' });
+  assert.deepEqual(locks, [owner.lockPath, lockPath]);
+  assert.deepEqual(JSON.parse(readFileSync(owner.entryPath, 'utf8')), { sessionId: 'old', seq: 2 });
 });
 
 test('hook rejects unknown flags before state work but remains cosmetic', () => {
@@ -699,20 +733,14 @@ test('statusline --with reports a failing wrapped command, not its undrained std
   assert.doesNotMatch(out.stderr, /EPIPE/, 'the stdin handoff was reported instead of the real failure');
 });
 
-test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', () => {
+test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', async () => {
   const e = env();
   mkdirSync(e.FAMILIAR_CONFIG_DIR, { recursive: true });
   mkdirSync(e.FAMILIAR_STATE_DIR, { recursive: true });
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'identities: []\n');
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
-    s1: {
-      sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, repositoryRoot: null, projectColor: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
-      state: 'working', updatedAt: 1,
-    },
-  }));
+  await seedBus(e, 's1', { cwd: '/tmp/api', repository: false });
 
   const empty = spawnSync(process.execPath, [bin, 'statusline'], {
     input: JSON.stringify({ session_id: 's1' }), encoding: 'utf8', env: e,
@@ -1373,35 +1401,34 @@ const statusline = (e, args, payload) => spawnSync(process.execPath, [bin, 'stat
   env: e,
 });
 
-// SEED agents.json DIRECTLY. Firing a real `familiar hook` cannot work here and is unsafe:
-//
-//   1. transaction.js:124 calls resolveAgentPid(), which requires an ancestor with
-//      comm === 'claude' AND a controlling tty. `node --test` has none, so the hook throws.
-//   2. bin/familiar's error boundary converts that throw to EXIT 0 plus one stderr line --
-//      so a status-only assertion would accept total failure and the test would seed nothing.
-//   3. Worse, when the suite IS run under a real Claude session, resolveAgentPid SUCCEEDS and
-//      emit() writes graphics escapes to /proc/<claude>/fd/1 -- the developer's live terminal.
-//      A test that scribbles on the terminal running it is not a test.
-//
-// The record shape is transaction.js:163-174. pid/starttime are this process's, so nothing
-// downstream can mistake the record for a dead session's.
-function seedBus(e, sessionId, { state = 'working', cwd = process.cwd() } = {}) {
-  const record = {
-    sessionId,
-    projectKey: projectKeyFor({ remote: null, repositoryRoot: cwd, cwd }),
-    project: displayProject({ repoRoot: cwd, cwd }),
-    remote: null,
-    repoRoot: cwd,
-    repositoryRoot: cwd,
-    projectColor: null,
-    cwd,
-    pid: process.pid,
-    starttime: startTimeOf(process.pid),
-    state,
-    updatedAt: Date.now(),
-  };
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({ [sessionId]: record }));
-  return record;
+// Publish through relay and admit through the observer without touching the live terminal.
+async function seedBus(e, sessionId, {
+  state = 'working', cwd = process.cwd(), projectColor = null, repository = true,
+} = {}) {
+  const p = paths(e);
+  const registryPaths = relayPaths(e);
+  const processOps = relayProcessOps();
+  const gitContext = async () => ({ remote: null, repoRoot: repository ? cwd : null,
+    repositoryRoot: repository ? cwd : null });
+  const kind = { working: 'prompt', idle: 'session-start', done: 'turn-end', error: 'turn-error' }[state];
+  const nativeEvent = { working: 'UserPromptSubmit', idle: 'SessionStart', done: 'Stop', error: 'StopFailure' }[state];
+  const event = { schema: 1, kind, harness: 'claude-code', nativeEvent,
+    sessionId, agentId: `claude-code:${sessionId}`, cwd, tool: null };
+  const { snapshot } = await applyEvent(event, { paths: registryPaths, processOps,
+    resolveSessionPid: () => process.pid, gitContext });
+  const result = await observe({ text: JSON.stringify({
+    schema: 1, type: 'event', subscriber: 'familiar', event,
+    registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+  }), deps: {
+    paths: p, relay: { readSnapshot: () => readSnapshot({ paths: registryPaths }) },
+    relayProcess: processOps,
+    adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid }),
+    gitContext, lookupProjectColor: async () => ({ color: projectColor, warnings: [] }),
+    loadContext: () => loadContext({ paths: p }),
+    emitTransition: async () => ({ kind: 'unchanged' }), env: e,
+  } });
+  assert.deepEqual(result, { exitCode: 0, lines: [] });
+  return (await readSessions(p.sessionsPath)).sessions[sessionId];
 }
 
 // The trap this guards: bin/familiar's no-intent branch printed `rawOutput ?? ''`. With
@@ -1427,12 +1454,47 @@ test('statusline with no --with prints the HUD for a session not on the bus', ()
   assert.ok(!result.stdout.includes('\x1b['), 'no identity means no hue');
 });
 
+for (const wrapped of [false, true]) {
+  test(`statusline keeps ${wrapped ? '--with output unchanged' : 'the HUD'} when its session's visuals fault`, async () => {
+    const e = statuslineEnv();
+    await seedBus(e, 'faulted');
+    writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
+      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+    const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
+    const payload = { session_id: 'faulted', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } };
+    const ledger = ledgerPaths(paths(e).transmitDir, 'faulted').entryPath;
+    mkdirSync(dirname(ledger), { recursive: true });
+    writeFileSync(ledger, '{not json');
+    const result = statusline(e, args, payload);
+    assert.equal(result.status, 0);
+    if (wrapped) assert.equal(result.stdout, 'custom\n\nlast');
+    else {
+      assert.match(result.stdout, /Opus 4\.8/);
+      assert.equal(result.stdout.trimEnd().split('\n').length, 4);
+    }
+    assert.doesNotMatch(result.stdout, /\x1b\[|\u{10EEEE}/u);
+    assert.match(result.stderr, /^familiar: statusline: session faulted: .*missing-cat.*\n$/);
+    assert.equal(result.stderr.trimEnd().split('\n').length, 1);
+    assert.equal(readFileSync(ledger, 'utf8'), '{not json', 'faulted visuals must skip settling');
+    const combined = join(e.FAMILIAR_STATE_DIR, 'output-order');
+    const fd = openSync(combined, 'w');
+    try {
+      const ordered = spawnSync(process.execPath, [bin, 'statusline', ...args], {
+        input: JSON.stringify(payload), env: e, stdio: ['pipe', fd, fd],
+      });
+      assert.equal(ordered.status, 0);
+    } finally { closeSync(fd); }
+    assert.equal(readFileSync(combined, 'utf8'), result.stdout + result.stderr,
+      'the diagnostic must follow the complete rendered output');
+  });
+}
+
 // THE ONE THAT PROVES THE COMPOSED PATH. The test above deliberately uses an unknown session,
 // so it exercises neither intent resolution nor composeForIntent -- on its own it would leave
 // the entire composed path unproven while LOOKING like coverage.
-test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', () => {
+test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', async () => {
   const e = statuslineEnv();
-  seedBus(e, 'on-the-bus');
+  await seedBus(e, 'on-the-bus');
   const result = statusline(e, [], {
     session_id: 'on-the-bus',
     cwd: process.cwd(),
@@ -1453,10 +1515,10 @@ test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', (
 // basename(cwd) and identity.project are the same repo-root label and the test passes either way.
 // Here the bus identity is the repo root while the payload points at a subdirectory, so the
 // two answers differ and only the correct one passes.
-test('the project label is the identity\'s, not the payload directory\'s', () => {
+test('the project label is the identity\'s, not the payload directory\'s', async () => {
   const e = statuslineEnv();
   const root = process.cwd();
-  const seeded = seedBus(e, 'monorepo', { cwd: root });
+  const seeded = await seedBus(e, 'monorepo', { cwd: root });
   assert.notEqual(seeded.project, 'src');
 
   const result = statusline(e, [], {
@@ -1479,7 +1541,7 @@ test('statusline still honours --with, unchanged', () => {
   assert.doesNotMatch(result.stdout, /Opus/);
 });
 
-test('a bus-backed statusline with --with bypasses HUD field collection and git', (t) => {
+test('a bus-backed statusline with --with bypasses HUD field collection and git', async (t) => {
   const e = statuslineEnv();
   const probe = mkdtempSync(join(tmpdir(), 'familiar-statusline-no-git-'));
   const fakeBin = join(probe, 'bin');
@@ -1498,7 +1560,7 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
     rmSync(probe, { recursive: true, force: true });
   });
 
-  seedBus(e, 'wrapped-no-fields');
+  await seedBus(e, 'wrapped-no-fields');
   const result = statusline(e, ['--with', 'printf custom'], {
     session_id: 'wrapped-no-fields',
     cwd: process.cwd(),
@@ -1520,10 +1582,10 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
 // forever.
 
 for (const state of ['done', 'error']) {
-  test(`an expired ${state} decays to idle rather than showing ${state} forever`, () => {
+  test(`an expired ${state} decays to idle rather than showing ${state} forever`, async () => {
     const e = statuslineEnv();
     const sessionId = `decays-${state}`;
-    seedBus(e, sessionId, { state });
+    await seedBus(e, sessionId, { state });
     const result = statusline({ ...e, FAMILIAR_NOW_MS: String(Date.now() + 60_000) }, [], {
       session_id: sessionId, cwd: process.cwd(),
     });
@@ -1548,7 +1610,7 @@ for (const state of ['done', 'error']) {
 // So assert the thing the comment always MEANT: exactly one git call, and a cheap one.
 // `symbolic-ref --short HEAD` reads one ref file. It cannot become `status` or `log`
 // without this failing, deterministically, on any machine at any load.
-test('a status line invocation makes exactly one cheap git call', (t) => {
+test('a status line invocation makes exactly one cheap git call', async (t) => {
   const e = statuslineEnv();
   const probe = mkdtempSync(join(tmpdir(), 'familiar-statusline-git-calls-'));
   const fakeBin = join(probe, 'bin');
@@ -1580,7 +1642,7 @@ test('a status line invocation makes exactly one cheap git call', (t) => {
   // Exercise the shim directly until it is warm; a genuine extra git call still fails the count.
   for (let i = 0; i < 5; i++) spawnSync(join(fakeBin, 'git'), ['--version'], { env: e });
 
-  seedBus(e, 'timed');
+  await seedBus(e, 'timed');
   const payload = { session_id: 'timed', cwd: process.cwd() };
   const warm = statusline(e, [], payload);
   assert.equal(warm.status, 0, warm.stderr);          // ASSERT SUCCESS BEFORE COUNTING:
@@ -1789,16 +1851,10 @@ test('the hook writes tasks warnings to stderr and still records the session', (
   assert.equal(agents.warn.projectColor, null);
 });
 
-test('the status line paints the label in the colour its record carries', () => {
+test('the status line paints the label in the colour its record carries', async () => {
   const e = pinned('identities: []\n');
   e.FAKE_TASKS_LOG = join(e.FAMILIAR_STATE_DIR, 'tasks.log');
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
-    s1: {
-      sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, repositoryRoot: null, projectColor: '#317d01', cwd: '/tmp/api', pid: process.pid, starttime: 1,
-      state: 'working', updatedAt: 1,
-    },
-  }));
+  await seedBus(e, 's1', { cwd: '/tmp/api', projectColor: '#317d01' });
   const r = spawnSync(process.execPath, [bin, 'statusline'], {
     input: JSON.stringify({ session_id: 's1' }), encoding: 'utf8', env: e,
   });

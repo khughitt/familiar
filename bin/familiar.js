@@ -25,7 +25,7 @@ import { applyHookEvent } from '../src/bus/transaction.js';
 import { reapRegistry, readSnapshot } from 'relay';
 import { reconcile } from '../src/observe/run.js';
 import { readSessions, writeSessions } from '../src/bus/sessions.js';
-import { pruneTerminalOwners } from '../src/render/term/terminal-owner.js';
+import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
@@ -40,7 +40,7 @@ import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
 import { sweepTemps } from '../src/bus/temp-sweep.js';
-import { composeForIntent, textLines } from '../src/render/term/statusline.js';
+import { composeForIntent } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
 import { readJson } from '../src/bus/store.js';
@@ -547,20 +547,24 @@ export async function settleStatusline({
   const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
   const ledger = fileLedger(entryPath);
   if (!(await ledger.read()).held?.provisional) return { kind: 'noop' };
-  const terminal = terminalTarget(record.pid, {
-    platform,
-    record: processOps.recordOf(record.pid),
-    hookEnv,
-    probe,
-  });
   const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
-  return settle({
-    owner: record,
-    intent,
-    terminal,
-    ledger,
-    lock: (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf })),
-    ownerAlive,
+  const lockOptions = transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf });
+  return withTerminal({ transmitDir: paths.transmitDir, terminal: record,
+    sessionId: record.sessionId, seq: null, lockWith, lockOptions }, () => {
+    const terminal = terminalTarget(record.pid, {
+      platform,
+      record: processOps.recordOf(record.pid),
+      hookEnv,
+      probe,
+    });
+    return settle({
+      owner: record,
+      intent,
+      terminal,
+      ledger,
+      lock: (fn) => lockWith(lockPath, fn, lockOptions),
+      ownerAlive,
+    });
   });
 }
 
@@ -885,36 +889,37 @@ async function main({ command, args: rest, color, mode }) {
     // It transmits nothing of its own. See src/render/term/statusline.js -- two processes
     // chunking graphics escapes into one fd is a corrupt escape stream. The one exception is
     // settling a provisional SessionStart image, which it does inside the hooks' own
-    // per-session transmit lock (settleStatusline below).
+    // terminal ownership and per-session transmit locks (settleStatusline below).
     const stdin = await readStdin();
     const payload = JSON.parse(stdin || '{}');
     const sessionId = payload.session_id;
 
     const ctx = await context();
-    const agents = (await readJson(ctx.paths.agentsPath)) ?? {};
-    const record = sessionId ? agents[sessionId] : undefined;
+    const { sessions } = await readSessions(ctx.paths.sessionsPath);
+    const record = sessionId ? sessions[sessionId] : undefined;
 
     // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
     // much of the wrapped text fits beside it. Resolve one session only: a broken config in
     // ANOTHER project must not fault this status line.
     let intent;
+    let visualFault;
     if (record) {
       const one = { [sessionId]: record };
-      const { identities, spriteFor, animationFor } = await makePrepareSprites(ctx)(one);
-      // THE DECAY CONTRACT (src/protocol/intent.js:40), not `.current`. `.current` discards
-      // expiresAt, which was survivable while this ran about once a turn -- but with
-      // refreshInterval set it is permanent: `done` carries an 8s TTL and `error` a 30s one,
-      // so a polled HUD reading `.current` would show `done` every two seconds, forever,
-      // until the next hook fired. The other polling renderer already follows this contract.
-      const intentRecord = resolveAll({
-        agents: one,
-        identities,
-        tone: ctx.tone,
-        spriteFor,
-        animationFor,
-        motionPolicy: ctx.motionPolicy,
-      })[sessionId];
-      intent = displayedIntent(intentRecord, now());
+      const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
+      if (faults.has(sessionId)) {
+        visualFault = `session ${sessionId}: ${faults.get(sessionId)}`;
+      } else {
+        // Keep the decay contract: polling must not show done/error forever.
+        const intentRecord = resolveAll({
+          agents: one,
+          identities,
+          tone: ctx.tone,
+          spriteFor,
+          animationFor,
+          motionPolicy: ctx.motionPolicy,
+        })[sessionId];
+        intent = displayedIntent(intentRecord, now());
+      }
     }
 
     const wrapped = values.with ?? null;
@@ -929,10 +934,12 @@ async function main({ command, args: rest, color, mode }) {
     // No identity means no hue and no state — so the HUD renders uncoloured, with the state
     // slot reading as absent, at the full four rows (there is no cat here to fit against).
     if (!intent) {
-      const lines = wrapped
-        ? textLines(rawOutput, Infinity)
-        : hudLines({ intent: null, fields: readFields(payload), rows: 4 });
-      process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+      const output = wrapped ? rawOutput
+        : hudLines({ intent: null, fields: readFields(payload), rows: 4 }).join('\n') + '\n';
+      process.stdout.write(output);
+      if (visualFault !== undefined) {
+        process.stderr.write(`familiar: statusline: ${visualFault.replace(/[\r\n]+/g, ' ')}\n`);
+      }
       return;
     }
 

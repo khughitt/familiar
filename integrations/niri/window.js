@@ -1,5 +1,7 @@
-import { ancestors as procAncestors } from '../../src/bus/proc.js';
+import { createProcessOps } from 'relay';
 import { join } from 'node:path';
+
+const { ancestors: procAncestors } = createProcessOps();
 
 export const niriWindowsPath = (paths) => join(paths.stateDir, 'niri-windows.json');
 
@@ -7,11 +9,11 @@ export const niriWindowsPath = (paths) => join(paths.stateDir, 'niri-windows.jso
 // until one matches a window pid. This walk was demoted here from ohai's core,
 // where it never belonged: session -> window -> workspace is an INTEGRATION
 // concern, and nothing under src/ may depend on a compositor existing.
-export function mapSessionsToWindows(agents, windows, { ancestors = procAncestors } = {}) {
+export function mapSessionsToWindows(sessions, windows, { ancestors = procAncestors } = {}) {
   const byPid = new Map(windows.map((w) => [w.pid, w]));
   const map = {};
 
-  for (const [sessionId, record] of Object.entries(agents)) {
+  for (const [sessionId, record] of Object.entries(sessions)) {
     const hit = ancestors(record.pid).find((p) => byPid.has(p.pid));
     if (!hit) continue;   // no window: a headless or SSH session. Omit, do not guess.
     const window = byPid.get(hit.pid);
