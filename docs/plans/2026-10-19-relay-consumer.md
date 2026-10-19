@@ -18,7 +18,7 @@ are deleted.
 `git+https://github.com/khughitt/relay.git#v0.1.0` (later `#v0.1.1`), familiar-theme
 v0.3.0.
 
-**Status:** draft for review, round 3. Round 2 (codex gpt-6.1-sol) corrected the legacy manifest path and the fake harness's process name.
+**Status:** accepted for execution 2026-10-19 after three review rounds; execution method: subagent-driven. Round 2 (codex gpt-6.1-sol) corrected the legacy manifest path and the fake harness's process name.
 
 Round 1 (codex gpt-6.1-sol) found eight gaps, all addressed: teardown acknowledgement, the two process providers, absent relay state, OpenCode retirement by package name, the theme fixture, the race-test pause point, runner-level read ordering, and a real pty.
 
