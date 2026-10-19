@@ -814,11 +814,59 @@ test('a worktree path pin overrides the inherited one, and a remote pin override
 test('idle_prompt while a background task runs is idle, not needs-input', async () => {
   const { paths, deps } = harness();
   await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps });
+  assert.equal((await readJson(paths.agentsPath)).s1.state, 'done');
   await applyHookEvent({ event: 'Notification:idle_prompt', stdin, deps });
 
   const agents = await readJson(paths.agentsPath);
   assert.equal(agents.s1.state, 'idle');
-  assert.equal(agents.s1.backgroundTasks, 1);
+  assert.deepEqual(agents.s1.background, { agents: 0, other: 1 });
+});
+
+// Measured 2026-10-19 on Claude Code 2.1.302: a turn that hands work to a background subagent or
+// workflow ends with Stop, listing it as in flight, and Claude re-invokes the session when the
+// work finishes; only that final Stop, with nothing in flight, is the end of the work.
+test('a Stop waiting on a background agent stays working until the final Stop', async () => {
+  for (const waiting of [
+    [{ id: 'a1', type: 'subagent', status: 'running' }],
+    [{ id: 'w1', type: 'workflow', status: 'pending' }],
+    [{ id: 'a1', type: 'subagent', status: 'running' }, RUNNING],
+  ]) {
+    const { paths, deps } = harness();
+    await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+    const parked = await applyHookEvent({ event: 'Stop', stdin: bgStdin(waiting), deps });
+    assert.equal(parked.next.state, 'working');
+
+    await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+    const final = await applyHookEvent({ event: 'Stop', stdin: bgStdin([]), deps });
+    assert.equal(final.next.state, 'done');
+    assert.deepEqual((await readJson(paths.agentsPath)).s1.background, { agents: 0, other: 0 });
+  }
+});
+
+test('a Stop with only shells, monitors or scheduled wakeups in flight is done', async () => {
+  const cron = JSON.stringify({
+    session_id: 's1', cwd: '/home/k/d/api', background_tasks: [],
+    session_crons: [{ id: 'c1', schedule: '0 9 * * *', recurring: false, prompt: 'check' }],
+  });
+  for (const stopStdin of [
+    bgStdin([RUNNING]),
+    bgStdin([{ id: 'm1', type: 'monitor', status: 'running' }]),
+    bgStdin([]),
+    cron,
+  ]) {
+    const { deps } = harness();
+    await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+    const result = await applyHookEvent({ event: 'Stop', stdin: stopStdin, deps });
+    assert.equal(result.next.state, 'done');
+  }
+});
+
+test('idle_prompt after an agent-only Stop is still needs-input', async () => {
+  const { paths, deps } = harness();
+  await applyHookEvent({ event: 'Stop', stdin: bgStdin([{ id: 'a1', type: 'subagent', status: 'running' }]), deps });
+  await applyHookEvent({ event: 'Notification:idle_prompt', stdin, deps });
+
+  assert.equal((await readJson(paths.agentsPath)).s1.state, 'needs-input');
 });
 
 test('idle_prompt after the background work has finished is needs-input again', async () => {
@@ -829,7 +877,7 @@ test('idle_prompt after the background work has finished is needs-input again', 
 
   const agents = await readJson(paths.agentsPath);
   assert.equal(agents.s1.state, 'needs-input');
-  assert.equal(agents.s1.backgroundTasks, 0);
+  assert.deepEqual(agents.s1.background, { agents: 0, other: 0 });
 });
 
 test('an event without background_tasks carries the last known count forward', async () => {
@@ -838,7 +886,7 @@ test('an event without background_tasks carries the last known count forward', a
   await applyHookEvent({ event: 'PreToolUse', stdin, deps });
 
   const agents = await readJson(paths.agentsPath);
-  assert.equal(agents.s1.backgroundTasks, 1);
+  assert.deepEqual(agents.s1.background, { agents: 0, other: 1 });
 });
 
 test('a background_tasks field that is not a list is a named failure', async () => {

@@ -19,18 +19,32 @@ export function parsePayload(stdin) {
   return {
     sessionId: data.session_id,
     cwd: data.cwd ?? process.cwd(),
-    backgroundTasks: runningBackgroundTasks(data.background_tasks),
+    background: inFlightBackground(data.background_tasks),
   };
 }
 
-// claude-code's Stop and SubagentStop list the session's background work (measured on 2.1.292:
-// `[{ id, type: 'shell', status: 'running', ... }]`, and `[]` once it has finished). Every other
-// event omits the field, so `undefined` means "not reported", never "none running" -- the
-// transaction carries the last reported count forward rather than reading absence as zero.
-function runningBackgroundTasks(tasks) {
+// claude-code's Stop and SubagentStop list the session's in-flight background work: running or
+// pending, and backgrounded (measured on 2.1.302: `[{ id, type: 'subagent', status: 'running',
+// ... }]`, and `[]` once it has finished). Every other event omits the field, so `undefined` means
+// "not reported", never "none running" -- the transaction carries the last reported counts forward
+// rather than reading absence as zero.
+//
+// The work splits by what it means for the turn. An AGENT-type task wakes the session when it
+// finishes, so a turn that ends with one in flight has handed its work off rather than finished
+// it; these are the types claude-code's own idle notice waits on (local_agent, local_workflow,
+// in_process_teammate, remote_agent), under the labels the payload gives them. Everything else
+// (a shell, a monitor, an MCP task, claude-code's own housekeeping) may run indefinitely -- a dev
+// server, a Monitor -- and must not hold the turn open. Scheduled wakeups arrive separately, in
+// `session_crons`, and are not counted: a cron may be a day away, or recur forever.
+const AGENT_TYPES = new Set(['subagent', 'workflow', 'teammate', 'cloud session']);
+const IN_FLIGHT = new Set(['running', 'pending']);
+
+function inFlightBackground(tasks) {
   if (tasks === undefined) return undefined;
   if (!Array.isArray(tasks)) {
     throw new Error(`hook payload background_tasks must be a list (found ${typeof tasks})`);
   }
-  return tasks.filter((task) => task?.status === 'running').length;
+  const inFlight = tasks.filter((task) => IN_FLIGHT.has(task?.status));
+  const agents = inFlight.filter((task) => AGENT_TYPES.has(task.type)).length;
+  return { agents, other: inFlight.length - agents };
 }

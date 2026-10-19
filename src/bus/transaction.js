@@ -121,7 +121,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
   // event still fails before anything is written -- and `null` still means "clear", so the git
   // and pid resolution below are still skipped for it.
   const level = stateForEvent(event);
-  const { sessionId, cwd, backgroundTasks: reported } = parsePayload(stdin);
+  const { sessionId, cwd, background: reported } = parsePayload(stdin);
 
   // Git runs OUTSIDE the lock. It spawns up to two subprocesses, and PreToolUse
   // fires on every tool call — holding the bus lock across a process spawn would
@@ -180,11 +180,11 @@ export async function applyHookEvent({ event, stdin, deps }) {
       // after `session.error` (measured -- see the spec, §4), and a reducer that could not see
       // `prev` would let the `done` erase the `error` every single time.
       //
-      // `backgroundTasks` rides on the record because the event that reports it (claude-code's
-      // Stop) is not the event that needs it (the idle_prompt a minute later). Absent until some
-      // event has reported a count; carried forward by every event that does not.
-      const backgroundTasks = reported ?? prev?.backgroundTasks;
-      const state = assertState(reduceState(level, prev?.state ?? null, { backgroundTasks }));
+      // `background` rides on the record because the event that reports it (claude-code's Stop)
+      // is not the only event that needs it (the idle_prompt a minute later). Absent until some
+      // event has reported counts; carried forward by every event that does not.
+      const background = reported ?? prev?.background;
+      const state = assertState(reduceState(level, prev?.state ?? null, { background }));
       const { remote, repoRoot, repositoryRoot } = context;
       next = {
         sessionId,
@@ -200,7 +200,7 @@ export async function applyHookEvent({ event, stdin, deps }) {
         seq,
         state,
         updatedAt: now(),
-        ...(backgroundTasks === undefined ? {} : { backgroundTasks }),
+        ...(background === undefined ? {} : { background }),
       };
       agents[sessionId] = next;
     }
