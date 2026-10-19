@@ -1,6 +1,9 @@
 # Familiar as a relay consumer
 
 Accepted 2026-10-19 after four review rounds (codex gpt-6.1-sol, round 4: no findings), and accepted for planning by the user.
+
+Implemented and reviewed 2026-10-19 on `feat/relay-identity`, with relay v0.1.1 and its released background-work contract (§8). The final review's Important findings were corrected and independently re-reviewed; live operator cutover remains `hq-539508`.
+
 - **Round 1** (codex gpt-6.1-sol) asked for revision on five findings:
   - cleanup evidence after another observer's removal;
   - stale enrichment;
@@ -15,8 +18,8 @@ Accepted 2026-10-19 after four review rounds (codex gpt-6.1-sol, round 4: no fin
   - teardown has no live row to prove;
   - the terminal ownership sequence could move backwards. Task: `fam-6e8321`. Addendum to the approved parent
 design, ops `docs/specs/2026-09-16-relay-design.md` §3 and §6 (Familiar), which stays
-authoritative wherever this document is silent. Target: relay `v0.1.0` (tag object
-9362dde, commit 0f59660), whose `docs/api.md` is the contract cited below. Engine
+authoritative wherever this document is silent. API baseline: relay `v0.1.0` (tag object
+9362dde, commit 0f59660), whose `docs/api.md` is the contract cited below; the implementation pins v0.1.1 with the additive contract in §8. Engine
 baseline: `3ec35ee`.
 
 ## Why an addendum

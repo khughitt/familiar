@@ -15,10 +15,12 @@ Relay's adapters, registry and OpenCode server plugin replace familiar's copies,
 are deleted.
 
 **Tech Stack:** Node >=22 ES modules, `node:test`, relay
-`git+https://github.com/khughitt/relay.git#v0.1.0` (later `#v0.1.1`), familiar-theme
+`git+https://github.com/khughitt/relay.git#v0.1.1` (initial steps use `#v0.1.0`), familiar-theme
 v0.3.0.
 
-**Status:** accepted for execution 2026-10-19 after three review rounds; execution method: subagent-driven. Round 2 (codex gpt-6.1-sol) corrected the legacy manifest path and the fake harness's process name.
+**Status:** implemented and reviewed 2026-10-19 on `feat/relay-identity`; all ten tasks complete. The final whole-branch review's two Important findings were corrected and independently re-reviewed. Three Minor findings remain recorded on `fam-6e8321`. Live operator cutover remains `hq-539508`; the branch stays isolated from the installed hooks.
+
+**Plan approval:** accepted for execution 2026-10-19 after three review rounds; execution method: subagent-driven. Round 2 (codex gpt-6.1-sol) corrected the legacy manifest path and the fake harness's process name.
 
 Round 1 (codex gpt-6.1-sol) found eight gaps, all addressed: teardown acknowledgement, the two process providers, absent relay state, OpenCode retirement by package name, the theme fixture, the race-test pause point, runner-level read ordering, and a real pty.
 
@@ -75,7 +77,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 **Interfaces:**
 - Produces: `import { STATES, adapterFor, createProcessOps, readSnapshot, reapRegistry } from 'relay'` is resolvable.
 
-- [ ] **Step 1: Write the failing test** `test/relay-parity.test.js`:
+- [x] **Step 1: Write the failing test** `test/relay-parity.test.js`:
   - `relay's observation states are exactly familiar-theme's`:
     `assert.deepEqual([...relaySTATES].sort(), [...themeSTATES].sort())`.
   - `every relay state resolves assets in the committed theme fixture`: for each relay
@@ -83,13 +85,13 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     is an existing file. Load `test/fixtures/theme-pack` directly with `loadThemePack`,
     as `test/bin-familiar.test.js` and `test/cli-surface.test.js` do. The engine ships
     no `themes/` directory, so `paths().themesDir` must not be used.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL, `Cannot find package 'relay'`.
-- [ ] **Step 3:** add `"relay": "git+https://github.com/khughitt/relay.git#v0.1.0"` to
+- [x] **Step 2:** `just test-fast`. Expected: FAIL, `Cannot find package 'relay'`.
+- [x] **Step 3:** add `"relay": "git+https://github.com/khughitt/relay.git#v0.1.0"` to
   `dependencies`, then `npm install`. Confirm that `package-lock.json` records
   `git+ssh://git@github.com/khughitt/relay.git#0f596607ad088be7607a9ff0b30f2073d2ee9147`.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS. `test/deps.test.js` stays green,
+- [x] **Step 4:** `just test-fast`. Expected: PASS. `test/deps.test.js` stays green,
   since `missingDependencies` now also covers `relay`.
-- [ ] **Step 5:** `just check`, then commit `build(deps): pin relay v0.1.0`.
+- [x] **Step 5:** `just check`, then commit `build(deps): pin relay v0.1.0`.
 
 ### Task 2: Presentation state and the projection
 
@@ -139,7 +141,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   `context` is
   `{ cwd, projectKey, project, remote, repoRoot, repositoryRoot, projectColor }`.
 
-- [ ] **Step 1: Write failing `test/sessions.test.js`:**
+- [x] **Step 1: Write failing `test/sessions.test.js`:**
   - absent file → `EMPTY_SESSIONS`;
   - corrupt JSON → throws `/invalid sessions file/`;
   - `schema: 2` → throws;
@@ -147,7 +149,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `sameBasis`: false when either `process` is null, false on each differing field,
     true on equal;
   - `sessionIdOf('opencode:opencode:42') === 'opencode:42'`.
-- [ ] **Step 2: Write failing `test/projection.test.js`,** with snapshot rows built
+- [x] **Step 2: Write failing `test/projection.test.js`,** with snapshot rows built
   inline (schema 2 `Agent`) and a fake `resolveVisuals` that faults named sessions:
   - `a fresh prepared event admits its session`: the record carries `basis`, terminal
     `pid`/`starttime`, `seq`, the row's `state`/`updatedAt` and every context field;
@@ -193,8 +195,8 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     `ended`; `registry` records the new generation and revision.
   - Review Focus 2: `corrupt sessions never empties intent`, asserted at the
     `readSessions` boundary (it throws before any projection).
-- [ ] **Step 3:** `just test-fast`. Expected: FAIL, modules missing.
-- [ ] **Step 4:** implement `src/bus/sessions.js` and `src/bus/projection.js`.
+- [x] **Step 3:** `just test-fast`. Expected: FAIL, modules missing.
+- [x] **Step 4:** implement `src/bus/sessions.js` and `src/bus/projection.js`.
   `projectSnapshot` is pure apart from awaiting `resolveVisuals`: no file or process
   access. Order of work in `full` mode:
   1. Fold the workers.
@@ -210,8 +212,8 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   7. Set `capture`.
 
   In `drop-only` mode, only steps 4 and 7 run, against keys absent from the snapshot.
-- [ ] **Step 5:** `just test-fast`. Expected: PASS.
-- [ ] **Step 6:** `just check`, then commit
+- [x] **Step 5:** `just test-fast`. Expected: PASS.
+- [x] **Step 6:** `just check`, then commit
   `feat(bus): project relay snapshots into presentation sessions`.
 
 ### Task 3: Per-terminal ownership and absent-intent emission
@@ -250,7 +252,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - stamps `{ held: null, presented: null }`, which is not `ended`;
   - writes `oscReset()` when the owner is alive.
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - `test/terminal-owner.test.js`:
     - the `decideClaim` table, including equal `seq` → `'superseded'`;
     - `the sequence never decreases`: owner `B/40`, then `B/20`, then `A/30`. The record
@@ -277,13 +279,13 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
       returns `{ kind: 'superseded', reason: 'terminal' }`;
     - the terminal's bytes are only B's.
   - `test/ledger-prune.test.js`: the `*.json` sweep ignores the `terminals/` subdirectory.
-- [ ] **Step 2:** `just test-fast`. Expected: the new cases FAIL.
-- [ ] **Step 3:** implement `terminal-owner.js`. Use `withLock` with
+- [x] **Step 2:** `just test-fast`. Expected: the new cases FAIL.
+- [x] **Step 3:** implement `terminal-owner.js`. Use `withLock` with
   `transmitLockOptions` for the terminal lock. Extend `emit` for `intent === null`, and
   have `pruneLedgers` skip directories.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS, and existing emit, settle and
+- [x] **Step 4:** `just test-fast`. Expected: PASS, and existing emit, settle and
   ledger tests stay green.
-- [ ] **Step 5:** `just check`, then commit
+- [x] **Step 5:** `just check`, then commit
   `feat(term): serialize terminal ownership per terminal process`.
 
 ### Task 4: Ownership proof and enrichment
@@ -352,7 +354,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
      otherwise call `lookupProjectColor(repoRoot)` (or `NO_PROJECT` outside a
      repository).
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - `observe-envelope.test.js`: each field's refusal, the empty-input message, and
     both valid forms.
   - `observe-enrich.test.js`, with fake `relayProcess` and `renderProcess` and chains
@@ -373,11 +375,11 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
       returns no repository and then a remote, yield different `context.projectKey`
       values;
     - project colour carried on an equal `repoRoot` and looked up on a change.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL, modules missing.
-- [ ] **Step 3:** implement the three modules. `enrich.js` imports `gitContext` from
+- [x] **Step 2:** `just test-fast`. Expected: FAIL, modules missing.
+- [x] **Step 3:** implement the three modules. `enrich.js` imports `gitContext` from
   familiar's `src/bus/identity.js` only as a default parameter.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS.
-- [ ] **Step 5:** `just check`, then commit
+- [x] **Step 4:** `just test-fast`. Expected: PASS.
+- [x] **Step 5:** `just check`, then commit
   `feat(observe): prove session ownership before enrichment`.
 
 ### Task 5: The observer runner
@@ -446,7 +448,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   Faults make `exitCode 1`, with one line each. `reconcile` type envelopes call
   `reconcile`.
 
-- [ ] **Step 1: Write failing `test/observe-run.test.js`** (temp state directories,
+- [x] **Step 1: Write failing `test/observe-run.test.js`** (temp state directories,
   `RELAY_STATE_DIR` at a private 0700 temp dir, snapshots written with relay's
   `applyEvent` under an injected `processOps` and `gitContext`, recorded `emitTransition`):
   - admit, then transition: intent is written, emission sees `prev` null then the
@@ -491,13 +493,13 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `session-end` drop-only latency: the median of 20 in-process runs is under 100 ms
     on this host. That is a regression bound leaving room for Node startup inside the
     200 ms teardown entry.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL.
-- [ ] **Step 3:** implement the three modules and move the helpers out of
+- [x] **Step 2:** `just test-fast`. Expected: FAIL.
+- [x] **Step 3:** implement the three modules and move the helpers out of
   `bin/familiar.js`. Existing `hook` and `statusline` keep working by importing the
   moved functions.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS, with `test/bin-familiar.test.js`
+- [x] **Step 4:** `just test-fast`. Expected: PASS, with `test/bin-familiar.test.js`
   still green.
-- [ ] **Step 5:** `just check`, then commit `feat(observe): run one projection per relay envelope`.
+- [x] **Step 5:** `just check`, then commit `feat(observe): run one projection per relay envelope`.
 
 ### Task 6: `familiar reap` over relay
 
@@ -518,12 +520,12 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   `{"reaped": string[], "awaiting": string[], "ended": string[], "pruned": n, "swept": n}`.
   Pretty output adds `awaiting <ids>` and `ended <ids>` lines when they are nonempty.
 
-- [ ] **Step 0: Reseed the existing tests.** From this task on, the legacy `familiar
+- [x] **Step 0: Reseed the existing tests.** From this task on, the legacy `familiar
   hook` writer survives only until Task 8. Any existing test here that seeds state
   through `familiar hook` or familiar's `agents.json` is rewritten to seed through
   relay's `applyEvent` and then `observe()` (Task 5). Tests of `hook` itself stay
   untouched until Task 8 deletes them.
-- [ ] **Step 1: Write failing `bin-familiar` tests:**
+- [x] **Step 1: Write failing `bin-familiar` tests:**
   - `reap prunes a dead relay agent and reconciles even when nothing was pruned`: a
     state change in the snapshot reaches `intent.json` with zero reaped;
   - `reap lists registry agents awaiting their first event`;
@@ -533,11 +535,11 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - Review Focus 1: an existing `RELAY_STATE_DIR` at 0755 exits 1 with exactly one
     stderr line `familiar: reap: IO_ERROR: …` and leaves `sessions.json` untouched. An
     absent relay state directory reconciles to no sessions and exits 0.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL.
-- [ ] **Step 3:** implement. Relay errors become one stderr line, `familiar: reap:
+- [x] **Step 2:** `just test-fast`. Expected: FAIL.
+- [x] **Step 3:** implement. Relay errors become one stderr line, `familiar: reap:
   <code>: <message>`, and exit 1.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS.
-- [ ] **Step 5:** `just check`, then commit `feat(reap): prune relay, then reconcile presentation`.
+- [x] **Step 4:** `just test-fast`. Expected: PASS.
+- [x] **Step 5:** `just check`, then commit `feat(reap): prune relay, then reconcile presentation`.
 
 ### Task 7: Readers: status line and niri
 
@@ -561,22 +563,22 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     `sessions.json` (`.sessions`) for `pid` and `seq` and watches `sessions.json` plus
     `intent.json`.
 
-- [ ] **Step 0: Reseed the existing tests.** From this task on, the legacy `familiar
+- [x] **Step 0: Reseed the existing tests.** From this task on, the legacy `familiar
   hook` writer survives only until Task 8. Any existing test here that seeds state
   through `familiar hook` or familiar's `agents.json` is rewritten to seed through
   relay's `applyEvent` and then `observe()` (Task 5). Tests of `hook` itself stay
   untouched until Task 8 deletes them.
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
   - `statusline keeps the HUD when its session's visuals fault`;
   - `statusline keeps --with output unchanged when its session's visuals fault`;
   - both write exactly one stderr line and exit 0;
   - `statusline settles only for the recorded terminal owner`;
   - niri: `a session with no intent key gets no slot`, and
     `the bridge resyncs on a sessions.json rename`.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL.
-- [ ] **Step 3:** implement.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS.
-- [ ] **Step 5:** `just check`, then commit
+- [x] **Step 2:** `just test-fast`. Expected: FAIL.
+- [x] **Step 3:** implement.
+- [x] **Step 4:** `just test-fast`. Expected: PASS.
+- [x] **Step 5:** `just check`, then commit
   `feat(readers): read presentation sessions; fault-safe status line`.
 
 ### Task 8: CLI surface cutover and removal of the extracted code
@@ -649,15 +651,15 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   removed; `startTimeOf`, `lockHolderAlive`, `ownerAlive`, `pidExists`, `isAlive` and
   `recordOf` stay.
 
-- [ ] **Step 1: Land the ops rows.**
+- [x] **Step 1: Land the ops rows.**
   - Create an ops worktree.
   - Edit `cli.toml`'s familiar rows as above.
   - Run ops's own check, then commit `feat(cli): familiar observe and setup relay rows`.
   - **Stop and ask the user** before merging to ops's default branch and pushing, since
     the adopted-copy check reads ops's `origin/HEAD`. Resume only after it lands.
-- [ ] **Step 2:** in this worktree, run ops's `bin/vendored adopt` (locate ops with `tasks root ops`) for
+- [x] **Step 2:** in this worktree, run ops's `bin/vendored adopt` (locate ops with `tasks root ops`) for
   `cli.toml`. `just test-fast` now FAILS `declared surface equals tools/cli.toml`.
-- [ ] **Step 3: Write and update failing tests:**
+- [x] **Step 3: Write and update failing tests:**
   - `setup.test.js`: the three documents above. A test validates the `setup relay`
     output with relay's `validateSubscribers`, and that `checkBudget` passes for every
     mapped harness/event plus reconcile, which proves the timeouts fit relay's
@@ -675,7 +677,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `bin-familiar.test.js`: `familiar observe` end to end through the CLI with a
     reconcile envelope; `familiar hook` is now an unknown-command usage error.
   - `deps.test.js` keeps passing for both launchers.
-- [ ] **Step 4:** implement the surface changes, then delete the extracted modules.
+- [x] **Step 4:** implement the surface changes, then delete the extracted modules.
   - Before deleting, `grep -rn` for each deleted module path across `src bin
     integrations tools test`: the only hits must be files deleted in this step.
   - Port these to `test/projection.test.js` or `test/observe-run.test.js`:
@@ -685,8 +687,8 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - Drop the background-task cases (`:814-850`); they return in Task 10.
   - The sprite imports `logError` from the new `integrations/opencode/log.js`. Its log
     file is unchanged: `$FAMILIAR_STATE_DIR/opencode-plugin.log`.
-- [ ] **Step 5:** `just test-fast`. Expected: PASS.
-- [ ] **Step 6:** `just check`, then commit
+- [x] **Step 5:** `just test-fast`. Expected: PASS.
+- [x] **Step 6:** `just check`, then commit
   `feat(cli)!: relay owns hooks; familiar observes`. The body names the removed
   commands.
 
@@ -700,7 +702,7 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 - Consumes: the whole chain, through relay's real CLI
   (`node_modules/relay/bin/relay.js`).
 
-- [ ] **Step 1: Write the failing test** `test/relay-e2e.slow.test.js`:
+- [x] **Step 1: Write the failing test** `test/relay-e2e.slow.test.js`:
   - Use a temp `RELAY_STATE_DIR` (0700) and `FAMILIAR_STATE_DIR`, and a 0600
     `subscribers.json` from `familiar setup relay` output, passed with `--subscribers`.
   - **A real pseudo-terminal and a real harness ancestor.** `tty-familiar.mjs` only
@@ -730,8 +732,8 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - After each event, `intent.json[sessionId].current.state` is `idle`, `working`,
     `needs-approval`, `done`, and then absent.
   - The ledger ends with `ended: true`, and the terminal received a final `oscReset()`.
-- [ ] **Step 2:** run `just test`. Expected: FAIL until fixtures exist, then PASS.
-- [ ] **Step 3: Rewrite `docs/install.md`:**
+- [x] **Step 2:** run `just test`. Expected: FAIL until fixtures exist, then PASS.
+- [x] **Step 3: Rewrite `docs/install.md`:**
   - the hook sections now tell you to put `familiar setup relay` output into relay's
     subscribers file and install hooks with `relay install … --retire familiar`. Link
     relay's guide, and mark the steps as the operator cutover;
@@ -742,8 +744,8 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     reconcile even when nothing is pruned;
   - timer recovery updates files and never emits;
   - the plugin log path line points at relay's log for server-side errors.
-- [ ] **Step 4:** `just check`, then `just test`. Expected: PASS.
-- [ ] **Step 5:** commit `docs(install): familiar as a relay observer`.
+- [x] **Step 4:** `just check`, then `just test`. Expected: PASS.
+- [x] **Step 5:** commit `docs(install): familiar as a relay observer`.
 
 ### Task 10: Relay v0.1.1 and the background-work parity
 
@@ -755,24 +757,24 @@ the reduced state without interpreting or storing those counts (spec §8).
 **Files:**
 - Modify: `package.json`, `package-lock.json`, `test/projection.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
   Drive relay's real `normalizeEvent` and `applyEvent`, then familiar's projection
   and visual resolver. Assert `intent[sid].current.state` and the projected session
   state for shell `Stop` then `Notification:idle_prompt` (`done`, `idle`), agent
   `Stop` then idle prompt (`working`, `needs-input`), and mixed agent/shell then
   shell-only `Stop` then idle prompt (`working`, `done`, `idle`). No familiar reducer
   or session background field.
-- [ ] **Step 2:** `just test-fast`. Expected: FAIL on v0.1.0 (shell idle prompt stays
+- [x] **Step 2:** `just test-fast`. Expected: FAIL on v0.1.0 (shell idle prompt stays
   `needs-input`; agent `Stop` becomes `done`).
-- [ ] **Step 3:** bump to `#v0.1.1` and `npm install`. Confirm the lockfile's commit is
+- [x] **Step 3:** bump to `#v0.1.1` and `npm install`. Confirm the lockfile's commit is
   the tag's.
-- [ ] **Step 4:** `just test-fast`. Expected: PASS.
-- [ ] **Step 5:** merge current main into this branch, keeping retired modules and
+- [x] **Step 4:** `just test-fast`. Expected: PASS.
+- [x] **Step 5:** merge current main into this branch, keeping retired modules and
   tests deleted and retaining all task records and notes. Re-run `just test-fast`
   and `just check`, then commit the candidate. From a clean clone of that committed
   candidate with an empty npm cache and SSH
   disabled (`GIT_SSH_COMMAND=false`), run `npm ci` in a temp dir. Expected: it
   installs relay anonymously over https.
-- [ ] **Step 6:** use commit `build(deps): relay v0.1.1 (background-work reduction)`
+- [x] **Step 6:** use commit `build(deps): relay v0.1.1 (background-work reduction)`
   for the pin/parity candidate; record its SHA with the clean-clone install proof.
   Overall completion remains subject to final whole-branch review.
