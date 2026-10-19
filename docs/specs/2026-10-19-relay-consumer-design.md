@@ -372,8 +372,8 @@ than vanishing.
     process, and dropped by `reap` for a dead owner;
   - **stale enrichment:** A prepares against one basis, then B projects a resumed
     process (and, separately, a new cwd, and a recreated generation). A's terminal and
-    context are discarded. The record keeps B's context, or leaves the projection when
-    none matches;
+    context are discarded and A emits nothing. The record keeps B's context, or
+    leaves the projection when none matches;
   - **git per event:** a session whose directory gains a repository and an origin
     between two events changes project identity at the second;
   - no-prune reconcile;
