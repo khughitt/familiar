@@ -76,13 +76,23 @@ export function resolveAgentPid({
 }
 
 // claude-code's events are edges -- every one names a state outright and none needs what came
-// before -- with ONE exception. idle_prompt fires 60s after a turn ends whether or not that turn
-// left background work running (measured on 2.1.292: a background shell still running gets the
-// prompt; a background subagent suppresses it upstream). An agent waiting on its own command is
-// not waiting on the user, so that prompt resolves to `idle` -- where `done` would have decayed
-// to anyway -- rather than needs-input.
-export const reduceState = (level, _prev, { backgroundTasks }) =>
-  (level === 'needs-input' && backgroundTasks > 0 ? 'idle' : level);
+// before -- with TWO exceptions, both about the background work its Stop reports (./payload.js).
+//
+// A Stop with an agent-type task in flight is a turn handing its work to that agent, not finishing
+// it: claude-code re-invokes the session when the agent is done, and that later Stop, with nothing
+// in flight, is the real end. Reading the first as `done` would play the done popup and pulse at
+// the launch of every background subagent, and again at its end. It stays `working`.
+//
+// idle_prompt fires 60s after a turn ends whether or not that turn left a shell or monitor
+// running (measured on 2.1.292 and 2.1.302); an agent-type task suppresses it upstream, so a
+// carried agent count is stale by then and does not count here. An agent waiting on its own
+// command is not waiting on the user, so that prompt resolves to `idle` -- where `done` would have
+// decayed to anyway -- rather than needs-input.
+export function reduceState(level, _prev, { background }) {
+  if (level === 'done' && background?.agents > 0) return 'working';
+  if (level === 'needs-input' && background?.other > 0) return 'idle';
+  return level;
+}
 
 // claude-code's status line runs `familiar statusline`, which prints the placeholder cells the
 // transmitted image lands in. So familiar transmits.

@@ -25,33 +25,69 @@ test('an unrecognized hook event is an error, never a silent no-op', () => {
 
 test('claude-code reduces a level to itself, and prints the cells its status line draws', () => {
   assert.equal(printsPlaceholderCells, true);
-  for (const backgroundTasks of [undefined, 0]) {
-    for (const level of STATES) assert.equal(reduceState(level, null, { backgroundTasks }), level);
+  for (const background of [undefined, { agents: 0, other: 0 }]) {
+    for (const level of STATES) assert.equal(reduceState(level, null, { background }), level);
   }
 });
 
-test('needs-input while background work runs reduces to idle; nothing else changes', () => {
-  assert.equal(reduceState('needs-input', 'done', { backgroundTasks: 2 }), 'idle');
+test('needs-input while non-agent background work runs reduces to idle; nothing else changes', () => {
+  const background = { agents: 0, other: 2 };
+  assert.equal(reduceState('needs-input', 'done', { background }), 'idle');
   for (const level of STATES.filter((s) => s !== 'needs-input')) {
-    assert.equal(reduceState(level, 'done', { backgroundTasks: 2 }), level);
+    assert.equal(reduceState(level, 'done', { background }), level);
   }
+});
+
+test('a turn that ends waiting on a background agent is still working, not done', () => {
+  assert.equal(reduceState('done', 'working', { background: { agents: 1, other: 0 } }), 'working');
+  assert.equal(reduceState('done', 'working', { background: { agents: 1, other: 3 } }), 'working');
+  assert.equal(reduceState('done', 'working', { background: { agents: 0, other: 3 } }), 'done');
+});
+
+test('a carried agent count never turns an idle prompt into idle', () => {
+  // Claude sends no idle_prompt while an agent-type task runs, so a count carried to one is stale.
+  assert.equal(reduceState('needs-input', 'done', { background: { agents: 2, other: 0 } }), 'needs-input');
 });
 
 test('parsePayload takes the session id and cwd the hook provides', () => {
   const payload = JSON.stringify({ session_id: 'abc', cwd: '/home/k/d/api', tool_name: 'Bash' });
   assert.deepEqual(parsePayload(payload), {
-    sessionId: 'abc', cwd: '/home/k/d/api', backgroundTasks: undefined,
+    sessionId: 'abc', cwd: '/home/k/d/api', background: undefined,
   });
 });
 
-test('parsePayload counts only the running background tasks it is given', () => {
+// The type labels and the in-flight statuses are claude-code 2.1.302's (`background_tasks` lists
+// running or pending backgrounded work, typed by a friendly label).
+test('parsePayload counts in-flight agent-type tasks apart from the rest', () => {
   const payload = JSON.stringify({
     session_id: 'abc',
     cwd: '/home/k/d/api',
-    background_tasks: [{ status: 'running' }, { status: 'completed' }, { status: 'running' }],
+    background_tasks: [
+      { type: 'subagent', status: 'running' },
+      { type: 'workflow', status: 'pending' },
+      { type: 'teammate', status: 'running' },
+      { type: 'cloud session', status: 'running' },
+      { type: 'shell', status: 'running' },
+      { type: 'monitor', status: 'running' },
+      { type: 'MCP task', status: 'pending' },
+      { type: 'subagent', status: 'completed' },
+      { type: 'shell', status: 'failed' },
+    ],
   });
-  assert.equal(parsePayload(payload).backgroundTasks, 2);
-  assert.equal(parsePayload(JSON.stringify({ session_id: 'abc', background_tasks: [] })).backgroundTasks, 0);
+  assert.deepEqual(parsePayload(payload).background, { agents: 4, other: 3 });
+  assert.deepEqual(
+    parsePayload(JSON.stringify({ session_id: 'abc', background_tasks: [] })).background,
+    { agents: 0, other: 0 },
+  );
+});
+
+test('scheduled wakeups are not background work', () => {
+  const payload = JSON.stringify({
+    session_id: 'abc',
+    background_tasks: [],
+    session_crons: [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: '/loop' }],
+  });
+  assert.deepEqual(parsePayload(payload).background, { agents: 0, other: 0 });
 });
 
 test('a payload without a session id is unusable and says so', () => {
