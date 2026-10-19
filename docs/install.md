@@ -38,36 +38,78 @@ inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes
 ≤ 3.7c; status-line colour depth; multiple attached clients with different outer
 terminals are not addressed). Intel Macs, macOS 13, and other terminals stay unclaimed.
 
+### Relay observers and lifecycle hooks (operator cutover)
+
+Familiar consumes relay's registry as an observer. Relay owns lifecycle hooks,
+process admission, and the agent registry; Familiar owns presentation state.
+The steps below change harness configuration and are the **operator cutover**,
+tracked separately as `hq-539508`. Updating this checkout does not perform them.
+
+Install relay and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/main/docs/runbooks/hook-install-rollback.md),
+including the platform evidence gates. Make the relay CLI available on `PATH`
+from that installation. Generate Familiar's observer document:
+
+```sh
+familiar setup relay
+```
+
+Review stdout and merge its `subscribers` entries into relay's
+`~/.config/relay/subscribers.json`, retaining other subscribers and one top-level
+`schema: 1`. For a fresh file, save the complete document. The command only prints
+JSON. Keep the parent directory privately owned with mode 0700 and the file mode
+0600. Every installer invocation below names that file explicitly; use its
+absolute path if you keep it elsewhere. OpenCode's server plugin reads relay's
+default subscribers file at runtime: if `XDG_CONFIG_HOME` is set, use
+`$XDG_CONFIG_HOME/relay/subscribers.json` consistently and keep the same environment
+when starting OpenCode.
+
+Relay's installer plans by default. Inspect the JSON plan, then repeat the same
+arguments with `--apply --artifact <file>` to write the configuration and save a
+rollback artifact. Keep that artifact; `relay rollback --artifact <file>` restores
+the recorded preimages. The apply command recomputes the plan from the current
+configuration, so inspect a fresh plan if anything changed after review. For
+hook commands, relay records the Node executable used by its installer; use its
+`--node /absolute/stable/node` option when that executable would otherwise live
+under a version manager. Existing guard subscribers may require `--evidence`;
+follow relay's guide rather than removing them to make installation pass.
+
 ### Claude Code
 
-Generate the Claude Code settings fragment:
+Familiar's Claude Code settings fragment now carries only its status line:
 
 ```sh
 familiar setup claude-code
 ```
 
-Review stdout and merge it into `~/.claude/settings.json`. The command only
-prints JSON; it does not edit your settings file.
+Review stdout and merge it into `~/.claude/settings.json`. Then plan and apply
+relay's hooks, retiring Familiar's old hook entries:
+
+```sh
+relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
+  --target "$HOME/.claude/settings.json" --retire familiar --json
+# After reviewing the plan:
+relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
+  --target "$HOME/.claude/settings.json" --retire familiar \
+  --apply --artifact "$HOME/.config/relay/claude-code-install.json"
+```
 
 ### Codex lifecycle hooks
 
-Generate the Codex hooks fragment:
+Plan and apply relay's Codex hooks instead of generating Familiar hooks:
 
 ```sh
-familiar setup codex
+relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.json" \
+  --target "$HOME/.codex/hooks.json" --retire familiar --json
+# After reviewing the plan:
+relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.json" \
+  --target "$HOME/.codex/hooks.json" --retire familiar \
+  --apply --artifact "$HOME/.config/relay/codex-install.json"
 ```
 
-Review stdout and merge it into `~/.codex/hooks.json`. The command only prints
-JSON; it does not edit that file. Codex asks for a one-time trust confirmation
-before it runs hooks.
-
-This configures lifecycle hooks only. Codex draws its own pet, so it has no
-status line entry — see Codex pets below for the art.
-
-Earlier versions shipped a review-only hooks fixture carrying a literal path
-placeholder. It is gone: the generated document embeds the real path of the
-`bin/familiar` you linked, shell-quoted for the `/bin/zsh -c` boundary Codex runs
-hook commands through.
+The hook targets must already contain valid configuration; for a fresh target,
+create its parent directory and an empty JSON object before planning. Codex asks
+for a one-time trust confirmation before it runs hooks. Codex draws its own pet,
+so it has no status line entry — see Codex pets below for the art.
 
 ## Project identity and Git worktrees
 
@@ -174,25 +216,33 @@ Restart an existing Codex session after syncing.
 
 ### OpenCode
 
-Install the OpenCode integration:
+Relay installs the server plugin; Familiar installs the sprite renderer. This is
+also part of the operator cutover above. Plan the relay change, review it, and
+apply it before installing the sprite:
 
 ```sh
+relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
+  --config-dir "$HOME/.config/opencode" --json
+# After reviewing the plan:
+relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
+  --config-dir "$HOME/.config/opencode" \
+  --apply --artifact "$HOME/.config/relay/opencode-install.json"
 familiar install opencode
 ```
 
-It preserves existing plugin entries. Restart OpenCode after installation; if
-the integration fails, inspect `~/.local/state/familiar/opencode-plugin.log`.
+Create the OpenCode config directory first if it is absent. Relay preserves
+JSONC comments and existing server plugin entries. Familiar registers only the
+sprite renderer in `tui.json` and removes its old server plugin from
+`opencode.json` when its ownership is verifiable; it preserves unrelated entries.
 
-It writes `tui.json` and `opencode.json` only. If you keep a `tui.jsonc` or
-`opencode.jsonc` instead, that file is left for you: the command prints the plugin
-path to add by hand, rather than rewriting a commented file as plain JSON or
-creating a `.json` sibling that shadows it.
+If you keep `tui.jsonc`, Familiar prints the renderer entry to add by hand and
+exits nonzero until that manual work is done. An old Familiar server plugin in
+`opencode.jsonc`, or one whose ownership cannot be verified, also needs manual
+removal. If both `.json` and `.jsonc` versions exist, resolve the ambiguity first.
+A malformed configuration prevents any Familiar writes.
 
-The two configs are handled independently — `tui.json` registers the sprite
-renderer, `opencode.json` registers the server plugin — so a `.jsonc` on one still
-lets the other be written. The command exits nonzero whenever anything is left for
-you, because the install is incomplete until you add that entry. A config it cannot
-parse is the different case: nothing is written at all.
+Restart OpenCode after installation. For server-side errors, inspect relay's
+`~/.local/state/relay/opencode-plugin.log` (or the log under `RELAY_STATE_DIR`).
 
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
 provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
@@ -207,7 +257,11 @@ label stands until those two cells are re-run. See
 
 ### Reap abandoned sessions
 
-An agent that exits without `SessionEnd` can leave state behind. First run
+An agent that exits without `SessionEnd` can leave state behind. `familiar reap`
+prunes relay's dead records and reconciles Familiar's presentation files even
+when nothing is pruned. Timer recovery updates files and never emits terminal
+bytes; a later live observer event handles terminal delivery. Keep the reap job
+when cutting over hooks to relay. First run
 `command -v node` and record its absolute output. To reap abandoned sessions
 every minute, replace both absolute paths below—the Node executable and this
 checkout's `bin/familiar`—then save the file as
@@ -306,7 +360,10 @@ The adapter reads Noctalia's dark/light setting and writes Familiar's scheme fil
 
 ### Reap abandoned sessions with systemd
 
-Run `familiar reap` periodically with a user systemd timer. Replace only the
+Run `familiar reap` periodically with a user systemd timer, including after the
+relay cutover. It prunes relay's dead records and reconciles presentation files
+even when nothing is pruned. Recovery updates files and never emits terminal
+bytes. Replace only the
 binary path in this service file:
 
 ```ini
