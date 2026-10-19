@@ -1,6 +1,6 @@
 # Familiar as a relay consumer
 
-Draft for review, 2026-10-19, round 4.
+Accepted 2026-10-19 after four review rounds (codex gpt-6.1-sol, round 4: no findings), and accepted for planning by the user.
 - **Round 1** (codex gpt-6.1-sol) asked for revision on five findings:
   - cleanup evidence after another observer's removal;
   - stale enrichment;
@@ -254,8 +254,8 @@ Two things carry over:
 
 Rejected: adopting relay's key. That re-hashes every remote-less worktree away from its
 checkout, which is the regression worktree pin inheritance fixed. Whether relay's
-`projectKey` should anchor to the main worktree is relay's question, filed as a relay
-idea. Until then the two keys may differ, and nothing compares them.
+`projectKey` should anchor to the main worktree is relay's question, filed as the relay
+idea `relay-abea92`. Until then the two keys may differ, and nothing compares them.
 
 ### 6. Emission runs for events only
 
@@ -388,7 +388,7 @@ The other emission rules:
 The rule from `0a9e0d7` is state reduction, which the parent design's ownership table
 gives to relay, and every registry consumer wants it, not only the cat. A
 `needs-input` for an agent waiting on its own shell is wrong for a notification too. So:
-- **Relay.** File a relay task: carry `background_tasks` from Claude Code's `Stop` (and
+- **Relay.** `relay-fe38b1` (filed 2026-10-19): carry `background_tasks` from Claude Code's `Stop` (and
   `SubagentStop`) as an optional additive `Agent.backgroundTasks`, carried forward
   across events. Reduce `needs-input` to `idle` while it is above zero, and release it
   as `v0.1.1`. Additive optional fields keep schema 2 (parent design §4).
@@ -456,7 +456,7 @@ than vanishing.
 - The Mac rollout, which waits on `relay-848c0f`.
 - Visual grouping of Codex workers, and moving renderer keys to relay ids.
 - OpenCode observer failures are invisible: relay's plugin discards stderr, and observer
-  exits never change its hook's exit. Filed as relay feedback, not worked around here.
+  exits never change its hook's exit. Filed as relay feedback `relay-dab29a`, not worked around here.
 
 ## Verification
 
