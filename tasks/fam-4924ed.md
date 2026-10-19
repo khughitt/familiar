@@ -1,15 +1,17 @@
 ---
 id: fam-4924ed
 title: "Readers: status line and niri"
-status: doing
+status: done
 priority: 1
 size: s
 complexity: mid
 process: direct
 owner: feat/relay-identity
 created: 2026-10-19T10:01:22Z
-updated: 2026-10-19T11:57:52Z
+updated: 2026-10-19T11:57:53Z
 started: 2026-10-19T11:46:30Z
+completed: 2026-10-19T11:57:53Z
+closed: 2026-10-19T11:57:53Z
 depends: [fam-a6a612]
 parent: fam-6e8321
 tags: []
@@ -23,3 +25,7 @@ step: "Task 7: Readers: status line and niri"
 - 2026-10-19T11:46:30Z (feat/relay-identity): started
   provenance: {"harness_session":"codex:01a153d3-c796-77c0-bb9a-999fc4584c45","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-19T11:57:52Z (feat/relay-identity): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-19T11:57:53Z (feat/relay-identity): done
+  provenance: {"harness_session":"codex:01a153d3-c796-77c0-bb9a-999fc4584c45","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T11:57:53Z (feat/relay-identity): Migrated statusline and niri to sessions with terminal ownership and fault-safe output; 1224 tests passed, review approved.
+  provenance: {"harness_session":"codex:01a153d3-c796-77c0-bb9a-999fc4584c45","harness_session_source":"CODEX_THREAD_ID"}
