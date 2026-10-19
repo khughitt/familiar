@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
@@ -46,4 +46,16 @@ test('a candidate whose lock is busy is skipped this pass, not removed', async (
 
 test('a missing transmit dir is nothing to prune', async () => {
   assert.deepEqual(await pruneLedgers({ transmitDir: '/nonexistent/transmit', agents: {}, ownerAlive: () => false, startTimeOf: () => 1 }), { removed: [], skipped: [] });
+});
+
+test('the json sweep ignores the terminals subdirectory and directories named json', async () => {
+  const { transmitDir, write } = await setup();
+  const dead = await write('dead', { pid: 3, starttime: 3 });
+  mkdirSync(join(transmitDir, 'terminals'));
+  mkdirSync(join(transmitDir, 'directory.json'));
+  const result = await pruneLedgers({ transmitDir, agents: {}, ownerAlive: () => false, startTimeOf: () => 1 });
+  assert.deepEqual(result, { removed: [ledgerName('dead')], skipped: [] });
+  assert.equal(existsSync(dead), false);
+  assert.ok(existsSync(join(transmitDir, 'terminals')));
+  assert.ok(existsSync(join(transmitDir, 'directory.json')));
 });

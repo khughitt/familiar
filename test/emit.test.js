@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { renderTransition, emit, settle } from '../src/render/term/emit.js';
 import { memoryLedger, stamp, EMPTY_ENTRY } from '../src/render/term/ledger.js';
 import { GRAPHICS_CAPABILITY } from '../src/render/term/capability.js';
+import { oscReset } from '../src/render/term/osc.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { imageIdFor } from '../src/render/term/placeholder.js';
 import { encodeRgba } from 'familiar-theme';
@@ -1312,5 +1313,39 @@ test('a suppressed event (tty or open gate) preserves held and advances seq', as
     assert.equal(bytes.length, 0);
     assert.deepEqual(ledger.entry.held, directHeld('idle'));
     assert.equal(ledger.entry.seq, 2);
+  }
+});
+
+test('absent intent withdraws visuals without ending the session', async () => {
+  for (const alive of [true, false]) {
+    const ledger = memoryLedger(stamp({ held: directHeld(), presented: 'working' }, { seq: 1, owner: OWNER }));
+    const { result, bytes, opens } = await captureEmission({ intent: null, ...section({ seq: 2, ledger, ownerAlive: () => alive }) });
+    assert.deepEqual(result, { kind: 'withdrawn' });
+    assert.deepEqual(ledger.entry, { seq: 2, ...OWNER, held: null, presented: null, ended: false });
+    assert.equal(bytes.toString(), alive ? oscReset() : '');
+    assert.equal(opens.length, alive ? 1 : 0);
+  }
+});
+
+test('a later event after withdrawal creates normally', async () => {
+  const ledger = memoryLedger(stamp({ held: directHeld(), presented: 'working' }, { seq: 1, owner: OWNER }));
+  await captureEmission({ intent: null, ...section({ seq: 2, ledger }) });
+  const { result, bytes } = await captureEmission({ ...section({ seq: 3, ledger }) });
+  assert.equal(result.lifecycle, 'create');
+  assert.match(bytes.toString(), /a=T,U=1/);
+  assert.equal(ledger.entry.presented, 'working');
+  assert.equal(ledger.entry.ended, false);
+});
+
+test('teardown reports a reset it could not write', async () => {
+  for (const [reason, overrides] of [
+    ['open', { open: () => { throw new Error('unavailable'); } }],
+    ['not-a-tty', { checkTty: () => false }],
+  ]) {
+    const ledger = memoryLedger(stamp({ held: directHeld(), presented: 'working' }, { seq: 1, owner: OWNER }));
+    const { result, bytes } = await captureEmission({ prev: agentAt('working'), next: null, ...section({ seq: 2, ledger }), ...overrides });
+    assert.deepEqual(result, { kind: 'suppressed', reason });
+    assert.equal(bytes.length, 0);
+    assert.deepEqual(ledger.entry, { seq: 2, ...OWNER, held: null, presented: null, ended: true });
   }
 });

@@ -180,8 +180,14 @@ export async function emit({
     if (next === null) {
       await ledger.write(stampWith({ held: null, presented: null, ended: true }));
       if (!alive) return { kind: 'suppressed', reason: 'owner-dead' };
-      writeTerminal(Buffer.from(oscReset()));
-      return { kind: 'ended' };
+      const result = writeTerminal(Buffer.from(oscReset()));
+      return result.written ? { kind: 'ended' } : { kind: 'suppressed', reason: result.reason };
+    }
+
+    if (intent === null) {
+      await ledger.write(stampWith({ held: null, presented: null }));
+      if (alive) writeTerminal(Buffer.from(oscReset()));
+      return { kind: 'withdrawn' };
     }
 
     const held = provisional ? null : inherit(entry, owner);
