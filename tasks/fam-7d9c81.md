@@ -7,8 +7,8 @@ size: s
 complexity: low
 process: direct
 created: 2026-10-19T11:55:16Z
-updated: 2026-10-19T11:55:16Z
-depends: []
+updated: 2026-10-19T20:49:11Z
+depends: [fam-6e8321]
 tags: []
 source: ops-630a87 boundary-proposal-r3.md A1
 agent: claude-code/claude-opus-5-5
