@@ -308,7 +308,7 @@ pending older capture then fails its acknowledgement match and leaves nothing be
 transmission locks and ledgers are keyed by session id. So when A's reset was captured
 before `/clear` and runs after B has painted, nothing in B's ledger stops it. A new
 per-terminal record closes that gap.
-- **The record:** `transmit/terminal-<pid>-<starttime>.json`, holding the terminal's
+- **The record:** `transmit/terminals/<pid>-<starttime>.json` (a subdirectory, so the ledger prune's `*.json` sweep never reads one as a session ledger), holding the terminal's
   current owner `{ sessionId, seq }`, under its own lock beside it.
 - **Every write to a terminal runs under it:** `emit` and the status line's `settle`
   take the terminal lock first, then the session's transmission lock, always in that
