@@ -6,7 +6,7 @@ priority: 2
 size: m
 complexity: mid
 created: 2026-08-30T16:30:28Z
-updated: 2026-09-12T16:42:29Z
+updated: 2026-10-19T20:49:10Z
 depends: []
 tags: [migration, macos]
 spec: docs/specs/2026-08-22-macos-support-design.md
@@ -23,3 +23,4 @@ Uncertainty: The code fixes are merged and CI-backed, but neither has been exerc
 ## Notes
 
 - 2026-09-12T16:42:29Z (main): Complexity mid: read the macOS support design, terminal-smoke evidence, handoff and amendments; both OpenCode fixes are ancestors of HEAD and present in the renderer/binding. Acceptance is explicit, but restoring the disposable byte tee and interpreting live pose/approval evidence still require bounded judgment. Physical Mac access is an execution prerequisite, not a reason for high.
+- 2026-10-19T20:49:10Z (main): The macOS gate scripts read agents.json, which the relay consumer (fam-6e8321) retires; if this re-run follows that merge, fam-e8f89d ports them first.
