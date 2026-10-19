@@ -861,6 +861,18 @@ test('a Stop with only shells, monitors or scheduled wakeups in flight is done',
   }
 });
 
+test('an agent and a shell: working, then done when only the shell is left, then idle', async () => {
+  const { paths, deps } = harness();
+  const agent = { id: 'a1', type: 'subagent', status: 'running' };
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.equal((await applyHookEvent({ event: 'Stop', stdin: bgStdin([agent, RUNNING]), deps })).next.state, 'working');
+  await applyHookEvent({ event: 'PreToolUse', stdin, deps });
+  assert.equal((await applyHookEvent({ event: 'Stop', stdin: bgStdin([RUNNING]), deps })).next.state, 'done');
+  await applyHookEvent({ event: 'Notification:idle_prompt', stdin, deps });
+
+  assert.equal((await readJson(paths.agentsPath)).s1.state, 'idle');
+});
+
 test('idle_prompt after an agent-only Stop is still needs-input', async () => {
   const { paths, deps } = harness();
   await applyHookEvent({ event: 'Stop', stdin: bgStdin([{ id: 'a1', type: 'subagent', status: 'running' }]), deps });

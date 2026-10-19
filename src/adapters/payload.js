@@ -32,7 +32,10 @@ export function parsePayload(stdin) {
 // The work splits by what it means for the turn. An AGENT-type task wakes the session when it
 // finishes, so a turn that ends with one in flight has handed its work off rather than finished
 // it; these are the types claude-code's own idle notice waits on (local_agent, local_workflow,
-// in_process_teammate, remote_agent), under the labels the payload gives them. Everything else
+// in_process_teammate, remote_agent), under the labels the payload gives them. Its check also
+// skips an idle teammate, a long-running cloud session and a paused task, but the payload carries
+// none of those flags (only id, type, status and description), so such a task holds the Stop at
+// `working` here while claude-code's idle notice still fires. Everything else
 // (a shell, a monitor, an MCP task, claude-code's own housekeeping) may run indefinitely -- a dev
 // server, a Monitor -- and must not hold the turn open. Scheduled wakeups arrive separately, in
 // `session_crons`, and are not counted: a cron may be a day away, or recur forever.
