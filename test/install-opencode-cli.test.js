@@ -162,3 +162,37 @@ for (const kind of ['this checkout', 'renamed checkout', 'relay', 'gone', 'no le
     }
   });
 }
+
+for (const kind of ['empty', 'relay', 'familiar', 'unknown', 'malformed']) {
+  test(`familiar install opencode preserves server JSONC and reports only required edits: ${kind}`, (t) => {
+    const dir = mkdir();
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const checkout = join(dir, 'pets-x');
+    const entry = join(checkout, 'integrations/opencode/plugin.js');
+    if (kind === 'relay' || kind === 'familiar') {
+      mkdirSync(checkout);
+      writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: kind }));
+    }
+    const config = join(dir, 'opencode.jsonc');
+    const original = kind === 'malformed' ? '{ "plugin": ['
+      : `{ // retain this comment\n "plugin": ${JSON.stringify(kind === 'empty' ? [] : [entry])},\n}\n`;
+    writeFileSync(config, original);
+    const result = run([FAMILIAR_BIN, 'install', 'opencode', '--config-dir', dir], dir);
+    assert.equal(result.status, ['empty', 'relay'].includes(kind) ? 0 : 1, result.stderr);
+    assert.equal(readFileSync(config, 'utf8'), original);
+    assert.equal(readdirSync(dir).includes('opencode.json'), false);
+    assert.equal(readdirSync(dir).includes('tui.json'), kind !== 'malformed');
+    if (kind === 'malformed') assert.match(result.stderr, /opencode\.jsonc: unparseable JSONC/);
+    else if (kind === 'unknown') assert.ok(result.stdout.includes(`kept ${entry}: cannot tell whether it is familiar's`));
+    else if (kind === 'familiar') {
+      assert.ok(result.stdout.includes(entry));
+      assert.match(result.stdout, /by hand/);
+      writeFileSync(config, '{ // user retired the entry\n "plugin": []\n}');
+      const retry = run([FAMILIAR_BIN, 'install', 'opencode', '--config-dir', dir], dir);
+      assert.equal(retry.status, 0, retry.stderr);
+    } else {
+      assert.equal(result.stderr, '');
+      assert.doesNotMatch(result.stdout, /left for you:/);
+    }
+  });
+}

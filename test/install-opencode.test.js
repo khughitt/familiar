@@ -108,7 +108,7 @@ test('installOpencode: missing files (read -> null) are created fresh', () => {
   assert.equal(writes['/cfg/opencode.json'], undefined);
 });
 
-test('installOpencode: an existing .jsonc config is refused, not shadowed by a new .json', () => {
+test('installOpencode: an empty server .jsonc is preserved without a manual handoff', () => {
   const files = { '/cfg/opencode.jsonc': '{\n  // mine\n  "plugin": []\n}' };
   const writes = {};
   const result = installOpencode({
@@ -119,8 +119,9 @@ test('installOpencode: an existing .jsonc config is refused, not shadowed by a n
   });
   // The original guard still holds: no opencode.json is created beside the .jsonc.
   assert.equal(writes['/cfg/opencode.json'], undefined);
-  assert.equal(result.manual.length, 1);
-  assert.match(result.manual[0], /\/cfg\/opencode\.jsonc: retire familiar.*by hand/);
+  assert.deepEqual(result.manual, []);
+  assert.deepEqual(result.written, ['/cfg/tui.json']);
+  assert.equal(writes['/cfg/opencode.jsonc'], undefined);
 });
 
 test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
@@ -187,4 +188,44 @@ test('legacyServerPlugin checks the checkout package and never guesses from its 
   for (const other of [null, 4, 'integrations/opencode/plugin.js', '/repo/other.js']) {
     assert.equal(legacyServerPlugin(other, { readFile: () => assert.fail('must not read unrelated entries') }), 'other');
   }
+});
+
+for (const owner of ['familiar', 'relay', 'unknown']) {
+  test(`installOpencode: server JSONC only needs manual retirement for familiar or unknown entries (${owner})`, () => {
+    const entry = '/pets-x/integrations/opencode/plugin.js';
+    const original = `{ // preserve comments\n "plugin": [${JSON.stringify(entry)},],\n}\n`;
+    const files = { '/cfg/opencode.jsonc': original,
+      '/pets-x/package.json': owner === 'unknown' ? null : JSON.stringify({ name: owner }) };
+    const writes = {};
+    const result = installOpencode({ configDir: '/cfg', tuiPluginPath: '/abs/sprite.tsx',
+      read: (path) => files[path] ?? null, writeAtomic: (path, text) => { writes[path] = text; },
+    });
+    assert.deepEqual(result.written, ['/cfg/tui.json']);
+    assert.equal(writes['/cfg/opencode.jsonc'], undefined);
+    assert.equal(writes['/cfg/opencode.json'], undefined);
+    assert.deepEqual(result.messages, []);
+    assert.equal(result.manual.length, owner === 'relay' ? 0 : 1);
+    if (owner !== 'relay') assert.ok(result.manual[0].includes(entry));
+  });
+}
+
+test('installOpencode: malformed server JSONC aborts before writing the TUI', () => {
+  for (const text of ['{ "plugin": [', '{ "plugin": "bad" }', ' ', 'null']) {
+    const writes = {};
+    assert.throws(() => installOpencode({ configDir: '/cfg', tuiPluginPath: '/abs/sprite.tsx',
+      read: (path) => path === '/cfg/opencode.jsonc' ? text : null,
+      writeAtomic: (path, content) => { writes[path] = content; },
+    }), /\/cfg\/opencode\.jsonc:/);
+    assert.deepEqual(writes, {});
+  }
+});
+
+test('installOpencode: server JSON and JSONC together remain ambiguous', () => {
+  const writes = {};
+  const result = installOpencode({ configDir: '/cfg', tuiPluginPath: '/abs/sprite.tsx',
+    read: (path) => path.startsWith('/cfg/opencode.') ? '{}' : null,
+    writeAtomic: (path, text) => { writes[path] = text; },
+  });
+  assert.deepEqual(result.written, ['/cfg/tui.json']);
+  assert.match(result.manual[0], /opencode\.json and .*opencode\.jsonc both exist/);
 });

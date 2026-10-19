@@ -59,7 +59,7 @@ function readText(path, read) {
   return text;
 }
 
-// JSONC configurations need a manual edit to preserve their comments.
+// JSONC can be inspected, but changes need a manual edit to preserve comments.
 function resolveTarget(configDir, base, pluginPath, read) {
   const jsonPath = join(configDir, `${base}.json`);
   const jsoncPath = join(configDir, `${base}.jsonc`);
@@ -72,8 +72,9 @@ function resolveTarget(configDir, base, pluginPath, read) {
       + 'guess which. Keep one and re-run.' };
   }
   if (jsoncText !== null) {
+    if (pluginPath === null) return { path: jsoncPath, text: jsoncText, readOnly: true };
     return { manual:
-      `${jsoncPath}: ${pluginPath ? `add ${JSON.stringify(pluginPath)} to its "plugin" array by hand` : "retire familiar's legacy server plugin by hand"}. Merging it `
+      `${jsoncPath}: add ${JSON.stringify(pluginPath)} to its "plugin" array by hand. Merging it `
       + 'here would rewrite the file as plain JSON and drop its comments.' };
   }
   return { path: jsonPath, text: jsonText };
@@ -97,6 +98,10 @@ export function installOpencode({ configDir, tuiPluginPath, read, writeAtomic })
       const owner = legacyServerPlugin(entry, { readFile: read });
       if (owner === 'unknown') manual.push(`kept ${entry}: cannot tell whether it is familiar's (no package.json beside it); remove it by hand if so`);
       if (owner !== 'familiar') return true;
+      if (server.readOnly) {
+        manual.push(`${server.path}: remove familiar's legacy OpenCode server plugin ${entry} by hand; rewriting it here would drop its comments.`);
+        return true;
+      }
       messages.push(`removed familiar's legacy OpenCode server plugin ${entry} from ${server.path}`);
       return false;
     });
