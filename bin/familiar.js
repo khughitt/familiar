@@ -1,3 +1,6 @@
+import { loadContext as context, makePrepareSprites, reportEvictions } from '../src/observe/context.js';
+import { emitTransition } from '../src/observe/emission.js';
+export { makePrepareSprites } from '../src/observe/context.js';
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -21,13 +24,13 @@ import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
 import { applyHookEvent, reap } from '../src/bus/transaction.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
-import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
+import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
-import { emit, settle } from '../src/render/term/emit.js';
+import { settle } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
 import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js';
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
@@ -41,7 +44,6 @@ import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capa
 import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
 import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
-import { preflightKittyPrograms } from '../src/render/term/kitty-animation.js';
 import {
   loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
   assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
@@ -511,131 +513,6 @@ function runWrapped(command, input) {
   return result.stdout;
 }
 
-// Everything the resolver needs, assembled once. This is the composition root:
-// the only place that knows where files live.
-async function context({ paths = resolvePaths(), config } = {}) {
-  const [{ themeId, motionPolicy }, tone] = await Promise.all([
-    config ?? loadConfig({ paths }),
-    loadTone({ paths }),
-  ]);
-  const pack = await loadThemePack(themeDirFor(paths, themeId));
-  const catalog = await loadIdentities(paths.identitiesPath);
-  return { paths, themeId, motionPolicy, tone, pack, catalog };
-}
-
-// Resolve every live record's identity ONCE — one per project in practice, and a
-// cache hit on every event after the first. Nothing is BAKED any more: the sprite
-// baker is gone, the terminal ships the master's bytes to kitty verbatim. Animation
-// manifests and their program budgets are admitted at this same member boundary
-// before anything reaches the bus.
-//
-// The identity map is RETURNED, not thrown away: resolveAll needs exactly the
-// same map, and recomputing it there would mean a second full pin-match +
-// realpathSync sweep over every record, on every tool call, for nothing.
-//
-// BOTH passes fault per RECORD, never per BUS. Everything here can fail — an
-// unpopulated slot, a pin contradicting its member, a deleted sprite PNG — and
-// any of it can start failing for a record that was fine a moment ago, because
-// all of it is read from files the user edits. A failure that escaped this
-// function would be a failure of the whole transaction, for every session on the
-// machine, including the ones whose config nobody touched.
-//
-// So faults are collected, not thrown, and handed to the transaction — which is
-// the only layer that knows whether a faulted record is the incoming one (abort)
-// or a pre-existing one (evict). See commit() in src/bus/transaction.js.
-export function makePrepareSprites(ctx, {
-  loadAnimationMember: loadMember = loadAnimationMember,
-  preflightKittyPrograms: preflight = preflightKittyPrograms,
-  readFrame = readFileSync,
-} = {}) {
-  return async (agents) => {
-    const { identities, faults } = resolveIdentities({ agents, catalog: ctx.catalog, pack: ctx.pack });
-
-    // Keyed by MEMBER, because that is what an asset or animation failure is
-    // about: a deleted PNG or malformed manifest belongs to a member, and faults
-    // exactly the sessions resolving to that member — not its bus neighbours.
-    //
-    // Nothing is generated here any more: the assets are committed, and this
-    // pass RESOLVES and VALIDATES them. The recolouring died with the indexed
-    // codec; the per-member fault isolation did not, and it is the reason a
-    // missing sprite cannot write a dangling path onto a surface with no error
-    // channel.
-    const cache = new Map();
-    const memberFaults = new Map();
-    for (const { member } of identities.values()) {
-      if (cache.has(member) || memberFaults.has(member)) continue;
-      try {
-        const assets = assetsFor(ctx.pack, member, ctx.tone.mode);
-        const { ref: animationRef, set: animationSet } = await loadMember(ctx.pack, member);
-        const animationPreflight = animationSet.kind === 'clips'
-          ? preflight(animationSet, {
-            memberId: member,
-            roots: Object.fromEntries(
-              STATES.map((state) => [state, assets[state].terminal]),
-            ),
-            readFrame,
-          })
-          : null;
-        cache.set(member, {
-          assets,
-          animationRef,
-          animationSet,
-          preflight: animationPreflight,
-        });
-      } catch (error) {
-        memberFaults.set(member, error.message);
-      }
-    }
-
-    for (const [sessionId, identity] of [...identities]) {
-      if (!memberFaults.has(identity.member)) continue;
-      faults.set(sessionId, memberFaults.get(identity.member));
-      identities.delete(sessionId);
-    }
-
-    // Named, not `cache.get(id)[state]`. If the identity pass and the asset pass
-    // ever disagree, the bare version says "Cannot read properties of undefined"
-    // and names neither the member nor the state — an anonymous failure in the
-    // one place that has both facts to hand. Every surviving identity now has
-    // resolved assets by construction, so reaching either throw is a bug here,
-    // not a user's config.
-    const spriteFor = (memberId, state) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) {
-        throw new Error(`no assets for member "${memberId}" (needed for state "${state}")`);
-      }
-      const { assets } = admitted;
-      const sprite = assets[state];
-      if (!sprite) throw new Error(`member "${memberId}" has no asset for state "${state}"`);
-      return sprite;
-    };
-
-    const animationFor = (memberId) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) throw new Error(`no animation for member "${memberId}"`);
-      return admitted.animationRef;
-    };
-
-    const animationSetFor = (memberId) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) throw new Error(`no animation set for member "${memberId}"`);
-      return admitted.animationSet;
-    };
-
-    return { identities, spriteFor, animationFor, animationSetFor, faults };
-  };
-}
-
-// An eviction is not an error — the transaction succeeded, for everyone who could
-// be resolved. It is a report: this session's record left the bus, and here is the
-// misconfiguration that put it out. One line each, on stderr, exactly like the
-// boundary below.
-function reportEvictions(evicted) {
-  for (const { sessionId, reason } of evicted) {
-    process.stderr.write(`familiar: evicted session ${sessionId} from the bus — ${reason}\n`);
-  }
-}
-
 export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, next }) {
   const payload = JSON.parse(stdin);
   appendFileSync(path, `${JSON.stringify({
@@ -649,45 +526,6 @@ export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, ne
     prev_state: prev?.state ?? null,
     next_state: next?.state ?? null,
   })}\n`);
-}
-
-// Probe before taking the transmission lock: tmux and Darwin process queries spawn.
-// Await the whole emission section so its failures reach the hook's error boundary.
-export async function emitHookTransition({
-  prev, next, intent, seq, transmitSprite, provisional = false,
-  paths,
-  processOps = defaultProcessOps,
-  platform = process.platform,
-  hookEnv = process.env,
-  probe = tmuxFacts,
-  lockWith = withLock,
-}) {
-  const record = next ?? prev;
-  if (record === null) return { kind: 'noop' };
-  const terminal = terminalTarget(record.pid, {
-    platform,
-    record: processOps.recordOf(record.pid),
-    hookEnv,
-    probe,
-  });
-  const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
-  const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
-  const lock = (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf }));
-  return emit({
-    prev,
-    next,
-    seq,
-    transmitSprite,
-    provisional,
-    terminal,
-    ledger: fileLedger(entryPath),
-    lock,
-    ownerAlive,
-    // The emitter takes the Intent, not its record. SessionEnd needs only identity.
-    intent: next !== null
-      ? intent[next.sessionId].current
-      : { identity: { project: prev.project }, pid: prev.pid, sessionId: prev.sessionId },
-  });
 }
 
 // The status line's half of a provisional SessionStart transmission (see settle() in
@@ -942,14 +780,14 @@ async function main({ command, args: rest, color, mode }) {
       });
     }
 
-    await emitHookTransition({
-      prev, next, intent, seq,
-      transmitSprite: adapter.printsPlaceholderCells,
+    await emitTransition({
+      prev, next, intent: next ? intent[next.sessionId].current : null, seq,
+      harness: name,
       // SessionStart fires before the agent's UI is up: a fullscreen TUI may not yet be on the
       // screen it will draw the placeholder cells on (see emit()'s `provisional`).
       provisional: positionals[0] === 'SessionStart',
       paths: ctx.paths,
-      processOps: defaultProcessOps,
+      renderProcess: defaultProcessOps,
     });
 
     // Prune after the transaction releases the bus lock: fresh Darwin liveness spawns.

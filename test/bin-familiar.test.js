@@ -1,3 +1,4 @@
+import { emitTransition } from '../src/observe/emission.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -26,7 +27,7 @@ import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import {
-  appendHookTrace, emitHookTransition, makePrepareSprites, settleStatusline, reportCommandError,
+  appendHookTrace, makePrepareSprites, settleStatusline, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar.js';
 
@@ -201,14 +202,14 @@ test('a hook invocation that throws internally still exits 0 and prints exactly 
 
 test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', async () => {
   let targetError;
-  await assert.rejects(emitHookTransition({
+  await assert.rejects(emitTransition({
     prev: null,
     next: { sessionId: 's1', projectColor: null, pid: 42 },
     seq: 1,
     paths: paths(env()),
-    intent: { s1: { current: {} } },
-    transmitSprite: true,
-    processOps: {
+    intent: {},
+    harness: 'claude-code',
+    renderProcess: {
       recordOf: () => ({ pid: 42, tty: null }),
       ownerAlive: () => true,
       startTimeOf: () => 1,
@@ -234,7 +235,7 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
 
 // The owner-dead gate keeps every terminal unopened while the real emission
 // section writes ordering evidence, including SessionEnd's tombstone.
-test('emitHookTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
+test('emitTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
   const p = paths(env());
   const sessionId = 'ledger/../session';
   const agent = { sessionId, state: 'working', pid: process.pid, starttime: 1, project: 'api' };
@@ -247,9 +248,9 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
     sessionId, pid: process.pid, identity: { project: 'api' }, state: 'working', motionPolicy: 'full',
     animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
   } } };
-  const first = await emitHookTransition({
-    prev: null, next: agent, intent, seq: 1, transmitSprite: true,
-    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  const first = await emitTransition({
+    prev: null, next: agent, intent: intent[sessionId].current, seq: 1, harness: 'claude-code',
+    paths: p, renderProcess: processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
   assert.equal(first.kind, 'suppressed');
   assert.equal(first.reason, 'owner-dead');
@@ -259,9 +260,9 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
   const entry = JSON.parse(readFileSync(entryPath, 'utf8'));
   assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, presented: null, ended: false });
 
-  const end = await emitHookTransition({
-    prev: agent, next: null, intent, seq: 2, transmitSprite: true,
-    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  const end = await emitTransition({
+    prev: agent, next: null, intent: null, seq: 2, harness: 'claude-code',
+    paths: p, renderProcess: processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
   assert.equal(end.kind, 'suppressed');
   assert.equal(end.reason, 'owner-dead');
@@ -271,7 +272,7 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
 
 // A provisional (SessionStart) section publishes no held evidence even where the previous
 // entry had some, so the first event after the agent's UI is up creates the image again.
-test('emitHookTransition passes provisional through: the ledger keeps no held evidence', async () => {
+test('emitTransition passes provisional through: the ledger keeps no held evidence', async () => {
   const p = paths(env());
   const sessionId = 's-provisional';
   const agent = { sessionId, state: 'idle', pid: process.pid, starttime: 1, project: 'api' };
@@ -285,10 +286,10 @@ test('emitHookTransition passes provisional through: the ledger keeps no held ev
     sessionId, pid: process.pid, identity: { project: 'api' }, state: 'idle', motionPolicy: 'full',
     animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
   } } };
-  const result = await emitHookTransition({
-    prev: agent, next: agent, intent, seq: 2, transmitSprite: true, provisional: true,
+  const result = await emitTransition({
+    prev: agent, next: agent, intent: intent[sessionId].current, seq: 2, harness: 'claude-code', provisional: true,
     paths: p,
-    processOps: { recordOf: () => ({ pid: process.pid, tty: 'ttys999' }), ownerAlive: () => false, startTimeOf: () => 1 },
+    renderProcess: { recordOf: () => ({ pid: process.pid, tty: 'ttys999' }), ownerAlive: () => false, startTimeOf: () => 1 },
     platform: 'darwin', hookEnv: { TERM: 'xterm-kitty' }, probe: () => null,
   });
   assert.equal(result.kind, 'suppressed');
