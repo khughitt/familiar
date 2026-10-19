@@ -18,7 +18,9 @@ are deleted.
 `git+https://github.com/khughitt/relay.git#v0.1.0` (later `#v0.1.1`), familiar-theme
 v0.3.0.
 
-**Status:** draft for review, round 2. Round 1 (codex gpt-6.1-sol) found eight gaps, all addressed: teardown acknowledgement, the two process providers, absent relay state, OpenCode retirement by package name, the theme fixture, the race-test pause point, runner-level read ordering, and a real pty.
+**Status:** draft for review, round 3. Round 2 (codex gpt-6.1-sol) corrected the legacy manifest path and the fake harness's process name.
+
+Round 1 (codex gpt-6.1-sol) found eight gaps, all addressed: teardown acknowledgement, the two process providers, absent relay state, OpenCode retirement by package name, the theme fixture, the race-test pause point, runner-level read ordering, and a real pty.
 
 **Spec:** `docs/specs/2026-10-19-relay-consumer-design.md` (accepted 2026-10-19). Its
 parent is ops `docs/specs/2026-09-16-relay-design.md` §3 and §6, and the contract is
@@ -622,7 +624,9 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     in `src/install/opencode.js`:
     - an entry that is not an absolute path ending in `/integrations/opencode/plugin.js`
       is `'other'`;
-    - for one that is, read `<entry>/../../package.json`. `name: "familiar"` is
+    - for one that is, read `resolve(dirname(entry), '../..', 'package.json')`, which
+      for `/repo/integrations/opencode/plugin.js` is `/repo/package.json`. Note that
+      `<entry>/../..` would wrongly give `/repo/integrations/`. `name: "familiar"` is
       `'familiar'`; any other name is `'other'`. That keeps relay's own
       `…/node_modules/relay/integrations/opencode/plugin.js`, whose package is `relay`;
     - an unreadable or missing `package.json` (the checkout itself was deleted) is
@@ -654,8 +658,10 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `install-opencode*`:
     - `tui.json` only;
     - a legacy entry from **this** checkout is removed and reported;
-    - `a renamed checkout's legacy entry is retired`: a temp clone at `.../pets-x/`
-      whose `package.json` says `familiar` is removed;
+    - `a renamed checkout's legacy entry is retired`: a temp checkout root `.../pets-x/`
+      holds `package.json` (`name: "familiar"`) **at that root** and an
+      `integrations/opencode/plugin.js` beneath it. The entry
+      `.../pets-x/integrations/opencode/plugin.js` is removed;
     - relay's `node_modules/relay/integrations/opencode/plugin.js` entry is kept;
     - an entry whose checkout is gone is kept, reported and exits 1;
     - a run with no legacy entry leaves `opencode.json` byte-identical.
@@ -693,13 +699,19 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - **A real pseudo-terminal and a real harness ancestor.** `tty-familiar.mjs` only
     overrides `stdout.isTTY` and creates no controlling terminal, so it cannot prove
     admission or the `isatty` gate. Instead:
-    - Make a temp symlink named `claude` pointing at `process.execPath`. The kernel
-      names the process after the path it executed, so `comm` is `claude`.
-    - It runs a new fixture, `test/fixtures/fake-harness.mjs`, which reads payload
-      lines from a FIFO and runs `relay hook --harness claude-code --subscribers <file>
-      <event>` for each, inheriting its stdio.
+    - A new fixture, `test/fixtures/fake-harness.mjs`, run by plain `node`, sets
+      `process.title = 'claude'` as its first statement. A symlink named `claude` does
+      not work: on this host Node then reports `comm` as `node-MainThread`. The title
+      sets `/proc/self/comm` to `claude` and blanks the rest of argv, so relay's
+      nearest-Claude `argv[1]` check sees neither `daemon` nor `bg-pty-host`.
+    - It then writes `ready <pid>` on stderr. The test asserts that
+      `/proc/<pid>/comm` reads `claude` and that `/proc/<pid>/stat` shows a nonzero
+      `tty_nr` before sending any payload, so a setup failure is named as one, not
+      reported as a failed admission.
+    - It reads payload lines from a FIFO, and for each runs `relay hook --harness
+      claude-code --subscribers <file> <event>`, inheriting its stdio.
     - Launch it under util-linux `script`, the way `test/tmux-pty.slow.test.js` launches
-      its client: `script -qfc '<tmp>/claude <fixture> <fifo>' <log>`. That gives the
+      its client: `script -qfc 'node <fixture> <fifo>' <log>`. That gives the
       fake harness a real controlling pty on its fd 1, and both of relay's resolvers
       find it.
     - The terminal bytes are read from `<log>`.
