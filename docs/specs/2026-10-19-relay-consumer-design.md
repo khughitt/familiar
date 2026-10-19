@@ -1,9 +1,16 @@
 # Familiar as a relay consumer
 
-Draft for review, 2026-10-19, round 2. Round 1 (codex gpt-6.1-sol) asked for revision
-on five findings: cleanup evidence after another observer's removal, stale enrichment,
-absent intent in the emitter and status line, cwd-keyed git caching, and the recovery
-promise. Task: `fam-6e8321`. Addendum to the approved parent
+Draft for review, 2026-10-19, round 3.
+- **Round 1** (codex gpt-6.1-sol) asked for revision on five findings:
+  - cleanup evidence after another observer's removal;
+  - stale enrichment;
+  - absent intent in the emitter and status line;
+  - cwd-keyed git caching;
+  - the recovery promise.
+- **Round 2** asked for revision on three findings:
+  - an observer whose own ancestry predates its basis row;
+  - a captured reset racing a new session's paint on the same terminal;
+  - cleanup evidence retired before the cleanup ran. Task: `fam-6e8321`. Addendum to the approved parent
 design, ops `docs/specs/2026-09-16-relay-design.md` §3 and §6 (Familiar), which stays
 authoritative wherever this document is silent. Target: relay `v0.1.0` (tag object
 9362dde, commit 0f59660), whose `docs/api.md` is the contract cited below. Engine
@@ -52,8 +59,11 @@ reconciliation protocol) and runs one projection:
    - Read the snapshot once, unlocked, and take the session's row: its root row for a
      Codex worker (§7).
    - Record that row's **basis**: `{ generation, agentId, process, cwd }`, where
-     `process` is the row's whole `Handle` or null.
-   - Resolve the terminal and the git context against that basis.
+     `process` is the row's whole `Handle`.
+   - **Prove the basis is this observer's own** (§4): the envelope's generation and the
+     observer's own session process must match the row.
+   - Resolve the terminal from the observer's ancestry, and the git context on the
+     basis row's `cwd`.
 3. Under `presentation.lock` (familiar's `withLock`, in familiar's state directory):
    - take the next value of familiar's own counter (`events.seq`);
    - read the **newest** snapshot with relay's `readSnapshot()`;
@@ -171,10 +181,34 @@ find a terminal. That event's observer **admits** the session.
   today's behaviour, including the Codex `--no-daemon` hint from `6eb99ca`.
 - The session process in `Agent.process` is never painted.
 
-**Freshness.** Enrichment prepared before the lock (the terminal, and the git context
-of §5) belongs to the basis it was resolved for. Under the lock, take the row in the
-newest snapshot, which is the root row for a worker, and compare its basis with the
-prepared one:
+**Ownership proof.** The terminal comes from the observer's own ancestry, which never
+changes; the basis comes from a snapshot read, which can be newer than the observer.
+
+Concretely, A can stall before its first read. B then resumes the same session in
+another process and projects it. When A finally reads, it gets B's row, so a basis taken
+from the row alone would label A's old terminal with B's process.
+
+So before anything is resolved, the prepared basis must pass two checks:
+- **The envelope is current.** `envelope.registry.generation` equals the basis row's
+  generation. An envelope from a recreated registry is obsolete.
+- **The row's process is the observer's own.** Relay's
+  `adapterFor(harness).resolveSessionPid({ startPid: process.pid })`, through relay's
+  `createProcessOps()`, finds the observer's own session process. Its `handleOf` must
+  equal the row's `process` exactly: platform, host, boot id, pid and start.
+  - A null row process, a null resolution and an unreadable handle are all unproven,
+    and so is any mismatch.
+  - Unproven enrichment is never prepared. The event does not admit or refresh its
+    session and emits nothing. The observer exits 0 with one stderr line if the row
+    names a different process (a newer process owns it), or exits 1 if the proof could
+    not be read.
+
+The terminal is then resolved from the same ancestry walk, so the terminal and the
+proven process come from one chain. Order no longer matters: whenever A reads, a row
+written for B's process fails A's proof.
+
+**Freshness.** Proven enrichment (the terminal, and the git context of §5) belongs to
+the basis it was resolved for. Under the lock, take the row in the newest snapshot,
+which is the root row for a worker, and compare its basis with the prepared one:
 - **Equal** (same generation, agent id, whole process handle and cwd): the prepared
   enrichment is current. It replaces the record's context and terminal, and the record
   stores the new basis.
@@ -243,20 +277,58 @@ the projection's `seq`. The reasons:
 - its basis moved (§4);
 - an identity collision (§7).
 
+The exception: when a present session already owns the same terminal process (same
+`pid` and `starttime`), the dropped session's terminal is no longer its to reset, and
+no `ended` entry is made. Claude Code's `/clear` ends one session and starts another in
+one process.
+
 The drop can happen in **another** observer's projection: relay publishes A's
 `SessionEnd`, and B's observer runs first. A's own observer still finds `prev` in
-`ended`, emits the tombstone and reset, and removes the entry in the same locked
-section that captured it.
+`ended`.
 
-An `ended` entry is otherwise retained, and leaves only in three ways:
-- it is consumed by one of its own session's events;
-- a projection admits a session whose terminal is the same process (same `pid` and
-  `starttime`), so the new session owns that terminal: Claude Code's `/clear` ends one
-  session and starts another in one process;
-- `familiar reap` finds its terminal owner dead.
+**Capture does not consume; success acknowledges.** Capturing `prev` from `ended`
+leaves the entry in place. After emission, the observer takes the presentation lock
+again and removes the entry **only if it is still the one it captured**: same
+`sessionId` and same `seq`. Newer evidence for that session is never removed by an
+older acknowledgement. Three emission outcomes acknowledge:
+- the reset was written;
+- the emitter reports the owner dead;
+- the terminal lock reports the terminal superseded (below).
 
-A dead owner would be suppressed by the emitter anyway. A session that is re-admitted
-under the same id leaves `ended` too.
+An emission that throws, or an observer killed at its timeout, leaves the entry. It is
+retried by the session's next event. If that never comes, it is retired in one of two
+ways:
+- a projection admits a session that owns the same terminal process;
+- `familiar reap` finds the terminal owner dead.
+
+A session re-admitted under the same id replaces its `ended` entry with its record. A
+pending older capture then fails its acknowledgement match and leaves nothing behind.
+
+**Terminal ownership is serialized per terminal, not per session.** Today the
+transmission locks and ledgers are keyed by session id. So when A's reset was captured
+before `/clear` and runs after B has painted, nothing in B's ledger stops it. A new
+per-terminal record closes that gap.
+- **The record:** `transmit/terminal-<pid>-<starttime>.json`, holding the terminal's
+  current owner `{ sessionId, seq }`, under its own lock beside it.
+- **Every write to a terminal runs under it:** `emit` and the status line's `settle`
+  take the terminal lock first, then the session's transmission lock, always in that
+  order.
+- **Under the terminal lock**, an operation for session S at counter value n reads the
+  owner:
+  - If the owner is another session with a **higher** `seq`, the terminal is
+    superseded: no byte is written, nothing is stamped, and the outcome is
+    `{ kind: 'superseded', reason: 'terminal' }`.
+  - Otherwise S becomes the owner at n, and the operation continues into today's
+    per-session section.
+  - `settle` carries no counter value of its own. It proceeds only while S is the
+    recorded owner.
+- **Both orders of the `/clear` race are covered.**
+  - A projects before B: A's `seq` is lower, and B's paint, or the ownership it records
+    first, supersedes A's late reset.
+  - B projects before A: A's projection finds B owning the terminal, makes no `ended`
+    entry, and captures nothing to emit.
+- **Pruning:** the terminal records are pruned with the ledgers, when their process is
+  confirmed dead.
 
 The other emission rules:
 - **A stale observer never emits** (§4).
@@ -338,7 +410,8 @@ A `session-end` event runs a **drop-only projection**, which skips the theme loa
 - Every other record and intent entry is copied unchanged.
 - Then the event's own session is reset (§6).
 
-This fits the 200 ms teardown entry, and a latency test holds it there. Whatever
+This fits the 200 ms teardown entry, together with the second lock acquisition for the
+acknowledgement (§6), and a latency test holds it there. Whatever
 changed in other rows is healed by the next full projection (§1).
 
 Familiar's error policy for the status line is unchanged: cosmetic, one stderr line,
@@ -368,12 +441,27 @@ than vanishing.
   - **removal by another observer:** A's `SessionEnd` is published, B's observer
     projects it first, and A's observer still emits the tombstone and reset from
     `ended`;
-  - `ended` retention: consumed once, dropped when a new session owns the same terminal
-    process, and dropped by `reap` for a dead owner;
+  - `ended` lifecycle:
+    - a capture survives until the acknowledgement;
+    - an emission that throws, and an observer killed between capture and emission,
+      both leave the entry for the session's next event;
+    - an acknowledgement whose `seq` no longer matches removes nothing;
+    - the entry is retired when a new session owns the same terminal process, and by
+      `reap` for a dead owner;
+  - **`/clear`, both orders:**
+    - A's reset is captured, A is paused, B starts in the same process and paints, then
+      A resumes. A is superseded by the terminal record and writes nothing;
+    - B projects first: A's drop makes no `ended` entry;
   - **stale enrichment:** A prepares against one basis, then B projects a resumed
     process (and, separately, a new cwd, and a recreated generation). A's terminal and
     context are discarded and A emits nothing. The record keeps B's context, or
     leaves the projection when none matches;
+  - **stall before the first read:** A stalls before reading, B resumes the session in
+    another process and projects, then A reads B's row. A's ownership proof fails, A
+    prepares nothing and emits nothing, and B's terminal binding stands;
+  - an envelope whose generation differs from the row's is refused;
+  - a row with `process: null`, and an unreadable own handle, are unproven: the session
+    is not admitted;
   - **git per event:** a session whose directory gains a repository and an origin
     between two events changes project identity at the second;
   - no-prune reconcile;
