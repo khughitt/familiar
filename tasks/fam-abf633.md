@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: feat/relay-identity
 created: 2026-10-19T10:01:22Z
-updated: 2026-10-19T15:53:09Z
+updated: 2026-10-19T15:54:04Z
 started: 2026-10-19T15:53:09Z
 depends: [fam-842e79, relay-fe38b1]
 parent: fam-6e8321
@@ -25,3 +25,4 @@ step: "Task 10: Relay v0.1.1 and the background-work parity"
   provenance: {"harness_session":"codex:01a153d3-c796-77c0-bb9a-999fc4584c45","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-19T15:53:09Z (feat/relay-identity): started
   provenance: {"harness_session":"codex:01a153d3-c796-77c0-bb9a-999fc4584c45","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-19T15:54:04Z (feat/relay-identity): Verified public v0.1.1 tag f050d52192840e434a095e27dd89af940588d027 points to 4ceec5d2ad22b136b37ee360e7a4ed00949f28d9; relay-fe38b1 done. Release carries current familiar main Background {agents, other} rules from fam-721108, superseding old backgroundTasks wording. Task 10 will prove shell idle and agent working parity, align spec/plan, and retain new main records while resolving deleted legacy modules.
