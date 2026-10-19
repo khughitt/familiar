@@ -8,7 +8,7 @@ import { writeAtomicSync } from '../src/install/atomic.js';
 // The integration's plugin files, resolved from this binary's own location (bin/ -> ../integrations).
 const integrationDir = fileURLToPath(new URL('../integrations/opencode/', import.meta.url));
 
-const HELP = `Install Familiar's OpenCode server and TUI plugins.
+const HELP = `Install Familiar's OpenCode TUI plugin and retire its legacy server plugin.
 
 Usage:
   familiar install opencode [--project-dir DIR | --config-dir DIR]
@@ -61,10 +61,9 @@ if (args[0] === '-h' || args[0] === '--help') {
       ? join(project, '.opencode')
       : join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'opencode');
 
-  const { written, manual } = installOpencode({
+  const { written, manual, messages } = installOpencode({
     configDir,
     tuiPluginPath: join(integrationDir, 'sprite-plugin.tsx'),
-    serverPluginPath: join(integrationDir, 'plugin.js'),
     read: (p) => {
       try { return readFileSync(p, 'utf8'); }
       catch (e) { if (e.code === 'ENOENT') return null; throw e; }
@@ -75,6 +74,7 @@ if (args[0] === '-h' || args[0] === '--help') {
     },
   });
   for (const path of written) process.stdout.write(`wrote ${path}\n`);
+  for (const message of messages) process.stdout.write(`${message}\n`);
   // A hand-off is not a crash, so it goes to stdout beside the writes -- but the install IS
   // incomplete, and a caller that chained on this command must not read success. Same shape as
   // `install pets`'s tracked-config hand-off, with a nonzero status because unlike that one this
@@ -90,6 +90,6 @@ if (args[0] === '-h' || args[0] === '--help') {
 } catch (err) {
   process.stderr.write(`familiar: opencode install failed: ${err.message}\n`);
   // exitCode, NOT process.exit(1): stderr is a pipe, and exiting immediately after a write can
-  // truncate it before it drains (see integrations/opencode/hook.test.mjs:49). Let the loop drain.
+  // truncate it before it drains. Let the loop drain.
   process.exitCode = 1;
 }

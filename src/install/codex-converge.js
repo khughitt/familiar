@@ -5,14 +5,6 @@ import {
 } from './codex.js';
 import { petUsable } from './pet-stamp.js';
 
-// SessionStart ONLY, AND CODEX ONLY. claude-code and opencode need none of this:
-// Familiar draws their surfaces itself, from the bus, live. This exists solely
-// because Codex draws its own pet from a file, so the file has to be kept true.
-// PreToolUse fires on every tool call and would repeat the work for nothing.
-export function shouldConverge({ agent, event }) {
-  return agent === 'codex' && event === 'SessionStart';
-}
-
 // ONE REPOSITORY, ONE LAUNCH LATE BY CONSTRUCTION.
 // docs/specs/2026-09-05-codex-identity-parity-design.md §6.1 measured it: Codex
 // reads `[tui] pet` at TUI start and no hook runs before the first turn, so what

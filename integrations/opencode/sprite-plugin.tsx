@@ -13,7 +13,7 @@ import { loadAnimationRefSync } from "familiar-theme"
 import { planAnimation } from "../../src/animation/program.js"
 import { encodeKittyProgram } from "../../src/render/term/kitty-animation.js"
 import { writeAllSync } from "../../src/render/term/io.js"
-import { logError } from "./binding.js"
+import { logError } from "./log.js"
 import { createSpriteRuntime } from "./sprite-runtime.js"
 
 const STATE_DIR = process.env.FAMILIAR_STATE_DIR ?? join(homedir(), ".local", "state", "familiar")

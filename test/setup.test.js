@@ -1,60 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { realpathSync } from 'node:fs';
 import { shellQuote, setupDocument } from '../src/install/setup.js';
-import { HOOK_EVENTS } from '../src/adapters/codex.js';
+import { adapterFor, validateSubscribers, budgetFor, checkBudget } from 'relay';
 
-test('shellQuote preserves spaces and single quotes at an sh -c boundary', () => {
-  assert.equal(
-    shellQuote("/tmp/Familiar's Build/bin/familiar"),
-    "'/tmp/Familiar'\\''s Build/bin/familiar'",
-  );
+const bin = realpathSync(new URL('../bin/familiar', import.meta.url));
+test('shellQuote preserves spaces and single quotes', () => {
+  assert.equal(shellQuote("/tmp/Familiar's Build/bin/familiar"), "'/tmp/Familiar'\\''s Build/bin/familiar'");
 });
-
-test('Claude setup contains every lifecycle hook and the status line', () => {
-  const document = setupDocument('claude-code', "/tmp/Familiar's Build/bin/familiar");
-  assert.deepEqual(Object.keys(document.hooks), [
-    'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification',
-    'Stop', 'StopFailure', 'SessionEnd',
-  ]);
-  assert.equal(document.hooks.Notification.length, 2);
-  assert.equal(document.statusLine.refreshInterval, 2);
-  assert.equal(
-    document.statusLine.command,
-    "'/tmp/Familiar'\\''s Build/bin/familiar' statusline",
-  );
+test('Claude setup contains only the status line', () => {
+  assert.deepEqual(setupDocument('claude-code', bin), { statusLine: {
+    type: 'command', command: `${shellQuote(bin)} statusline`, refreshInterval: 2,
+  } });
 });
-
-// Codex's executor boundary is measured -- `/bin/zsh -c`, captured on a real Mac with a
-// deliberately unquoted path and a `; :` canary, recorded in
-// docs/ref/2026-08-23-macos-agent-process-spike.md. Single-quote quoting is correct under both
-// that and Claude Code's `/bin/sh -c`, so one shellQuote serves both targets.
-test('Codex setup contains the six supported events and explicit agent selection', () => {
-  const document = setupDocument('codex', "/tmp/Familiar's Build/bin/familiar");
-  assert.deepEqual(Object.keys(document.hooks), [
-    'SessionStart', 'UserPromptSubmit', 'PreToolUse',
-    'PermissionRequest', 'Stop', 'SessionEnd',
-  ]);
-  assert.equal(
-    document.hooks.SessionEnd[0].hooks[0].command,
-    "'/tmp/Familiar'\\''s Build/bin/familiar' hook SessionEnd --agent codex",
-  );
-  assert.equal(document.hooks.PreToolUse[0].matcher, '*');
+test('relay setup declares all three observers and fits every mapped event budget', () => {
+  const document = setupDocument('relay', bin);
+  const nonEnd = ['session-start', 'prompt', 'before-tool', 'activity', 'idle', 'needs-input', 'needs-approval', 'turn-end', 'turn-error', 'reconcile'];
+  assert.deepEqual(document, { schema: 1, subscribers: [
+    { name: 'familiar', role: 'observer', harnesses: ['claude-code', 'codex'], kinds: nonEnd, argv: [bin, 'observe'], timeoutMs: 2000 },
+    { name: 'familiar-opencode', role: 'observer', harnesses: ['opencode'], kinds: ['session-start', 'activity', 'idle', 'needs-approval', 'turn-error', 'session-end'], argv: [bin, 'observe'], timeoutMs: 1000 },
+    { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code', 'codex'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 200 },
+  ] });
+  const config = validateSubscribers(document);
+  for (const harness of ['claude-code', 'codex', 'opencode']) {
+    for (const [nativeEvent, { kind }] of Object.entries(adapterFor(harness).events)) {
+      assert.doesNotThrow(() => checkBudget(config, budgetFor({ harness, nativeEvent }), { harness, kind }));
+    }
+  }
+  assert.doesNotThrow(() => checkBudget(config, budgetFor({ outerMs: 60000 }), { kind: 'reconcile' }));
 });
-
-// Codex renders its own pet and its status line is a closed enum of built-ins, so there are no
-// cells for Familiar to print into -- src/adapters/codex.js's printsPlaceholderCells says so.
-// Emitting a statusLine key here would be configuration Codex has nowhere to put.
-test('Codex setup carries hooks only, with no status line', () => {
-  assert.deepEqual(Object.keys(setupDocument('codex', '/bin/familiar')), ['hooks']);
-});
-
-// Codex has no idle-prompt notification and no error event (test/codex.test.js states why), so
-// the generated document must not invent hooks the adapter would reject.
-test('Codex setup emits exactly the events the Codex adapter maps', () => {
-  const document = setupDocument('codex', '/bin/familiar');
-  assert.deepEqual(Object.keys(document.hooks).sort(), Object.keys(HOOK_EVENTS).sort());
-});
-
-test('setupDocument rejects an unknown agent', () => {
-  assert.throws(() => setupDocument('cursor', '/bin/familiar'), /unknown setup target "cursor"/);
+test('codex and unknown setup targets are rejected', () => {
+  for (const target of ['codex', 'cursor']) assert.throws(() => setupDocument(target, bin), /unknown setup target/);
 });

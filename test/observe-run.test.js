@@ -1,3 +1,4 @@
+import { prepareEnrichment } from '../src/observe/enrich.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod } from 'node:fs/promises';
@@ -40,7 +41,7 @@ async function fixture(t) {
 
 test('admit then transition writes intent and keeps old agents byte-identical', async (t) => {
   const f = await fixture(t);
-  await mkdir(f.paths.stateDir); await writeFile(f.paths.agentsPath, 'old state untouched');
+  await mkdir(f.paths.stateDir); await writeFile(join(f.paths.stateDir, 'agents.json'), 'old state untouched');
   await f.publish(event());
   assert.deepEqual(await f.run(), { exitCode: 0, lines: [] });
   assert.equal(f.emitted[0].prev, null); assert.equal(f.emitted[0].provisional, true);
@@ -48,7 +49,7 @@ test('admit then transition writes intent and keeps old agents byte-identical', 
   await f.publish(event('prompt')); assert.equal((await f.run(event('prompt'))).exitCode, 0);
   assert.equal(f.emitted[1].prev.state, 'idle');
   assert.equal((await readJson(f.paths.intentPath)).s.current.state, 'working');
-  assert.equal(await readFile(f.paths.agentsPath, 'utf8'), 'old state untouched');
+  assert.equal(await readFile(join(f.paths.stateDir, 'agents.json'), 'utf8'), 'old state untouched');
 });
 
 for (const alreadyDropped of [false, true]) test(`teardown resets stored evidence after ${alreadyDropped ? 'another projection' : 'own drop'}`, async (t) => {
@@ -217,4 +218,57 @@ test('emission takes the terminal lock before session lock, withdraws null inten
   assert.deepEqual(await emitTransition({ ...args, seq: 1, prev: { ...record, sessionId: 'old' }, next: null }), { kind: 'superseded', reason: 'terminal' });
   assert.equal(locks.length, 1);
   assert.equal(await readJson(ledgerPaths(f.paths.transmitDir, 'old').entryPath), null);
+});
+
+// Colour carry cases formerly exercised through the extracted hook transaction.
+test('enrichment carries only an own colour from the same session and checkout', async (t) => {
+  const f = await fixture(t);
+  const snapshot = await f.publish(event());
+  const envelope = JSON.parse(text(event(), snapshot));
+  const calls = [];
+  const prepare = (old, repoRoot = '/repo') => prepareEnrichment({
+    ...f.deps, envelope, snapshot, prior: { sessions: { s: old, other: { repoRoot, projectColor: '#abcdef' } } },
+    gitContext: async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot }),
+    lookupProjectColor: async (dir) => { calls.push(dir); return { color: '#317d01', warnings: ['looked up'] }; },
+  });
+  for (const old of [undefined, { repoRoot: '/different', projectColor: '#123456' },
+    { repoRoot: '/repo' }, Object.assign(Object.create({ projectColor: '#123456' }), { repoRoot: '/repo' })]) {
+    const result = await prepare(old);
+    assert.equal(result.context.projectColor, '#317d01');
+    assert.deepEqual(result.warnings, ['looked up']);
+  }
+  assert.deepEqual(calls, ['/repo', '/repo', '/repo', '/repo']);
+  calls.length = 0;
+  for (const projectColor of [null, '#123456']) {
+    const result = await prepare({ repoRoot: '/repo', projectColor });
+    assert.equal(result.context.projectColor, projectColor);
+    assert.deepEqual(result.warnings, []);
+  }
+  assert.equal((await prepare({ repoRoot: '/repo', projectColor: '#123456' }, null)).context.projectColor, null);
+  assert.deepEqual(calls, []);
+  await assert.rejects(prepareEnrichment({ ...f.deps, envelope, snapshot, prior: { sessions: {} },
+    gitContext: async () => ({ remote: null, repoRoot: '/repo', repositoryRoot: '/repo' }),
+    lookupProjectColor: async () => { throw new Error('tasks lookup failed'); },
+  }), /tasks lookup failed/);
+  assert.equal(await readJson(f.paths.seqPath), null);
+  assert.equal(await readJson(f.paths.sessionsPath), null);
+  assert.equal(await readJson(f.paths.intentPath), null);
+});
+
+test('enrichment looks again after a checkout move, carries across subdirectories, and emits warnings only when looking', async (t) => {
+  const f = await fixture(t);
+  const snapshot = await f.publish(event());
+  const envelope = JSON.parse(text(event(), snapshot));
+  const calls = [];
+  let prior = { sessions: {} };
+  for (const repoRoot of ['/api', '/api', '/web', '/web']) {
+    const result = await prepareEnrichment({ ...f.deps, envelope, snapshot, prior,
+      gitContext: async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot }),
+      lookupProjectColor: async (dir) => { calls.push(dir); return { color: dir === '/api' ? '#317d01' : '#ff0000', warnings: ['looked up'] }; },
+    });
+    assert.deepEqual(result.warnings, prior.sessions.s?.repoRoot === repoRoot ? [] : ['looked up']);
+    prior = { sessions: { s: result.context } };
+  }
+  assert.deepEqual(calls, ['/api', '/web']);
+  assert.equal(prior.sessions.s.projectColor, '#ff0000');
 });

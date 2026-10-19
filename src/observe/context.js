@@ -35,9 +35,7 @@ export async function loadContext({ paths = resolvePaths(), config } = {}) {
 // function would be a failure of the whole transaction, for every session on the
 // machine, including the ones whose config nobody touched.
 //
-// So faults are collected, not thrown, and handed to the transaction — which is
-// the only layer that knows whether a faulted record is the incoming one (abort)
-// or a pre-existing one (evict). See commit() in src/bus/transaction.js.
+// Faults are collected per session so projection can omit only the broken visuals.
 export function makePrepareSprites(ctx, {
   loadAnimationMember: loadMember = loadAnimationMember,
   preflightKittyPrograms: preflight = preflightKittyPrograms,
@@ -119,16 +117,6 @@ export function makePrepareSprites(ctx, {
 
     return { identities, spriteFor, animationFor, animationSetFor, faults };
   };
-}
-
-// An eviction is not an error — the transaction succeeded, for everyone who could
-// be resolved. It is a report: this session's record left the bus, and here is the
-// misconfiguration that put it out. One line each, on stderr, exactly like the
-// boundary below.
-export function reportEvictions(evicted) {
-  for (const { sessionId, reason } of evicted) {
-    process.stderr.write(`familiar: evicted session ${sessionId} from the bus — ${reason}\n`);
-  }
 }
 
 export function visualResolver(ctx) {

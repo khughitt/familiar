@@ -1,16 +1,13 @@
-import { loadContext as context, makePrepareSprites, reportEvictions } from '../src/observe/context.js';
-import { emitTransition } from '../src/observe/emission.js';
+import { loadContext as context, makePrepareSprites } from '../src/observe/context.js';
 export { makePrepareSprites } from '../src/observe/context.js';
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { adapterFor, AGENTS } from '../src/adapters/index.js';
 import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
-import { convergeCodexProject, shouldConverge } from '../src/install/codex-converge.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
@@ -21,9 +18,8 @@ import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
-import { applyHookEvent } from '../src/bus/transaction.js';
-import { reapRegistry, readSnapshot } from 'relay';
-import { reconcile } from '../src/observe/run.js';
+import { reapRegistry, readSnapshot, adapterFor, createProcessOps as createRelayProcessOps } from 'relay';
+import { observe, reconcile } from '../src/observe/run.js';
 import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
@@ -154,12 +150,12 @@ Set up
   install pets                 Install the active theme as Codex pets
   install opencode             Install the OpenCode integration
   setup claude-code            Print Claude Code integration settings
-  setup codex                  Print Codex integration settings
+  setup relay                  Print familiar's relay observer entries
 
 Runtime
-  hook EVENT                   Record an agent lifecycle event
+  observe                      Project relay's registry into presentation state
   statusline                   Render the Claude Code status line
-  reap                         Remove sessions whose agent has exited
+  reap                         Prune relay's registry and reconcile presentation
 
 Examples:
   familiar whoami
@@ -374,11 +370,11 @@ Usage:
 
 Commands:
   claude-code     Print Claude Code integration settings
-  codex           Print Codex integration settings
+  relay           Print familiar's relay observer entries
 
 Examples:
   familiar setup claude-code
-  familiar setup codex
+  familiar setup relay
 `,
   'setup claude-code': `Print Claude Code integration settings.
 
@@ -390,32 +386,22 @@ Prints JSON for you to merge into Claude Code settings; it never reads or writes
 Examples:
   familiar setup claude-code
 `,
-  'setup codex': `Print Codex integration settings.
+  'setup relay': `Print familiar's relay observer entries.
 
 Usage:
-  familiar setup codex
+  familiar setup relay
 
-Prints JSON for you to merge into Codex settings; it never reads or writes those settings.
-Codex draws its own pet, so this configures lifecycle hooks only — see \`familiar install pets\`.
+Prints JSON for you to merge into relay's subscribers.json; it writes nothing.
 
 Examples:
-  familiar setup codex
+  familiar setup relay
 `,
-  hook: `Record an agent lifecycle event.
+  observe: `Project relay's registry into presentation state.
 
 Usage:
-  familiar hook EVENT [--agent NAME] [--trace FILE]
+  familiar observe
 
-Arguments:
-  EVENT           Agent lifecycle event
-
-Options:
-  --agent NAME    Agent adapter: ${AGENTS.join(', ')}
-  --trace FILE    Append metadata-only lifecycle records as JSONL
-
-Examples:
-  familiar hook SessionStart
-  familiar hook Stop --agent codex
+Reads one relay observer envelope on stdin. Faults exit 1; success or staleness exits 0.
 `,
   statusline: `Render the Claude Code status line.
 
@@ -429,7 +415,7 @@ Examples:
   familiar statusline
   familiar statusline --with "printf ready"
 `,
-  reap: `Remove sessions whose agent has exited. No output means nothing was reaped.
+  reap: `Prune relay's registry and reconcile presentation.
 
 Usage:
   familiar reap
@@ -453,19 +439,7 @@ export function renderHelp(key, { color = false } = {}) {
     ? `${BOLD}${fg(HELP_ACCENT)}${line}${RESET}` : line).join('\n');
 }
 
-// The OTHER promise in the hook path that could never settle (the first was the
-// un-timed `git` — see gitContext). This one resolves on `end` or `error`, so a
-// parent that writes the payload and then holds the pipe open without closing it
-// leaves the hook waiting forever, and claude-code kills it at 60s.
-//
-// So EOF gets a deadline. On expiry we resolve with whatever arrived rather than
-// rejecting, because by then one of two things is true, and both are handled
-// downstream: either the payload is complete and only the EOF was missing — in
-// which case parsing it is exactly right — or it is short, and parsePayload says
-// "hook payload is not JSON" on one line through the boundary. Neither hangs.
-//
-// The timer is unref'd: it must never hold the process open on the normal path,
-// which is every hook, every tool call.
+// Bound stdin reads when the sender does not close its pipe.
 const STDIN_EOF_TIMEOUT_MS = 5_000;
 
 // A PINNABLE CLOCK, for the decay tests only. Nothing in production sets this; without it
@@ -515,21 +489,6 @@ function runWrapped(command, input) {
   if (result.signal) throw new Error(`--with command was killed by ${result.signal}: ${named}`);
   if (result.status !== 0) throw new Error(`--with command exited ${result.status}: ${named}`);
   return result.stdout;
-}
-
-export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, next }) {
-  const payload = JSON.parse(stdin);
-  appendFileSync(path, `${JSON.stringify({
-    timestamp,
-    agent,
-    event,
-    hook_event_name: payload.hook_event_name ?? null,
-    source: payload.source ?? null,
-    session_id: payload.session_id,
-    turn_id: payload.turn_id ?? null,
-    prev_state: prev?.state ?? null,
-    next_state: next?.state ?? null,
-  })}\n`);
 }
 
 // The status line's half of a provisional SessionStart transmission (see settle() in
@@ -660,7 +619,7 @@ async function main({ command, args: rest, color, mode }) {
   // completion and the conformance test read -- one source, not a hand-kept mirror.
   const cmd = commandAt(command.split(' '));
   const leafOptions = { options: parseArgsOptions(cmd), ...positionalBounds(cmd), help: command };
-  if (command === 'setup claude-code' || command === 'setup codex') {
+  if (command === 'setup claude-code' || command === 'setup relay') {
     parseLeaf(rest, leafOptions);
     // The launcher, not this file: what setup writes into a config must be what the
     // agent invokes, and the launcher is the one that checks dependencies first.
@@ -798,87 +757,14 @@ async function main({ command, args: rest, color, mode }) {
       }
       process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
     }
-  } else if (command === 'hook') {
-    const { positionals, values } = parseLeaf(rest, leafOptions);
-    const name = values.agent ?? 'claude-code';
-    const adapter = adapterFor(name);          // throws on an unknown agent, before any work
-    const ctx = await context();
-    const stdin = await readStdin();
-
-    const { prev, next, seq, intent, evicted, warnings } = await applyHookEvent({
-      event: positionals[0],
-      stdin,
-      deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
-    });
-    for (const warning of warnings) process.stderr.write(`familiar: tasks: ${warning}\n`);
-    reportEvictions(evicted);
-    if (values.trace !== undefined) {
-      appendHookTrace(values.trace, {
-        timestamp: new Date(now()).toISOString(),
-        agent: name,
-        event: positionals[0],
-        stdin,
-        prev,
-        next,
-      });
-    }
-
-    await emitTransition({
-      prev, next, intent: next ? intent[next.sessionId].current : null, seq,
-      harness: name,
-      // SessionStart fires before the agent's UI is up: a fullscreen TUI may not yet be on the
-      // screen it will draw the placeholder cells on (see emit()'s `provisional`).
-      provisional: positionals[0] === 'SessionStart',
-      paths: ctx.paths,
-      renderProcess: defaultProcessOps,
-    });
-
-    // Prune after the transaction releases the bus lock: fresh Darwin liveness spawns.
-    await pruneLedgers({
-      transmitDir: ctx.paths.transmitDir,
-      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
-      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
-      startTimeOf: defaultProcessOps.startTimeOf,
-    });
-    await sweepTemps({
-      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
-    });
-
-    // CODEX ONLY, SessionStart ONLY. Codex draws its own pet from a file rather
-    // than from the bus, so the file has to be kept true. Everything needed is
-    // already in hand: `next` is the record the transaction just wrote, and the
-    // member came out of the same resolve that fed the bus -- so nothing here
-    // re-runs git or re-matches a pin.
-    //
-    // `next` is null on SessionEnd, which removes a record rather than writing one.
-    if (shouldConverge({ agent: name, event: positionals[0] }) && next) {
-      try {
-        const result = await convergeCodexProject({
-          repoRoot: next.repoRoot,
-          member: intent[next.sessionId].current.identity.member,
-          catalog: ctx.catalog,
-          pack: ctx.pack,
-          themeId: ctx.themeId,
-          petsDir: join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
-        });
-        // ORDINARY NO-OPS ARE SILENT; ANYTHING A USER COULD ACT ON IS NOT.
-        // `quiet` and `unchanged` are the common cases and say nothing. But an
-        // unmanaged config, a tracked one, missing pets, a symlink refusal or a
-        // wedged git all mean the pet on screen is NOT the one Familiar
-        // resolved -- and saying nothing there is the same silent drift this
-        // whole mechanism exists to end.
-        if (result.outcome === 'actionable' || result.outcome === 'error') {
-          process.stderr.write(`familiar: ${result.reason}\n`);
-        }
-      } catch (error) {
-        // The cosmetic layer never degrades the tool it decorates. The
-        // top-level boundary in this file already turns a throw into exit 0
-        // plus one stderr line; this narrower catch keeps a convergence failure
-        // from skipping anything after it.
-        process.stderr.write(
-          `familiar: could not converge the Codex pet config: ${error.message}\n`);
-      }
-    }
+  } else if (command === 'observe') {
+    parseLeaf(rest, leafOptions);
+    const result = await observe({ text: await readStdin(), deps: {
+      paths: resolvePaths(), relay: { readSnapshot }, relayProcess: createRelayProcessOps(),
+      renderProcess: defaultProcessOps, adapterFor,
+    } });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exitCode = result.exitCode;
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, leafOptions);
     // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
@@ -1574,25 +1460,8 @@ async function main({ command, args: rest, color, mode }) {
   }
 }
 
-// THE ERROR BOUNDARY, and the one place in this codebase that formats a thrown error.
-//
-// Every module below fails early and loudly, which is right — but `familiar hook`
-// runs on EVERY TOOL CALL of the user's coding agent. An uncaught throw here is a
-// Node stack trace in their transcript, on every Bash, forever. The failure is
-// still reported once, on one line. Hook and statusline remain exit-zero protocols;
-// every human-invoked command fails nonzero.
-//
-// A cosmetic layer must never be able to degrade the tool it decorates. That is
-// worth exactly one catch, and this is it.
-//
-const COSMETIC_COMMANDS = new Set(['hook', 'statusline']);
-// A usage error (bad argv shape) always exits 2, plain text -- reportCosmeticError's
-// one line plus, where the error names a help scope, the "Run ... --help" line, same
-// as before this command table existed. A RUNTIME failure (parsing succeeded, the
-// work did not) exits 1, and under --json on a non-protocol command it is the error
-// object on stderr instead of the plain line -- the general contract's json-failure
-// shape. Protocol commands (hook, statusline) keep exiting 0 either way: a cosmetic
-// layer must never be able to degrade the tool it decorates.
+// Status-line failures are cosmetic; observer faults must reach relay.
+const COSMETIC_COMMANDS = new Set(['statusline']);
 export function reportCommandError(error, resolved, {
   write = (line) => process.stderr.write(line),
   mode = 'pretty',

@@ -81,26 +81,7 @@ test('Darwin rows reject malformed identities, dates, and commands', () => {
   }
 });
 
-test('one Darwin snapshot serves ancestry, start time, and liveness', () => {
-  let spawns = 0;
-  const ops = createProcessOps({
-    platform: 'darwin',
-    runPs: () => {
-      spawns++;
-      return [
-        '30 20 ?? Sat Aug 22 23:24:47 2026 /usr/bin/node',
-        '20 10 ttys003 Sat Aug 22 23:24:46 2026 /opt/bin/claude',
-        '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
-      ].join('\n');
-    },
-    kill: () => {},
-  });
-  const chain = ops.ancestors(30);
-  assert.deepEqual(chain.map((record) => record.pid), [30, 20, 10]);
-  assert.equal(ops.startTimeOf(20), chain[1].starttime);
-  assert.equal(ops.isAlive(20, { starttime: chain[1].starttime }), true);
-  assert.equal(spawns, 1);
-});
+
 
 test('Darwin fresh reads target one pid with the strict row parser', () => {
   let args;
@@ -183,9 +164,9 @@ test('Darwin liveness treats EPERM as existing and other kill errors as absent',
   assert.equal(absent.isAlive(20, { starttime }), false);
 });
 
-test('Darwin empty ps output and unsupported platforms fail explicitly', () => {
+test('Darwin empty ps output means absent; unsupported platforms fail explicitly', () => {
   const ops = createProcessOps({ platform: 'darwin', runPs: () => '' });
-  assert.throws(() => ops.recordOf(1), /Darwin ps: malformed output/);
+  assert.equal(ops.recordOf(1), null);
   assert.throws(() => createProcessOps({ platform: 'win32' }), /unsupported process platform: win32/);
 });
 
@@ -212,7 +193,7 @@ test('Darwin ps uses the fixed binary, arguments, locale, and returns stdout', (
   assert.equal(call[2].env.LC_ALL, 'C');
 });
 
-test('Darwin real snapshot keeps this process identity stable', {
+test('Darwin real per-pid reads keep this process identity stable', {
   skip: requiresDarwin,
 }, () => {
   const ops = createProcessOps({ platform: 'darwin' });
@@ -236,25 +217,9 @@ test('returns null on garbage rather than a half-built record', () => {
   assert.equal(parseStat('nonsense'), null);
 });
 
-test('walks the ancestor chain, self first, and stops at pid 1', () => {
-  const table = {
-    500: '500 (node) S 400 0 0 0 0 0 0 0 0 0 0 0 0 0',
-    400: '400 (zsh) S 300 0 0 0 0 0 0 0 0 0 0 0 0 0',
-    300: '300 (claude) S 1 0 0 0 0 0 0 0 0 0 0 0 0 0',
-  };
-  const readStat = (pid) => table[pid] ?? null;
-  const ops = createProcessOps({ platform: 'linux' });
-  assert.deepEqual(
-    ops.ancestors(500, { readStat }).map((p) => p.comm),
-    ['node', 'zsh', 'claude']
-  );
-});
 
-test('a vanished ancestor truncates the chain rather than throwing', () => {
-  const readStat = (pid) => (pid === 500 ? '500 (node) S 999 0 0 0 0 0 0 0 0 0 0 0 0 0' : null);
-  const ops = createProcessOps({ platform: 'linux' });
-  assert.deepEqual(ops.ancestors(500, { readStat }).map((p) => p.pid), [500]);
-});
+
+
 
 test('Linux fresh start-time reads once through the call-time seam', () => {
   let reads = 0;
@@ -328,55 +293,6 @@ test('a pid recycled into ANOTHER USER\'S process is caught too — EPERM is not
   assert.equal(ops.isAlive(1, { starttime: 5, readStat }), true, 'pid 1 IS the process the record names');
 });
 
-// THE SNAPSHOT IS A MACHINE-WIDE TABLE, NOT FAMILIAR'S DATA. `ps -axo` returns every process on
-// the Mac, so a strict row parser makes Familiar's correctness depend on all several hundred of
-// them -- including other users' -- producing a row it accepts. `tty console` is a real BSD tty
-// name, and one row carrying it used to throw out of the map() that builds the snapshot, taking
-// down every hook on the machine with a cosmetic exit-zero diagnostic. Unrelated garbage must not
-// be able to do that; the row we were actually asked about must still fail loudly.
-const CONSOLE_ROW =
-  '501 1 console Sun Aug 23 15:09:55 2026 /System/Library/CoreServices/loginwindow';
-
-test('an unrelated unparseable row does not destroy the Darwin snapshot', () => {
-  const ops = createProcessOps({
-    platform: 'darwin',
-    kill: () => {},
-    runPs: () => [
-      '30 20 ?? Sat Aug 22 23:24:47 2026 /usr/bin/node',
-      CONSOLE_ROW,
-      '20 10 ttys003 Sat Aug 22 23:24:46 2026 /opt/bin/claude',
-      '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
-    ].join('\n'),
-  });
-
-  assert.deepEqual(ops.ancestors(30).map((record) => record.comm), ['node', 'claude', 'zsh']);
-});
-
-test('the pid whose own Darwin row is unparseable still fails loudly', () => {
-  const ops = createProcessOps({
-    platform: 'darwin',
-    kill: () => {},
-    runPs: () => [
-      '10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh',
-      CONSOLE_ROW,
-    ].join('\n'),
-  });
-
-  assert.throws(() => ops.recordOf(501), /unsafe Darwin tty "console"/);
-  assert.equal(ops.recordOf(10).comm, 'zsh');   // its neighbour is unaffected
-});
-
-test('a row too damaged to attribute to a pid is not mistaken for a live process', () => {
-  const ops = createProcessOps({
-    platform: 'darwin',
-    kill: () => {},
-    runPs: () => ['10 1 ttys003 Sat Aug 22 23:00:00 2026 /bin/zsh', 'not a ps row at all'].join('\n'),
-  });
-
-  assert.equal(ops.recordOf(10).comm, 'zsh');
-  assert.equal(ops.recordOf(99), null);
-});
-
 test('Linux ownerAlive is fresh identity: pid alive but restarted is dead', () => {
   let starttime = 100;
   const ops = createProcessOps({
@@ -397,7 +313,7 @@ const darwinRow = ({ pid, starttime }) => {
   return `${pid} 1 ?? ${weekdays[date.getDay()]} ${months[date.getMonth()]} ${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')} ${date.getFullYear()} /usr/bin/node`;
 };
 
-test('Darwin ownerAlive consults ps -p, not the memoized -axo snapshot', () => {
+test('Darwin liveness always consults ps -p', () => {
   const old = Date.parse('Sat Aug 22 23:24:46 2026') / 1000;
   let fresh = old;
   const ops = createProcessOps({
@@ -409,6 +325,17 @@ test('Darwin ownerAlive consults ps -p, not the memoized -axo snapshot', () => {
   });
   assert.equal(ops.isAlive(7, { starttime: old }), true);
   fresh += 1;
-  assert.equal(ops.isAlive(7, { starttime: old }), true, 'the snapshot-backed predicate is stale');
+  assert.equal(ops.isAlive(7, { starttime: old }), false);
   assert.equal(ops.ownerAlive(7, { starttime: old }), false);
+});
+
+test('process helpers expose no ancestor discovery or whole-table Darwin reads', () => {
+  for (const platform of ['linux', 'darwin']) {
+    const ops = createProcessOps({ platform, runPs: (args) => {
+      assert.deepEqual(args, ['-p', '20', '-o', 'pid=,ppid=,tty=,lstart=,comm=']);
+      return '20 1 ?? Sat Aug 22 23:24:46 2026 /usr/bin/node';
+    } });
+    assert.equal(Object.hasOwn(ops, 'ancestors'), false);
+    if (platform === 'darwin') assert.equal(ops.recordOf(20).pid, 20);
+  }
 });

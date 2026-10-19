@@ -1,3 +1,6 @@
+import { parseIdentities } from '../src/bus/pins.js';
+import { visualResolver } from '../src/observe/context.js';
+import { loadThemePack } from 'familiar-theme';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { projectSnapshot } from '../src/bus/projection.js';
@@ -224,4 +227,35 @@ test('prepared enrichment whose row disappeared is stale and cannot emit', async
   assert.equal(result.stale, true);
   assert.equal(result.capture, null);
   assert.deepEqual(result.sessions.sessions, {});
+});
+
+// Worktree pin precedence survives the relay snapshot -> presentation -> intent boundary.
+test('projection keeps checkout labels and repository anchors for path and remote pins', async () => {
+  const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
+  const cases = [
+    { pins: [{ path: '/fixture/api', slot: 7 }], remote: null, slot: 7 },
+    { pins: [{ path: '/fixture/api', slot: 7 }, { path: '/fixture/fix-api', slot: 3 }], remote: null, slot: 3 },
+    { pins: [{ path: '/fixture/api', slot: 7 }, { path: '/fixture/fix-api', slot: 3 }, { remote: 'github.com/example/api', slot: 6 }], remote: 'github.com/example/api', slot: 6 },
+    { pins: [{ path: '/fixture/fix-api', slot: 3 }], remote: 'github.com/example/api', slot: 3 },
+  ];
+  for (const { pins, remote, slot } of cases) {
+    const a = row('a');
+    const ctx = { cwd: '/fixture/fix-api/src', repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
+      remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null };
+    const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a, { context: ctx }),
+      resolveVisuals: visualResolver({ pack, catalog: parseIdentities(JSON.stringify({ identities: pins })),
+        tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+    });
+    assert.deepEqual(result.faults, new Map());
+    const record = result.sessions.sessions.a;
+    assert.equal(record.repoRoot, '/fixture/fix-api');
+    assert.equal(record.repositoryRoot, '/fixture/api');
+    assert.equal(record.remote, remote);
+    assert.equal(record.projectKey, remote ?? '/fixture/api');
+    assert.equal(record.project, 'fix-api');
+    assert.equal(result.intent.a.current.identity.slot, slot);
+    assert.equal(result.intent.a.current.identity.project, 'fix-api');
+    assert.equal(result.intent.a.current.identity.member, 'pip');
+    assert.equal(result.intent.a.current.identity.projectColor, null);
+  }
 });

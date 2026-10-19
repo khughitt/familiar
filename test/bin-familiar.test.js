@@ -19,9 +19,7 @@ import { parse } from 'yaml';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 import { fg } from '../src/render/term/sgr.js';
 import { CAPS, truncEnd } from '../src/render/term/hud.js';
-import { adapterFor } from '../src/adapters/index.js';
 import { displayProject } from '../src/bus/identity.js';
-import { applyHookEvent } from '../src/bus/transaction.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
 import { parseIdentities } from '../src/bus/pins.js';
@@ -32,7 +30,7 @@ import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import {
-  appendHookTrace, makePrepareSprites, settleStatusline, reportCommandError,
+  makePrepareSprites, settleStatusline, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar.js';
 
@@ -81,45 +79,23 @@ test('setup claude-code prints exact JSON without reading configuration', () => 
   assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
 });
 
-test('setup codex prints exact JSON without reading configuration', () => {
+test('setup relay prints exact JSON without reading configuration', () => {
   const runEnv = env();
-  const result = spawnSync(process.execPath, [bin, 'setup', 'codex'], {
+  const result = spawnSync(process.execPath, [bin, 'setup', 'relay'], {
     encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.equal(result.stdout, `${JSON.stringify(setupDocument('codex', realpathSync(bin)), null, 2)}\n`);
+  assert.equal(result.stdout, `${JSON.stringify(setupDocument('relay', realpathSync(bin)), null, 2)}\n`);
   assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
-});
-
-// Codex hands its single-string hook command to `/bin/zsh -c` -- measured on a real Mac with a
-// deliberately unquoted path and a `; :` canary (docs/ref/2026-08-23-macos-agent-process-spike.md).
-// So the emitted string is shell source, and a checkout path with a space or an apostrophe is
-// where naive concatenation breaks. Run it through a POSIX shell against a stand-in that reports
-// its own argv: the path must arrive as one argument, with `--agent codex` trailing the event.
-test('a generated Codex command survives a shell with an awkward checkout path', (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'familiar-codex-quote-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const checkout = join(root, "Keith's Familiar Build");
-  mkdirSync(checkout, { recursive: true });
-  const stand = join(checkout, 'familiar');
-  writeFileSync(stand, '#!/bin/sh\nprintf \'%s\\n\' "$0" "$@"\n');
-  chmodSync(stand, 0o755);
-
-  const command = setupDocument('codex', stand).hooks.Stop[0].hooks[0].command;
-  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.stdout.split('\n').slice(0, -1), [
-    stand, 'hook', 'Stop', '--agent', 'codex',
-  ]);
 });
 
 test('setup rejects extra arguments and unknown flags before work', () => {
   for (const args of [
     ['setup', 'claude-code', 'extra'],
     ['setup', 'claude-code', '--write'],
-    ['setup', 'codex', 'extra'],
-    ['setup', 'codex', '--write'],
+    ['setup', 'relay', 'extra'],
+    ['setup', 'relay', '--write'],
   ]) {
     const runEnv = env();
     const result = spawnSync(process.execPath, [bin, ...args], {
@@ -155,59 +131,21 @@ test('setup resolves an npm-style link to a checkout path containing spaces', (t
     `'${join(checkout, 'bin', 'familiar')}' statusline`);
 });
 
-test('hook trace appends lifecycle metadata without prompt or tool contents', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'familiar-hook-trace-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const path = join(dir, 'codex.jsonl');
-
-  appendHookTrace(path, {
-    timestamp: '2026-08-03T12:34:56.000Z',
-    agent: 'codex',
-    event: 'SessionStart',
-    stdin: JSON.stringify({
-      session_id: 's1', turn_id: 't1', hook_event_name: 'SessionStart', source: 'compact',
-      prompt: 'secret prompt', tool_input: { command: 'secret command' },
-    }),
-    prev: { projectColor: null, state: 'working' },
-    next: { projectColor: null, state: 'idle' },
-  });
-
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
-    timestamp: '2026-08-03T12:34:56.000Z',
-    agent: 'codex',
-    event: 'SessionStart',
-    hook_event_name: 'SessionStart',
-    source: 'compact',
-    session_id: 's1',
-    turn_id: 't1',
-    prev_state: 'working',
-    next_state: 'idle',
-  });
-});
-
-// THE ERROR BOUNDARY. `familiar hook` runs on every tool call of the user's
-// coding agent — an uncaught throw there must never surface as a non-zero
-// exit or a stack trace, or a cosmetic layer would be able to break the tool
-// it decorates. Here the throw is real and unforced: no scheme.json exists in
-// the temp config dir, so loadTone() throws from deep inside context() —
-// well before the locked transaction — and the top-level try/catch in
-// bin/familiar is what has to catch it.
-test('a hook invocation that throws internally still exits 0 and prints exactly one line to stderr', () => {
-  const result = spawnSync(process.execPath, [bin, 'hook', 'UserPromptSubmit'], {
-    input: JSON.stringify({ session_id: 's1', cwd: '/tmp' }),
-    encoding: 'utf8',
-    env: env(),
-  });
-
-  assert.equal(result.status, 0);
+test('observe reconciles through the CLI and reports malformed envelopes as faults', () => {
+  const runEnv = env();
+  writeFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  const input = JSON.stringify({ schema: 1, type: 'reconcile', subscriber: 'familiar', event: null, registry: { generation: null, revision: null }, changed: false, reaped: [] });
+  const result = spawnSync(process.execPath, [bin, 'observe'], { input, encoding: 'utf8', env: runEnv });
+  assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '');
-
-  const lines = result.stderr.split('\n').filter((line) => line !== '');
-  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${result.stderr}`);
-  assert.match(lines[0], /^familiar: no scheme at .* — run: familiar scheme set dark\|light$/);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(readFileSync(join(runEnv.FAMILIAR_STATE_DIR, 'sessions.json'))).sessions, {});
+  const bad = spawnSync(process.execPath, [bin, 'observe'], { input: '{', encoding: 'utf8', env: runEnv });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /familiar: observe:/);
 });
 
-test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', async () => {
+test('an observer transition with no Darwin tty reports a fault', async () => {
   let targetError;
   await assert.rejects(emitTransition({
     prev: null,
@@ -230,11 +168,11 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
   });
 
   const lines = [];
-  const status = reportCommandError(targetError, { command: 'hook' }, {
+  const status = reportCommandError(targetError, { command: 'observe' }, {
     write: (line) => lines.push(line),
   });
 
-  assert.equal(status, 0);
+  assert.equal(status, 1);
   assert.deepEqual(lines, [
     'familiar: terminal target: agent pid 42 has no validated Darwin tty\n',
   ]);
@@ -359,17 +297,15 @@ test('statusline settles only for the recorded terminal owner', async () => {
   assert.deepEqual(JSON.parse(readFileSync(owner.entryPath, 'utf8')), { sessionId: 'old', seq: 2 });
 });
 
-test('hook rejects unknown flags before state work but remains cosmetic', () => {
-  const e = env();
-  const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart', '--bogus'], {
-    encoding: 'utf8', env: e,
-  });
-  assert.equal(result.status, 0);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /unknown option.*bogus/i);
-  assert.doesNotMatch(result.stderr, /place it at the end/i);
-  assert.match(result.stderr, /familiar hook --help/);
-  assert.deepEqual(readdirSync(e.FAMILIAR_STATE_DIR), []);
+test('removed hook and setup codex commands are usage errors before state work', () => {
+  for (const args of [['hook', 'SessionStart'], ['setup', 'codex']]) {
+    const e = env();
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: e });
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /unknown/i);
+    assert.deepEqual(readdirSync(e.FAMILIAR_STATE_DIR), []);
+  }
 });
 
 test('statusline keeps malformed input cosmetic', () => {
@@ -552,13 +488,13 @@ test('reap never emits and never touches familiar old agents or lock files', asy
   const f = reapFixture(t);
   await f.admit();
   f.emitted.length = 0;
-  writeFileSync(f.p.agentsPath, 'old familiar agents');
-  writeFileSync(f.p.lockPath, 'old familiar lock');
+  writeFileSync(join(f.p.stateDir, 'agents.json'), 'old familiar agents');
+  writeFileSync(join(f.p.stateDir, 'agents.lock'), 'old familiar lock');
   await f.publish(f.event('prompt'));
   await f.run();
   assert.deepEqual(f.emitted, []);
-  assert.equal(readFileSync(f.p.agentsPath, 'utf8'), 'old familiar agents');
-  assert.equal(readFileSync(f.p.lockPath, 'utf8'), 'old familiar lock');
+  assert.equal(readFileSync(join(f.p.stateDir, 'agents.json'), 'utf8'), 'old familiar agents');
+  assert.equal(readFileSync(join(f.p.stateDir, 'agents.lock'), 'utf8'), 'old familiar lock');
 });
 
 test('reap rejects an existing relay directory at 0755 before changing sessions', async (t) => {
@@ -878,7 +814,7 @@ test('preview on a terminal WITHOUT graphics prints the poses and no escape at a
   }
 });
 
-test('an incoming malformed animation reports its member fault and writes neither bus file', async (t) => {
+test('an incoming malformed animation reports its member fault before preflight', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-malformed-animation-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const poses = STATES.map((state) => `      ${state}: ${state} pose`).join('\n');
@@ -903,13 +839,6 @@ ${poses}
   }
   pack.members.get('broken-cat').assetDirProof = 'filesystem';
 
-  const paths = {
-    agentsPath: join(dir, 'state', 'agents.json'),
-    intentPath: join(dir, 'state', 'intent.json'),
-    lockPath: join(dir, 'state', 'agents.lock'),
-    seqPath: join(dir, 'state', 'events.seq'),
-    transmitDir: join(dir, 'state', 'transmit'),
-  };
   const namedFault = 'animation: member "broken-cat" manifest has unknown role "wobble"';
   let preflights = 0;
   const prepareSprites = makePrepareSprites({
@@ -921,35 +850,12 @@ ${poses}
     preflightKittyPrograms: () => { preflights++; },
   });
 
-  await assert.rejects(
-    applyHookEvent({
-      event: 'UserPromptSubmit',
-      stdin: JSON.stringify({ session_id: 'bad', cwd: '/repos/api' }),
-      deps: {
-        paths,
-        tone: { mode: 'dark', satScale: 1 },
-        motionPolicy: 'full',
-        prepareSprites,
-        adapter: adapterFor('claude-code'),
-        gitContext: async () => ({
-          remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api',
-        }),
-        resolveAgentPid: () => 4242,
-        processOps: {
-          ancestors: () => [],
-          recordOf: () => null,
-          startTimeOf: () => 123,
-          isAlive: () => true,
-          lockHolderAlive: () => true,
-        },
-        now: () => 1_000,
-      },
-    }),
-    new RegExp(namedFault.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-  );
+  const result = await prepareSprites({ bad: {
+    sessionId: 'bad', projectKey: 'github.com/me/api', project: 'api',
+    remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api', projectColor: null,
+  } });
+  assert.equal(result.faults.get('bad'), namedFault);
   assert.equal(preflights, 0, 'preflight ran after validation failed');
-  assert.equal(existsSync(paths.agentsPath), false);
-  assert.equal(existsSync(paths.intentPath), false);
 });
 
 test('install pets --help documents the full, reduced, and off policies without loading config', () => {
@@ -1696,9 +1602,9 @@ function projectsJson(e, dirs) {
   return JSON.parse(r.stdout).projects;
 }
 
-const benchWrapper = fileURLToPath(new URL('fixtures/bench-hook-cli.mjs', import.meta.url));
-function hookIdentity(e, dir) {
-  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+const observeFixture = fileURLToPath(new URL('fixtures/observe-event.mjs', import.meta.url));
+function observerIdentity(e, dir) {
+  const r = spawnSync(process.execPath, [observeFixture], {
     cwd: dir, encoding: 'utf8', env: e,
     input: JSON.stringify({ session_id: `cli-parity-${basenameOf(dir)}`, cwd: dir }),
   });
@@ -1714,7 +1620,7 @@ const resolvedAs = (color, warnings = []) => JSON.stringify({
   warnings,
 });
 
-test('a registered colour reaches whoami, projects and the hook on every worktree', (t) => {
+test('a registered colour reaches whoami, projects and the observer on every worktree', (t) => {
   const { main, internal, external } = worktreeLayout(t);
   const e = { ...pinned('identities: []\n'), FAKE_TASKS_OUTPUT: resolvedAs('#317d01') };
   for (const dir of [main, internal, external]) {
@@ -1723,7 +1629,7 @@ test('a registered colour reaches whoami, projects and the hook on every worktre
   }
   assert.deepEqual(projectsJson(e, [main, internal]).map((p) => [p.slot, p.color, p.source]),
     [[3, '#317d01', 'colour'], [3, '#317d01', 'colour']]);
-  const hooked = hookIdentity(e, internal);
+  const hooked = observerIdentity(e, internal);
   assert.deepEqual([hooked.slot, hooked.projectColor, hooked.source], [3, '#317d01', 'colour']);
 });
 
@@ -1793,7 +1699,7 @@ test('unpinned remote-less worktrees share the repository slot and keep their la
   const seen = [main, internal, external, link].map((dir) => whoami(e, dir));
   assert.deepEqual(seen.map((s) => s.project), ['api', 'fix-api', 'fix-ext', 'fix-ext']);
   assert.equal(new Set(seen.map((s) => s.slot)).size, 1);
-  assert.equal(hookIdentity(e, external).slot, seen[0].slot);
+  assert.equal(observerIdentity(e, external).slot, seen[0].slot);
 });
 
 test('a main path pin reaches every worktree on every surface', (t) => {
@@ -1804,7 +1710,7 @@ test('a main path pin reaches every worktree on every surface', (t) => {
   assert.deepEqual(listed.map((p) => [p.project, p.slot, p.source]), [
     ['api', 7, 'pin'], ['fix-api', 7, 'pin'], ['fix-ext', 7, 'pin'], ['fix-ext', 7, 'pin'],
   ]);
-  const hooked = hookIdentity(e, internal);
+  const hooked = observerIdentity(e, internal);
   assert.deepEqual([hooked.slot, hooked.member, hooked.project], [7, whoami(e, internal).member.id, 'fix-api']);
 });
 
@@ -1828,7 +1734,7 @@ test('a matching remote pin dominates every path pin', (t) => {
   const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`
     + `  - path: ${JSON.stringify(internal)}\n    slot: 3\n  - remote: github.com/example/api\n    slot: 6\n`);
   for (const dir of [main, internal, external]) assert.equal(whoami(e, dir).slot, 6);
-  assert.equal(hookIdentity(e, internal).slot, 6);
+  assert.equal(observerIdentity(e, internal).slot, 6);
 });
 
 test('projects with no directories lists path pins only, never their worktrees', (t) => {
@@ -1837,17 +1743,17 @@ test('projects with no directories lists path pins only, never their worktrees',
   assert.deepEqual(projectsJson(e, []).map((p) => p.project), ['api']);
 });
 
-test('the hook writes tasks warnings to stderr and still records the session', (t) => {
+test('the observer writes tasks warnings to stderr and still records the session', (t) => {
   const { main } = worktreeLayout(t);
   const e = { ...pinned('identities: []\n'),
     FAKE_TASKS_OUTPUT: JSON.stringify({ results: [{ input: main, kind: 'path', status: 'unregistered' }],
       warnings: ['nexc: its checkout is not matched and its color is not reported (bad)'] }) };
-  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+  const r = spawnSync(process.execPath, [observeFixture], {
     cwd: main, encoding: 'utf8', env: e, input: JSON.stringify({ session_id: 'warn', cwd: main }) });
   assert.equal(r.status, 0);
   assert.equal(r.stderr,
-    'familiar: tasks: nexc: its checkout is not matched and its color is not reported (bad)\n');
-  const agents = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), 'utf8'));
+    'familiar: observe: nexc: its checkout is not matched and its color is not reported (bad)\n');
+  const agents = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'sessions.json'), 'utf8')).sessions;
   assert.equal(agents.warn.projectColor, null);
 });
 

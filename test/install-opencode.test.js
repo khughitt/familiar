@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergePlugin, installOpencode } from '../src/install/opencode.js';
+import { mergePlugin, installOpencode, legacyServerPlugin } from '../src/install/opencode.js';
 
 test('mergePlugin: appends to an empty config', () => {
   const out = mergePlugin('{}', '/abs/plugin.tsx');
@@ -48,18 +48,17 @@ test('mergePlugin: a whitespace-only string is refused', () => {
   assert.throws(() => mergePlugin('   \n\t', '/abs/p.tsx'), /root must be a JSON object/);
 });
 
-test('installOpencode: writes both files on success', () => {
+test('installOpencode: writes only tui.json on success', () => {
   const files = { '/cfg/tui.json': '{}', '/cfg/opencode.json': '{ "plugin": [] }' };
   const writes = {};
   installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   });
   assert.deepEqual(JSON.parse(writes['/cfg/tui.json']).plugin, ['/abs/sprite.tsx']);
-  assert.deepEqual(JSON.parse(writes['/cfg/opencode.json']).plugin, ['/abs/plugin.js']);
+  assert.equal(writes['/cfg/opencode.json'], undefined);
 });
 
 test('installOpencode: a bad file aborts BOTH writes', () => {
@@ -68,7 +67,6 @@ test('installOpencode: a bad file aborts BOTH writes', () => {
   assert.throws(() => installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   }), /\/cfg\/opencode\.json:.*must be an array/);
@@ -81,7 +79,6 @@ test('installOpencode: a present-but-blank file aborts BOTH writes', () => {
   assert.throws(() => installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   }), /\/cfg\/tui\.json:.*root must be a JSON object/);
@@ -93,7 +90,6 @@ test('installOpencode: undefined is not missing and aborts BOTH writes', () => {
   assert.throws(() => installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: () => undefined,
     writeAtomic: (p, text) => { writes[p] = text; },
   }), /\/cfg\/tui\.json:.*read\(\) must return a string or null, found undefined/);
@@ -105,12 +101,11 @@ test('installOpencode: missing files (read -> null) are created fresh', () => {
   installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: () => null,           // both absent — only null means "missing"
     writeAtomic: (p, text) => { writes[p] = text; },
   });
   assert.deepEqual(JSON.parse(writes['/cfg/tui.json']).plugin, ['/abs/sprite.tsx']);
-  assert.deepEqual(JSON.parse(writes['/cfg/opencode.json']).plugin, ['/abs/plugin.js']);
+  assert.equal(writes['/cfg/opencode.json'], undefined);
 });
 
 test('installOpencode: an existing .jsonc config is refused, not shadowed by a new .json', () => {
@@ -119,14 +114,13 @@ test('installOpencode: an existing .jsonc config is refused, not shadowed by a n
   const result = installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   });
   // The original guard still holds: no opencode.json is created beside the .jsonc.
   assert.equal(writes['/cfg/opencode.json'], undefined);
   assert.equal(result.manual.length, 1);
-  assert.match(result.manual[0], /\/cfg\/opencode\.jsonc: add "\/abs\/plugin\.js" to its "plugin" array by hand/);
+  assert.match(result.manual[0], /\/cfg\/opencode\.jsonc: retire familiar.*by hand/);
 });
 
 test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
@@ -139,7 +133,6 @@ test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
   const result = installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   });
@@ -150,18 +143,17 @@ test('installOpencode: a .jsonc beside a .json is refused as ambiguous', () => {
 // REGRESSION, from the physical-Mac terminal gate. A `.jsonc` on ONE config used to abort the other,
 // so a hand-maintained opencode.jsonc left tui.json unwritten and the sprite RENDERER unregistered.
 // The two files are independent; a hand-off takes only its own file out of the run.
-test('installOpencode: a .jsonc hand-off leaves the OTHER file written', () => {
+test('installOpencode: a TUI .jsonc hand-off does not rewrite an unchanged server config', () => {
   const files = { '/cfg/tui.jsonc': '{}', '/cfg/opencode.json': '{ "plugin": [] }' };
   const writes = {};
   const result = installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   });
-  assert.deepEqual(JSON.parse(writes['/cfg/opencode.json']).plugin, ['/abs/plugin.js']);
-  assert.deepEqual(result.written, ['/cfg/opencode.json']);
+  assert.equal(writes['/cfg/opencode.json'], undefined);
+  assert.deepEqual(result.written, []);
   assert.equal(writes['/cfg/tui.json'], undefined);
   assert.match(result.manual[0], /\/cfg\/tui\.jsonc/);
 });
@@ -174,9 +166,25 @@ test('installOpencode: a malformed config still aborts before anything is writte
   assert.throws(() => installOpencode({
     configDir: '/cfg',
     tuiPluginPath: '/abs/sprite.tsx',
-    serverPluginPath: '/abs/plugin.js',
     read: (p) => files[p] ?? null,
     writeAtomic: (p, text) => { writes[p] = text; },
   }), /\/cfg\/tui\.json/);
   assert.deepEqual(writes, {});   // opencode.json is mergeable, but nothing is written
+});
+
+test('legacyServerPlugin checks the checkout package and never guesses from its name', () => {
+  const entry = '/pets-x/integrations/opencode/plugin.js';
+  for (const name of ['familiar', 'relay', 'other']) {
+    assert.equal(legacyServerPlugin(entry, { readFile: (path) => {
+      assert.equal(path, '/pets-x/package.json');
+      return JSON.stringify({ name });
+    } }), name === 'familiar' ? 'familiar' : 'other');
+  }
+  for (const value of [null, 'broken JSON']) {
+    assert.equal(legacyServerPlugin(entry, { readFile: () => value }), 'unknown');
+  }
+  assert.equal(legacyServerPlugin(entry, { readFile: () => { throw new Error('unreadable'); } }), 'unknown');
+  for (const other of [null, 4, 'integrations/opencode/plugin.js', '/repo/other.js']) {
+    assert.equal(legacyServerPlugin(other, { readFile: () => assert.fail('must not read unrelated entries') }), 'other');
+  }
 });

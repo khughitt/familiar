@@ -127,28 +127,6 @@ running session at its next checkout change or next session.
 Use `familiar --color auto projects` for coloured swatches in a TTY; the CLI
 defaults to plain output.
 
-### Measuring hook latency
-
-Every agent tool call runs a hook, so identity discovery is measured, not
-assumed. `just bench-hook MODE BASELINE CANDIDATE FIXTURE [SAMPLES WARMUPS PAIRS]`
-(defaults 30, 5 and 4) times complete `familiar hook PreToolUse` processes for
-two checkouts in one sitting, on a fixture main checkout and a linked worktree
-with real Git. Pairs run the two checkouts' batches back to back and alternate
-which goes first, so host drift lands on both sides of a pair. FIXTURE must be a
-fresh empty directory; it holds the repositories, separate bus state per
-checkout and context, `batches.jsonl` (appended as each batch completes) and
-`report.json`. A sample counts only when the hook exited cleanly with no output
-and left a fresh working agent record and intent. `pilot` mode accepts the same
-checkout twice and proves the tool; `compare` needs two distinct revisions and
-enforces the Git spawn counts (two on a main checkout; three on a linked one).
-The candidate resolves a controlled registered colour on its first event per
-context and carries it for the rest of the sitting; the baseline spawns no
-`tasks`. The tasks executable is a fixture stand-in, so its measured lookup
-time is the stand-in's spawn cost rather than real tasks latency. Timing is
-never judged automatically: the report gives medians, p95, each pair's difference and the probe's own cost for review.
-Each batch is recorded by `tools/tt` as `bench-hook-<context>-<version>`. It
-needs Linux; the measurement covers the hook process, not a live agent.
-
 ## macOS integration
 
 ### Codex pets

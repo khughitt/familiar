@@ -56,7 +56,7 @@ printf '\n--- cell %s / %s ---\n' "$FAMILIAR_TERMINAL" "$FAMILIAR_GATE_AGENT"
 case "$_gc_agent" in
   claude-code)
     cat <<'TXT'
-Drive all SIX states, then exit normally. Exact triggers (src/adapters/claude-code.js):
+Drive all SIX states, then exit normally. Exact triggers (relay Claude Code adapter):
   idle            SessionStart          fires on launch — nothing to do
   working         UserPromptSubmit      submit any prompt (PreToolUse also maps here)
   needs-approval  Notification:permission_prompt

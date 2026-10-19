@@ -175,10 +175,10 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
   assert.deepEqual(uncovered, []);
 });
 
-// setup claude-code|codex are protocol rows: the harness settings document is the
+// setup claude-code|relay are protocol rows: the harness settings document is the
 // whole point, so stdout is that JSON file whichever output mode is asked for.
 test('setup prints the settings document in every mode', () => {
-  for (const agent of ['claude-code', 'codex']) {
+  for (const agent of ['claude-code', 'relay']) {
     const docs = [[], ['--json'], ['--pretty']].map((flags) => {
       const r = run([...flags, 'setup', agent]);
       assert.equal(r.status, 0, `${agent} ${flags}: ${r.stderr}`);

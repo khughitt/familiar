@@ -47,6 +47,7 @@ export function createSpriteRuntime({
   let settleCleanup = null;
   let disposePromise = null;
 
+  // Relay projects OpenCode windows under their unchanged session id, opencode:<pid>.
   const state = createSpriteState(pid, {
     now, setTimer, clearTimer, capability,
     requestRender: () => renderer.requestRender(),
@@ -110,7 +111,7 @@ export function createSpriteRuntime({
       // exactly that on both Kitty and Ghostty.
       //
       // Dropping the filter is cheap. stateDir holds only agents.json, agents.lock and
-      // intent.json, every bus transaction writes intent.json anyway, refresh()
+      // intent.json, every presentation projection writes intent.json anyway, refresh()
       // coalesces concurrent calls, and state.apply() is a no-op when the pose has not
       // moved -- and on Darwin there is only the one event to answer.
       const next = watchDirectory(stateDir, () => { void refresh(); });
