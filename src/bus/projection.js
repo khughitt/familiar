@@ -63,9 +63,12 @@ export async function projectSnapshot({
       } else {
         continue;
       }
+      // Niri orders sessions by their last event or row change, not by reconciles.
+      const changed = !old || old.state !== row.state || old.updatedAt !== row.updatedAt
+        || (event?.sessionId === sid && !stale);
       kept.set(sid, {
         ...context, sessionId: sid, agentId: row.id, harness: row.harness, basis,
-        seq, state: row.state, updatedAt: row.updatedAt,
+        seq: changed ? seq : old.seq, state: row.state, updatedAt: row.updatedAt,
       });
     }
   }

@@ -93,7 +93,11 @@ events (§4). `REGISTRY_SUPERSEDED`, `CORRUPT_STATE` and `INVALID_SCHEMA` from
 `readSnapshot` are errors: nothing is written, and the next invocation retries. A
 missing snapshot (`null`) projects to no sessions.
 
-The `seq` taken in step 3 orders emission exactly as it does today. Relay's
+The invocation `seq` taken in step 3 orders captured terminal emission and marks
+new cleanup evidence. A session's `seq` advances only on its own non-stale event,
+fresh admission, or a changed projected `state`/`updatedAt` (including a worker
+fold). Reconcile and unrelated events preserve unchanged sessions' ordering for
+Niri. Sequence values never gate authoritative snapshot updates. Relay's
 `generation` and `revision` are recorded in `sessions.json` for diagnostics only;
 they are never compared with ledger evidence. A generation reset needs no special
 case: sessions missing from the new snapshot leave the projection, and the counter
@@ -118,7 +122,7 @@ type Session = {
   remote: string | null; repoRoot: string | null; repositoryRoot: string | null;
   projectColor: string | null;
   pid: number; starttime: number; // the terminal process (§4)
-  seq: number;                    // the counter value at which this record last changed
+  seq: number;                    // counter at last own event, admission, or state/timestamp change
   state: State; updatedAt: number;
 };
 type Ended = {

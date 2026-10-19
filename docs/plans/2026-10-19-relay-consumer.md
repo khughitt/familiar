@@ -155,8 +155,15 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `an unadmitted registry agent without prepared enrichment is not projected` (§4).
   - `the projection depends on the snapshot, not on the seq order`: project a newer
     row first, then again with an older `seq` and the same snapshot. The output
-    reflects the snapshot. This pins only the pure property; the lock/read ordering it
-    relies on is tested through the runner in Task 5.
+    reflects the snapshot and preserves unchanged session ordering. A subsequent
+    changed snapshot still updates state even with an older invocation `seq`.
+    This pins only the pure property; the lock/read ordering it relies on is tested
+    through the runner in Task 5.
+  - Project two sessions sharing a Niri window with distinct session sequences:
+    reconcile and an unrelated event keep the winner and emit no completion pulse.
+    An own non-stale event, fresh admission, or changed projected state/timestamp
+    (including worker fold) advances only the affected session's sequence. The
+    invocation sequence remains separate for terminal emission and cleanup evidence.
   - `stale enrichment is discarded`: the prepared basis differs from the locked row in
     turn by process, by cwd and by generation. `stale === true`; with a matching prior
     record, the context is kept and only the state updates; with none, the session is

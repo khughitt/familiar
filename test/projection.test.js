@@ -4,6 +4,7 @@ import { loadThemePack } from 'familiar-theme';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { projectSnapshot } from '../src/bus/projection.js';
+import { planWindowSignals } from '../integrations/niri/signal.js';
 import { EMPTY_SESSIONS } from '../src/bus/sessions.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -53,7 +54,75 @@ test('the projection depends on the snapshot, not on the seq order', async () =>
   const second = await project({ snapshot: snapshot(a), prior: first.sessions, seq: 10 });
   assert.equal(second.sessions.sessions.a.state, 'done');
   assert.equal(second.sessions.sessions.a.updatedAt, 2000);
-  assert.equal(second.sessions.sessions.a.seq, 10);
+  assert.equal(second.sessions.sessions.a.seq, 20);
+  const newer = row('a', { state: 'idle', updatedAt: 3000 });
+  const third = await project({ snapshot: snapshot(newer), prior: second.sessions, seq: 11 });
+  assert.equal(third.sessions.sessions.a.state, 'idle');
+  assert.equal(third.sessions.sessions.a.updatedAt, 3000);
+});
+
+test('projection preserves the Niri winner through reconcile and unrelated events', async () => {
+  const a = row('a');
+  const b = row('b');
+  const c = row('c');
+  const resolveVisuals = async (sessions) => ({
+    intent: Object.fromEntries(Object.entries(sessions).map(([sid, record]) => [sid, {
+      current: { state: record.state, urgency: record.state === 'done' ? 'notice' : 'none',
+        motion: 'static', motionPolicy: 'full', color: { base: '#123456' }, identity: { member: sid } },
+      expiresAt: null, after: null,
+    }])), faults: new Map(),
+  });
+  let previous = prior(session(a), session(b, { seq: 2 }), session(c, { seq: 3 }));
+  let signals = { sent: new Map(), states: new Map() };
+  const resync = (sessions, intent) => {
+    signals = planWindowSignals({ intent, sessions: sessions.sessions,
+      sessionWindows: { a: { windowId: 7 }, b: { windowId: 7 } },
+      windows: [{ id: 7, signal: { sources: ['familiar'] } }],
+      ...signals, themeId: 'cats', now: 1000,
+    });
+    return signals;
+  };
+  resync(previous, (await resolveVisuals(previous.sessions)).intent);
+  assert.equal(JSON.parse(signals.sent.get(7)).tag, 'cats/b');
+  for (const options of [
+    { seq: 4 },
+    { seq: 5, event: { sessionId: 'c' }, prepared: prepared(c) },
+  ]) {
+    const result = await project({ snapshot: snapshot(a, b, c), prior: previous, resolveVisuals, ...options });
+    resync(result.sessions, result.intent);
+    assert.equal(JSON.parse(signals.sent.get(7)).tag, 'cats/b');
+    assert.deepEqual(signals.commands, [], 'no winner change or completion pulse');
+    assert.equal(result.sessions.sessions.a.seq, 1);
+    assert.equal(result.sessions.sessions.b.seq, 2);
+    previous = result.sessions;
+  }
+  const ownEvent = await project({ snapshot: snapshot(a, b, c), prior: previous, resolveVisuals,
+    seq: 6, event: { sessionId: 'a' }, prepared: prepared(a) });
+  resync(ownEvent.sessions, ownEvent.intent);
+  assert.equal(ownEvent.sessions.sessions.a.seq, 6);
+  assert.equal(ownEvent.sessions.sessions.b.seq, 2);
+  assert.equal(JSON.parse(signals.sent.get(7)).tag, 'cats/a');
+  assert.equal(signals.commands.some(({ args }) => args[0] === 'pulse-window-signal'), false);
+
+  const doneB = row('b', { state: 'done', updatedAt: 2000 });
+  const changed = await project({ snapshot: snapshot(a, doneB, c), prior: ownEvent.sessions, resolveVisuals, seq: 7 });
+  resync(changed.sessions, changed.intent);
+  assert.equal(changed.sessions.sessions.a.seq, 6);
+  assert.equal(changed.sessions.sessions.b.seq, 7);
+  assert.equal(JSON.parse(signals.sent.get(7)).tag, 'cats/b');
+  assert.deepEqual(signals.commands.filter(({ args }) => args[0] === 'pulse-window-signal').map(({ args }) => args[6]), ['done']);
+  const unchanged = await project({ snapshot: snapshot(a, doneB, c), prior: changed.sessions, resolveVisuals, seq: 8 });
+  resync(unchanged.sessions, unchanged.intent);
+  assert.equal(unchanged.sessions.sessions.b.seq, 7);
+  assert.deepEqual(signals.commands, []);
+});
+
+test('changed state or timestamp advances ordering without an own event', async () => {
+  const a = row('a');
+  for (const update of [{ state: 'idle' }, { updatedAt: 2000 }]) {
+    const result = await project({ snapshot: snapshot(row('a', update)), prior: prior(session(a)), seq: 5 });
+    assert.equal(result.sessions.sessions.a.seq, 5);
+  }
 });
 
 test('stale enrichment is discarded for a changed process, cwd or generation', async () => {
@@ -70,6 +139,7 @@ test('stale enrichment is discarded for a changed process, cwd or generation', a
     assert.equal(kept.sessions.sessions.a.project, 'repo');
     assert.equal(kept.sessions.sessions.a.state, 'done');
     assert.equal(kept.capture, null);
+    assert.equal(kept.sessions.sessions.a.seq, 1, 'stale event does not reorder unchanged session');
     const old = session(a, { basis: staleBasis });
     const dropped = await project({ snapshot: snapshot(a), prior: prior(old), event: { sessionId: 'a' }, prepared: enrichment });
     assert.equal(dropped.stale, true);
@@ -163,9 +233,14 @@ test('worker rows fold into their root, taking the latest state and updatedAt', 
   assert.equal(result.sessions.sessions.a.updatedAt, 3000);
   assert.deepEqual(result.sessions.sessions.a.basis, basis(root));
   const newerRoot = row('a', { state: 'done', updatedAt: 5000 });
-  const next = await project({ snapshot: snapshot(newerRoot, worker), prior: result.sessions });
+  const next = await project({ snapshot: snapshot(newerRoot, worker), prior: result.sessions, seq: 6 });
   assert.equal(next.sessions.sessions.a.state, 'done');
   assert.equal(next.sessions.sessions.a.updatedAt, 5000);
+  assert.equal(next.sessions.sessions.a.seq, 6);
+  const folded = await project({ snapshot: snapshot(root, worker), prior: prior(session(root)), seq: 7 });
+  assert.equal(folded.sessions.sessions.a.seq, 7);
+  const stable = await project({ snapshot: snapshot(root, worker), prior: folded.sessions, seq: 8 });
+  assert.equal(stable.sessions.sessions.a.seq, 7);
 });
 
 test('a sessionId shared by two agents is a collision', async () => {

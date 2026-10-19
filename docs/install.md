@@ -45,12 +45,45 @@ process admission, and the agent registry; Familiar owns presentation state.
 The steps below change harness configuration and are the **operator cutover**,
 tracked separately as `hq-539508`. Updating this checkout does not perform them.
 
+Before upgrading in place or editing configuration, retain a complete, working
+pre-migration Familiar checkout at a stable absolute path, including its installed
+dependencies. Install the new revision in a different checkout. Keep the old
+`bin/familiar` (which still accepts `hook`), `integrations/opencode/plugin.js`,
+its imported modules, and sprite renderer available until cutover is accepted.
+An old hook command pointing at the new CLI, or a restored plugin entry pointing
+at a deleted file, is **not** a working rollback.
+
+While harnesses are stopped, ensure all old Familiar hook commands, Claude
+`statusLine`, OpenCode server/TUI plugin entries and Familiar service/launcher
+references resolve into that retained checkout. If the original checkout was
+already upgraded, first recover the previous revision and its dependencies into
+a separate checkout and change those references to its absolute paths. Inspect
+commands and imported plugin files there before recording the rollback baseline.
+Do not delete old Familiar state during this cutover.
+
+Create a fresh private backup directory (replace the example path):
+
+```sh
+FAMILIAR_NEW=/absolute/path/to/new/familiar/bin/familiar
+CUTOVER_BACKUP=/absolute/path/to/retained-cutover-backup
+mkdir -m 700 "$CUTOVER_BACKUP"
+```
+
+The cutover commands below invoke the new checkout explicitly, so they do not
+depend on which version a shared launcher selects. Keep the backup directory,
+old checkout, and relay's artifacts for the whole rollback window. Before each configuration edit, save its exact bytes, permissions, and
+whether it existed; save the result after each edit too. This includes relay's
+subscribers file and any launcher/service changes. Restoring an absent file means
+removing only the file created by that operation. Stop on unexpected drift rather
+than overwrite later edits. The examples below assume existing plain JSON harness
+files; JSONC/manual edits need the same before/after snapshots of the actual files.
+
 Install relay and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/main/docs/runbooks/hook-install-rollback.md),
 including the platform evidence gates. Make the relay CLI available on `PATH`
 from that installation. Generate Familiar's observer document:
 
 ```sh
-familiar setup relay
+"$FAMILIAR_NEW" setup relay
 ```
 
 Review stdout and merge its `subscribers` entries into relay's
@@ -66,8 +99,11 @@ when starting OpenCode.
 Relay's installer plans by default. Inspect the JSON plan, then repeat the same
 arguments with `--apply --artifact <file>` to write the configuration and save a
 rollback artifact. Keep that artifact; `relay rollback --artifact <file>` restores
-the recorded preimages. The apply command recomputes the plan from the current
-configuration, so inspect a fresh plan if anything changed after review. For
+the recorded preimages only while each target still matches its saved before or
+after bytes. Later edits to the same file must be reversed first. Relay's artifact
+covers only relay's changes, not Familiar's installer, status line, subscribers,
+launchers, or services. Follow the coordinated rollback below. The apply command
+recomputes the plan from the current configuration, so inspect a fresh plan if anything changed after review. For
 hook commands, relay records the Node executable used by its installer; use its
 `--node /absolute/stable/node` option when that executable would otherwise live
 under a version manager. Existing guard subscribers may require `--evidence`;
@@ -78,19 +114,23 @@ follow relay's guide rather than removing them to make installation pass.
 Familiar's Claude Code settings fragment now carries only its status line:
 
 ```sh
-familiar setup claude-code
+"$FAMILIAR_NEW" setup claude-code
 ```
 
-Review stdout and merge it into `~/.claude/settings.json`. Then plan and apply
-relay's hooks, retiring Familiar's old hook entries:
+Save the baseline before merging stdout into `~/.claude/settings.json`; save
+that merged result before relay's edit. Then plan and apply relay's hooks,
+retiring Familiar's old hook entries:
 
 ```sh
+cp -p "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.before-familiar"
+# Merge the reviewed statusLine fragment now, then:
+cp -p "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.after-familiar"
 relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
   --target "$HOME/.claude/settings.json" --retire familiar --json
 # After reviewing the plan:
 relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
   --target "$HOME/.claude/settings.json" --retire familiar \
-  --apply --artifact "$HOME/.config/relay/claude-code-install.json"
+  --apply --artifact "$CUTOVER_BACKUP/claude-code-install.json"
 ```
 
 ### Codex lifecycle hooks
@@ -103,7 +143,7 @@ relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.jso
 # After reviewing the plan:
 relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.json" \
   --target "$HOME/.codex/hooks.json" --retire familiar \
-  --apply --artifact "$HOME/.config/relay/codex-install.json"
+  --apply --artifact "$CUTOVER_BACKUP/codex-install.json"
 ```
 
 The hook targets must already contain valid configuration; for a fresh target,
@@ -218,16 +258,29 @@ Restart an existing Codex session after syncing.
 
 Relay installs the server plugin; Familiar installs the sprite renderer. This is
 also part of the operator cutover above. Plan the relay change, review it, and
-apply it before installing the sprite:
+apply it before installing the sprite. Save relay's exact postimage before
+Familiar removes the old server entry; rollback needs those bytes. With plain
+`opencode.json` and `tui.json` (no `.jsonc` siblings), run:
 
 ```sh
+OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+mkdir -p "$OPENCODE_DIR"
+if test -e "$OPENCODE_DIR/tui.json"; then
+  cp -p "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.before-familiar"
+else
+  touch "$CUTOVER_BACKUP/tui.before-familiar.absent"
+fi
 relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
-  --config-dir "$HOME/.config/opencode" --json
+  --config-dir "$OPENCODE_DIR" --json
 # After reviewing the plan:
 relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
-  --config-dir "$HOME/.config/opencode" \
-  --apply --artifact "$HOME/.config/relay/opencode-install.json"
-familiar install opencode
+  --config-dir "$OPENCODE_DIR" \
+  --apply --artifact "$CUTOVER_BACKUP/opencode-install.json"
+cp -p "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-relay"
+"$FAMILIAR_NEW" install opencode --config-dir "$OPENCODE_DIR"
+# After a successful install (or completing its manual edits):
+cp -p "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-familiar"
+cp -p "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.after-familiar"
 ```
 
 Create the OpenCode config directory first if it is absent. Relay preserves
@@ -243,6 +296,61 @@ A malformed configuration prevents any Familiar writes.
 
 Restart OpenCode after installation. For server-side errors, inspect relay's
 `~/.local/state/relay/opencode-plugin.log` (or the log under `RELAY_STATE_DIR`).
+
+#### Coordinated rollback
+
+Stop the affected harnesses and Familiar jobs first. Reverse completed operations
+in reverse order, using only artifacts and snapshots from this cutover. If an
+install stopped partway, inspect its artifact and actual files first; do not run
+steps for edits that never happened. Preserve any subsequent user edits separately
+and reconcile them before restoring snapshots.
+
+For the plain JSON OpenCode sequence above, the following block first verifies
+that neither file changed since Familiar's install. It then undoes Familiar's
+server/TUI changes, verifies relay's exact postimage, and rolls relay back:
+
+```sh
+(
+  set -e
+  cmp "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-familiar"
+  cmp "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.after-familiar"
+  cp -p "$CUTOVER_BACKUP/opencode.after-relay" "$OPENCODE_DIR/opencode.json"
+  if test -e "$CUTOVER_BACKUP/tui.before-familiar.absent"; then
+    rm "$OPENCODE_DIR/tui.json"
+  else
+    cp -p "$CUTOVER_BACKUP/tui.before-familiar" "$OPENCODE_DIR/tui.json"
+  fi
+  cmp "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-relay"
+  relay rollback --artifact "$CUTOVER_BACKUP/opencode-install.json"
+)
+```
+
+Calling relay rollback directly after `familiar install opencode` can fail with
+a preimage-drift refusal (the current CLI prints `relay: relay operation failed`):
+Familiar removed the old plugin from relay's saved postimage. Do not edit the
+artifact or bypass that check. For JSONC, restore the exact saved post-relay `.jsonc` bytes before relay rollback, and restore the TUI file's own
+preimage; regenerating equivalent JSON is insufficient.
+
+For Codex, `relay rollback --artifact "$CUTOVER_BACKUP/codex-install.json"`
+restores the old hook commands. For Claude, the status line was changed **before**
+relay, so reverse relay first, then the status line:
+
+```sh
+(
+  set -e
+  relay rollback --artifact "$CUTOVER_BACKUP/claude-code-install.json"
+  cmp "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.after-familiar"
+  cp -p "$CUTOVER_BACKUP/claude.before-familiar" "$HOME/.claude/settings.json"
+)
+```
+
+If the status line was edited after relay instead, first restore the saved exact
+post-relay settings bytes, then roll relay back. Finally restore the subscribers
+file and any services/launchers from their separately recorded preimages. Check
+that every restored hook executable and plugin import resolves into the retained
+compatible Familiar checkout, then restart harnesses and jobs and smoke-test them.
+Do not restore a launcher to this migration's CLI: it has no `hook` command.
+Neither rollback nor updating this checkout authorizes a live host cutover.
 
 OpenCode renderer graphics, tint, bell, and live terminal delivery remain
 provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
