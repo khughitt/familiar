@@ -18,6 +18,8 @@ are deleted.
 `git+https://github.com/khughitt/relay.git#v0.1.0` (later `#v0.1.1`), familiar-theme
 v0.3.0.
 
+**Status:** draft for review, round 2. Round 1 (codex gpt-6.1-sol) found eight gaps, all addressed: teardown acknowledgement, the two process providers, absent relay state, OpenCode retirement by package name, the theme fixture, the race-test pause point, runner-level read ordering, and a real pty.
+
 **Spec:** `docs/specs/2026-10-19-relay-consumer-design.md` (accepted 2026-10-19). Its
 parent is ops `docs/specs/2026-09-16-relay-design.md` §3 and §6, and the contract is
 relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
@@ -42,9 +44,14 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 
 ## Review Focus
 
-1. **Unusable relay state directory.** An absent or 0755 `RELAY_STATE_DIR` makes relay
-   throw `IO_ERROR`. `observe` and `reap` should exit 1 with one line naming the code
-   and write nothing, with no stack trace (Task 5, Task 6).
+1. **Relay state that is absent versus unsafe.**
+   - An **absent** relay state directory or `agents.json` is ordinary absence:
+     `readSnapshot()` returns `null`, which projects to no sessions (admitted ones move
+     to `ended`), and `observe` exits 0.
+   - An **existing unsafe** one (`RELAY_STATE_DIR` at 0755) makes relay throw
+     `IO_ERROR`. Then `observe` and `reap` exit 1 with one line naming the code, write
+     nothing, and print no stack trace.
+   - Covered in Task 4 and Task 5 for the observer, Task 6 for `reap`.
 2. **Corrupt `sessions.json`.** It is an error naming the file, never treated as empty.
    An empty registry plus corrupt sessions must not wipe intent (Task 2).
 3. **A fresh host.** With no familiar state directory and no `sessions.json`, the
@@ -69,10 +76,11 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 - [ ] **Step 1: Write the failing test** `test/relay-parity.test.js`:
   - `relay's observation states are exactly familiar-theme's`:
     `assert.deepEqual([...relaySTATES].sort(), [...themeSTATES].sort())`.
-  - `every relay state resolves assets in the bundled theme`: for each relay `STATES`
-    entry, `assetsFor(pack, defaultMemberForSlot(pack, 0), 'dark')[state].terminal`
-    is an existing file. Load the pack from `paths().themesDir` the way
-    `bin/familiar.js` `context()` does.
+  - `every relay state resolves assets in the committed theme fixture`: for each relay
+    `STATES` entry, `assetsFor(pack, defaultMemberForSlot(pack, 0), 'dark')[state].terminal`
+    is an existing file. Load `test/fixtures/theme-pack` directly with `loadThemePack`,
+    as `test/bin-familiar.test.js` and `test/cli-surface.test.js` do. The engine ships
+    no `themes/` directory, so `paths().themesDir` must not be used.
 - [ ] **Step 2:** `just test-fast`. Expected: FAIL, `Cannot find package 'relay'`.
 - [ ] **Step 3:** add `"relay": "git+https://github.com/khughitt/relay.git#v0.1.0"` to
   `dependencies`, then `npm install`. Confirm that `package-lock.json` records
@@ -143,9 +151,10 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     `pid`/`starttime`, `seq`, the row's `state`/`updatedAt` and every context field;
     intent has the key.
   - `an unadmitted registry agent without prepared enrichment is not projected` (§4).
-  - `overlapping observers cannot regress intent`: project a newer row first, then
-    with an older `seq` and the same snapshot. The output reflects the snapshot, not
-    the call order.
+  - `the projection depends on the snapshot, not on the seq order`: project a newer
+    row first, then again with an older `seq` and the same snapshot. The output
+    reflects the snapshot. This pins only the pure property; the lock/read ordering it
+    relies on is tested through the runner in Task 5.
   - `stale enrichment is discarded`: the prepared basis differs from the locked row in
     turn by process, by cwd and by generation. `stale === true`; with a matching prior
     record, the context is kept and only the state updates; with none, the session is
@@ -220,6 +229,11 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     - is called before, and wraps, the session's transmission lock.
   - `pruneTerminalOwners({ transmitDir, ownerAlive, lockWith }) → Promise<{ removed: string[] }>`:
     removes records whose `pid`/`starttime` owner is confirmed not alive.
+- Produces, in `src/render/term/emit.js`, for teardown (`next === null`): `{ kind: 'ended' }`
+  only when the reset bytes were written. When the owner is alive but the terminal
+  cannot be opened, or `isatty` rejects it, the tombstone is still written (it is
+  ordering evidence) and the result is `{ kind: 'suppressed', reason: 'open' }` or
+  `{ kind: 'suppressed', reason: 'not-a-tty' }`. Today both of those return `ended`.
 - Produces, in `src/render/term/emit.js`: `emit({ …, next, intent })` accepts
   `intent === null` with a non-null `next`, returning `{ kind: 'withdrawn' }`. Inside
   the existing section it:
@@ -238,12 +252,21 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     - `absent intent withdraws visuals`: ledger `held: null`, `presented: null`,
       `ended: false`; bytes are exactly `oscReset()` for a live owner, and none for a
       dead owner;
-    - a later event after the withdrawal creates normally.
+    - a later event after the withdrawal creates normally;
+    - `teardown reports a reset it could not write`: with `open` throwing, and then
+      with `checkTty` returning false, a live-owner teardown returns `suppressed` with
+      reason `open` and `not-a-tty`, the ledger tombstone is written, and no bytes are
+      written.
   - `test/emit-section.test.js`: `a captured reset paused across another session's paint
-    writes nothing`. Using the real lock and a `memoryLedger`, A's SessionEnd emission
-    (seq 10) is held by a deferred `fn`; B's transition (seq 11) on the same terminal
-    completes; A resumes and returns `{ kind: 'superseded', reason: 'terminal' }`, and
-    the terminal's bytes are only B's.
+    writes nothing`. A is paused **before it acquires the terminal lock**, not inside
+    the locked callback, which would hold the lock and deadlock B. The steps:
+    - A's teardown emission (seq 10) is given a `lockWith` wrapper that awaits a
+      deferred and only then calls the real `withLock`;
+    - B's transition (seq 11) on the same terminal runs to completion through the real
+      lock;
+    - the deferred is resolved, and A acquires the lock, finds the owner `B/11`, and
+      returns `{ kind: 'superseded', reason: 'terminal' }`;
+    - the terminal's bytes are only B's.
   - `test/ledger-prune.test.js`: the `*.json` sweep ignores the `terminals/` subdirectory.
 - [ ] **Step 2:** `just test-fast`. Expected: the new cases FAIL.
 - [ ] **Step 3:** implement `terminal-owner.js`. Use `withLock` with
@@ -288,9 +311,9 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   ```js
   prepareEnrichment({
     envelope, snapshot, prior,     // prior: Sessions
-    processOps,                    // relay createProcessOps()
+    relayProcess,                  // relay createProcessOps(): ancestors, handleOf, executableOf, argvOf
+    renderProcess,                 // familiar defaultProcessOps (src/bus/proc.js): startTimeOf
     adapterFor,                    // relay adapterFor
-    startTimeOf,                   // familiar src/bus/proc.js
     gitContext, lookupProjectColor,
     startPid = process.pid,
   }) → Promise<
@@ -298,28 +321,38 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     | { ok: false, sessionId, exitCode: 0 | 1, reason: string }>
   ```
 
-  It selects the root row for a worker (`row.root` → `snapshot.agents[row.root]`). Its
-  order of work:
-  1. Check `envelope.registry.generation === snapshot.generation`; otherwise
+  The `ok: false` form gains `absent: true` when the session has no row. Its order of
+  work:
+  1. **Absence.** If `snapshot === null`, or the event's agent has no row
+     (`snapshot.agents[envelope.event.agentId]` is missing), or a worker's root row is
+     missing: return `{ ok: false, absent: true, exitCode: 0, reason: 'no registry row
+     for this session' }`. Nothing is dereferenced first. The row is the root row for a
+     worker (`row.root` → `snapshot.agents[row.root]`).
+  2. Check `envelope.registry.generation === snapshot.generation`; otherwise
      `exitCode 0`, reason `obsolete envelope`.
-  2. Get `resolveSessionPid({ startPid, ancestors: processOps.ancestors, executableOf, argvOf })`,
-     then `processOps.handleOf(pid)`. A null result or a throw is `exitCode 1`,
+  3. Get `resolveSessionPid({ startPid, ancestors: relayProcess.ancestors, executableOf: relayProcess.executableOf, argvOf: relayProcess.argvOf })`,
+     then `relayProcess.handleOf(pid)`. A null result or a throw is `exitCode 1`,
      `ownership unproven`.
-  3. Compare the handle with `row.process`: a null row process is `exitCode 1`; a
+  4. Compare the handle with `row.process`: a null row process is `exitCode 1`; a
      different process is `exitCode 0`, `a newer process owns this session`.
-  4. Get `resolveTerminalPid({ startPid, ancestors })`; null is `exitCode 1` with
-     `noTerminalMessage`.
-  5. Run `gitContext(row.cwd)` on every call.
-  6. Reuse `projectColor` from `prior.sessions[sessionId]` when its `repoRoot` is equal;
+  5. Get `resolveTerminalPid({ startPid, ancestors: relayProcess.ancestors })`; null is
+     `exitCode 1` with `noTerminalMessage`. Stamp the terminal with
+     `renderProcess.startTimeOf(pid)`.
+  6. Run `gitContext(row.cwd)` on every call.
+  7. Reuse `projectColor` from `prior.sessions[sessionId]` when its `repoRoot` is equal;
      otherwise call `lookupProjectColor(repoRoot)` (or `NO_PROJECT` outside a
      repository).
 
 - [ ] **Step 1: Write failing tests:**
   - `observe-envelope.test.js`: each field's refusal, the empty-input message, and
     both valid forms.
-  - `observe-enrich.test.js`, with fake `processOps` and chains built after relay's
+  - `observe-enrich.test.js`, with fake `relayProcess` and `renderProcess` and chains
+    built after relay's
     `relay/fixtures/ancestry.json` shapes:
     - a proven event returns `ok` with the root row's basis for a worker;
+    - `absence is not an error`: a `null` snapshot, a snapshot without the event's
+      agent, and a worker whose root row is missing each return `absent: true` and
+      `exitCode 0`, with no process or git call;
     - an obsolete envelope generation → `exitCode 0`;
     - `stall before the first read`: the snapshot row holds B's handle, while the
       observer chain resolves A's process → `exitCode 0`, no git call made;
@@ -354,13 +387,23 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `visualResolver(ctx) → resolveVisuals` (Task 2's signature), built from
     `makePrepareSprites` plus `resolveAll`.
 - Produces, in `src/observe/emission.js`:
-  `emitTransition({ prev, next, intent /* Intent | null */, seq, harness, provisional, paths, processOps, platform, hookEnv, probe, lockWith }) → Promise<result>`.
+  `emitTransition({ prev, next, intent /* Intent | null */, seq, harness, provisional, paths, renderProcess, platform, hookEnv, probe, lockWith }) → Promise<result>`.
+  `renderProcess` is familiar's `defaultProcessOps` (`recordOf`, `ownerAlive`,
+  `startTimeOf`), exactly what today's `emitHookTransition` uses. It never receives
+  relay's provider.
   It is today's `emitHookTransition` wrapped in `withTerminal` (Task 3), with
   `transmitSprite = printsPlaceholderCells(harness)`. `prev`/`next` are `Session` or
   `Ended` records (both carry `pid`, `starttime`, `sessionId`, `project`).
 - Produces, in `src/observe/run.js`:
   - `observe({ text, deps }) → Promise<{ exitCode: 0 | 1, lines: string[] }>`. `deps`:
-    `{ paths, relay: { readSnapshot }, processOps, adapterFor, startTimeOf, gitContext, lookupProjectColor, loadContext, emitTransition, now, env }`.
+    `{ paths, relay: { readSnapshot }, relayProcess, renderProcess, adapterFor, gitContext, lookupProjectColor, loadContext, emitTransition, lockWith, now, env }`.
+    The two process providers are distinct contracts:
+    - `relayProcess` (relay's `createProcessOps()`) serves only `prepareEnrichment`'s
+      proof and ancestry;
+    - `renderProcess` (familiar's `defaultProcessOps`) serves terminal stamping,
+      emission, locks, `reap`'s `ended` liveness and the prunes.
+
+    The CLI wires both; tests inject fakes of each separately.
   - `reconcile({ deps }) → Promise<{ sessions, awaiting: string[], lines: string[] }>`:
     a full projection with `event: null`, under the lock, with no emission.
   - `acknowledgeEnded({ paths, sessionId, seq, lockWith }) → Promise<boolean>`: under the
@@ -373,10 +416,14 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
        intent, then `projectSnapshot({ mode: 'drop-only', event: { sessionId } })`, and
        write;
      - after it: if `capture.prev` exists, `emitTransition({ prev, next: null })`;
-     - if the outcome's `kind` is `ended`, `suppressed` with reason `owner-dead`, or
-       `superseded`, call `acknowledgeEnded`.
-  3. Any other `event`: read the snapshot unlocked, run `prepareEnrichment`, and if
-     `!ok` return `{ exitCode, lines: [reason] }` without emitting.
+     - call `acknowledgeEnded` only for an outcome of `ended` (the reset was written),
+       `suppressed` with reason `owner-dead`, or `superseded` (session ledger or
+       terminal). A `suppressed` `open` or `not-a-tty` (Task 3) keeps the evidence.
+  3. Any other `event`: read the snapshot unlocked and run `prepareEnrichment`.
+     - On `absent`, run step 4 with `prepared: null`, so the disappearance is
+       reconciled, then return `exitCode 0` without emitting.
+     - On any other `!ok`, return `{ exitCode, lines: [reason] }` without projecting or
+       emitting.
   4. Under the lock: `nextSeq`, `readSnapshot`, `readSessions`, then
      `projectSnapshot({ mode: 'full', prepared, event })` with
      `resolveVisuals = visualResolver(await loadContext())`, and write `sessions`, then
@@ -404,12 +451,30 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     - an `emitTransition` that throws leaves it, and the next event retries;
     - `acknowledgeEnded` with a different `seq` removes nothing;
   - `a stale observer emits nothing and exits 0`;
+  - `teardown keeps evidence when the reset was not written`: `emitTransition` returns
+    `suppressed` `open` and then `not-a-tty`; `ended[sid]` remains, and the next event
+    of that session retries it;
+  - `the snapshot is read after the presentation lock`. Two `observe()` calls, X and Y,
+    run over a mutable snapshot store, with `lockWith` gated by deferreds so the test
+    controls who acquires first. The steps:
+    - X's unlocked read sees revision 1, and X then waits at the lock;
+    - the store advances to revision 2 (the session's state changes);
+    - Y acquires, projects and releases;
+    - X acquires.
+
+    `sessions.registry.revision === 2` after X, and `intent.json` shows revision 2's
+    state. An implementation that projected X's pre-lock read would leave revision 1;
+  - `an event whose row vanished reconciles the removal and exits 0`: an admitted
+    session's row is gone and a non-end event arrives. The session moves to `ended`,
+    nothing is emitted, and the exit code is 0;
+  - Review Focus 1, absent: no relay state directory at all → `exitCode 0`, an empty
+    projection, and `sessions.json` written;
   - `a visual fault on the incoming session withdraws visuals and exits 1`;
   - `a missed observer of an admitted session is healed by another session's event`;
   - `a missed first observer leaves the session unadmitted`: a reconcile and another
     session's event do not admit it, and its next event does;
-  - Review Focus 1: an unsafe `RELAY_STATE_DIR` (0755) → `exitCode 1`, one line
-    containing `IO_ERROR`, nothing written;
+  - Review Focus 1, unsafe: an existing `RELAY_STATE_DIR` at 0755 → `exitCode 1`, one
+    line containing `IO_ERROR`, nothing written;
   - Review Focus 3: a fresh host with no state directory admits;
   - Review Focus 4: a pre-written familiar `agents.json` is byte-identical afterwards;
   - Review Focus 5: empty and non-JSON text → `exitCode 1`, one `familiar: observe:`
@@ -435,8 +500,9 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 - Produces: `familiar reap` does four things in order:
   1. `reapRegistry()`;
   2. `reconcile()`;
-  3. drops `ended` entries whose terminal owner `ownerAlive` reports not alive (under
-     the presentation lock);
+  3. drops `ended` entries whose terminal owner `renderProcess.ownerAlive` reports not
+     alive (under the presentation lock). Relay's provider serves only
+     `reapRegistry()`'s own defaults;
   4. `pruneLedgers`, `pruneTerminalOwners` and `sweepTemps`.
 
   `--json` prints
@@ -454,7 +520,10 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
   - `reap lists registry agents awaiting their first event`;
   - `reap drops ended evidence for a dead terminal owner`;
   - `reap never emits`: no terminal bytes, asserted through a recording `emitTransition`
-    injected via env-free deps.
+    injected via env-free deps;
+  - Review Focus 1: an existing `RELAY_STATE_DIR` at 0755 exits 1 with exactly one
+    stderr line `familiar: reap: IO_ERROR: …` and leaves `sessions.json` untouched. An
+    absent relay state directory reconciles to no sessions and exits 0.
 - [ ] **Step 2:** `just test-fast`. Expected: FAIL.
 - [ ] **Step 3:** implement. Relay errors become one stderr line, `familiar: reap:
   <code>: <message>`, and exit 1.
@@ -545,10 +614,26 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
       `['session-end']`, `timeoutMs` 200;
     - `argv: [<realpath of bin/familiar>, 'observe']` for all three;
   - `'codex'` throws `unknown setup target`.
-- Produces, in `familiar install opencode`: writes only `tui.json`. It removes a
-  `plugin` entry ending in `familiar/integrations/opencode/plugin.js` from
-  `opencode.json` when present, reporting `removed familiar's legacy OpenCode server
-  plugin from <path>`.
+- Produces, in `familiar install opencode`: it writes only `tui.json`, and retires
+  familiar's legacy server-plugin registrations from `opencode.json` without depending
+  on the checkout's directory name. The old installer recorded the absolute
+  `<checkout>/integrations/opencode/plugin.js` of whichever clone or worktree ran it.
+  - **Matching.** `legacyServerPlugin(entry, { readFile }) → 'familiar' | 'other' | 'unknown'`,
+    in `src/install/opencode.js`:
+    - an entry that is not an absolute path ending in `/integrations/opencode/plugin.js`
+      is `'other'`;
+    - for one that is, read `<entry>/../../package.json`. `name: "familiar"` is
+      `'familiar'`; any other name is `'other'`. That keeps relay's own
+      `…/node_modules/relay/integrations/opencode/plugin.js`, whose package is `relay`;
+    - an unreadable or missing `package.json` (the checkout itself was deleted) is
+      `'unknown'`.
+  - **Effect.**
+    - `'familiar'` entries are removed, and the output reports `removed familiar's
+      legacy OpenCode server plugin <entry> from <path>`.
+    - `'unknown'` entries are kept and reported: `kept <entry>: cannot tell whether it
+      is familiar's (no package.json beside it); remove it by hand if so`. The command
+      then exits 1 after writing `tui.json`, matching the existing manual-hand-off
+      convention.
 - Produces, in `src/bus/proc.js`: `ancestors` and its Darwin table-walk helpers are
   removed; `startTimeOf`, `lockHolderAlive`, `ownerAlive`, `pidExists`, `isAlive` and
   `recordOf` stay.
@@ -566,8 +651,14 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
     output with relay's `validateSubscribers`, and that `checkBudget` passes for every
     mapped harness/event plus reconcile, which proves the timeouts fit relay's
     budgets.
-  - `install-opencode*`: `tui.json` only; the legacy entry is removed and reported; a
-    run with no legacy entry leaves `opencode.json` byte-identical.
+  - `install-opencode*`:
+    - `tui.json` only;
+    - a legacy entry from **this** checkout is removed and reported;
+    - `a renamed checkout's legacy entry is retired`: a temp clone at `.../pets-x/`
+      whose `package.json` says `familiar` is removed;
+    - relay's `node_modules/relay/integrations/opencode/plugin.js` entry is kept;
+    - an entry whose checkout is gone is kept, reported and exits 1;
+    - a run with no legacy entry leaves `opencode.json` byte-identical.
   - `bin-familiar.test.js`: `familiar observe` end to end through the CLI with a
     reconcile envelope; `familiar hook` is now an unknown-command usage error.
   - `deps.test.js` keeps passing for both launchers.
@@ -589,25 +680,37 @@ relay `docs/api.md` at `v0.1.0`. Section references (§n) below are to the spec.
 ### Task 9: End to end through relay, and the install guide
 
 **Files:**
-- Create: `test/relay-e2e.test.js`
+- Create: `test/relay-e2e.slow.test.js`, `test/fixtures/fake-harness.mjs`
 - Modify: `docs/install.md`, `README.md` (any `familiar hook` or `setup codex` mention)
 
 **Interfaces:**
 - Consumes: the whole chain, through relay's real CLI
   (`node_modules/relay/bin/relay.js`).
 
-- [ ] **Step 1: Write the failing test** `test/relay-e2e.test.js`:
+- [ ] **Step 1: Write the failing test** `test/relay-e2e.slow.test.js`:
   - Use a temp `RELAY_STATE_DIR` (0700) and `FAMILIAR_STATE_DIR`, and a 0600
     `subscribers.json` from `familiar setup relay` output, passed with `--subscribers`.
-  - Wrap the relay hook in a fake harness ancestor: a launcher process whose `comm` is
-    `claude`, with a pty from `test/fixtures/tty-familiar.mjs`'s approach.
+  - **A real pseudo-terminal and a real harness ancestor.** `tty-familiar.mjs` only
+    overrides `stdout.isTTY` and creates no controlling terminal, so it cannot prove
+    admission or the `isatty` gate. Instead:
+    - Make a temp symlink named `claude` pointing at `process.execPath`. The kernel
+      names the process after the path it executed, so `comm` is `claude`.
+    - It runs a new fixture, `test/fixtures/fake-harness.mjs`, which reads payload
+      lines from a FIFO and runs `relay hook --harness claude-code --subscribers <file>
+      <event>` for each, inheriting its stdio.
+    - Launch it under util-linux `script`, the way `test/tmux-pty.slow.test.js` launches
+      its client: `script -qfc '<tmp>/claude <fixture> <fifo>' <log>`. That gives the
+      fake harness a real controlling pty on its fd 1, and both of relay's resolvers
+      find it.
+    - The terminal bytes are read from `<log>`.
+    - Skip with a named reason when not on Linux, or when `script` or `mkfifo` is
+      missing, as the tmux test does.
+  - The file is `test/relay-e2e.slow.test.js`, in the slow partition, run by `just test`.
   - Drive `SessionStart`, `UserPromptSubmit`, `Notification:permission_prompt`, `Stop`
     and `SessionEnd` fixture payloads through `relay hook --harness claude-code`.
   - After each event, `intent.json[sessionId].current.state` is `idle`, `working`,
     `needs-approval`, `done`, and then absent.
   - The ledger ends with `ended: true`, and the terminal received a final `oscReset()`.
-  - Mark it `.slow.test.js` if it needs a pty (the slow partition), and run it with
-    `just test`.
 - [ ] **Step 2:** run `just test`. Expected: FAIL until fixtures exist, then PASS.
 - [ ] **Step 3: Rewrite `docs/install.md`:**
   - the hook sections now tell you to put `familiar setup relay` output into relay's
