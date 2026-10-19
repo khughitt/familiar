@@ -22,6 +22,8 @@ export function paths(env = process.env) {
     themesDir: env.FAMILIAR_THEMES_DIR ?? join(REPO_ROOT, 'themes'),
     agentsPath: join(stateDir, 'agents.json'),
     lockPath: join(stateDir, 'agents.lock'),
+    sessionsPath: join(stateDir, 'sessions.json'),
+    presentationLockPath: join(stateDir, 'presentation.lock'),
     intentPath: join(stateDir, 'intent.json'),
     // The transmission ledger (spec §3.5): one entry and one lock per session, named by
     // ledgerName() so a session id can never be a path. And the bus-wide event counter.
