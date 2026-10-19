@@ -7,7 +7,7 @@ size: m
 complexity: mid
 process: direct
 created: 2026-10-19T16:49:42Z
-updated: 2026-10-19T16:49:47Z
+updated: 2026-10-19T16:49:55Z
 depends: []
 tags: []
 source: fam-6e8321
@@ -30,3 +30,4 @@ Process: direct because the task is bounded exposure assessment and compatible d
 ## Notes
 
 - 2026-10-19T16:49:47Z (feat/relay-identity): concerns: fam-6e8321 extension — Assess inherited dependency advisories recorded during the migration clean-install proof; these were outside the completed migration scope.
+- 2026-10-19T16:49:55Z (feat/relay-identity): Upstream checked before scoping: searched open and closed issues/PRs in lxsmnsyc/seroval (thenable), juliangruber/brace-expansion (denial), and babel/babel (sourceMappingURL); checked default/development branch names and package snapshots, changelogs where present, and recent releases. Known advisories already link fixes, so use released compatible upgrades rather than a local patch. Seroval main is 1.6.7 and next 1.3.2; its package changelog records the 1.6.2 thenable guard (https://github.com/lxsmnsyc/seroval/blob/main/packages/seroval/CHANGELOG.md). Brace main is 5.0.12, with existing reports https://github.com/juliangruber/brace-expansion/pull/65 and https://github.com/juliangruber/brace-expansion/issues/71; no root changelog was found. Babel main is 8.0.7, master core 7.10.2; source-map handling fix https://github.com/babel/babel/pull/17999 is in the search results. Refresh exact applicable versions during implementation. No local reproduction, patch or exploitability assessment was attempted.
