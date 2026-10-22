@@ -3,6 +3,8 @@
 Desktop/terminal/agent familiar engine. Themes install separately with
 `familiar theme add`; this repo ships no art.
 
+- Lifecycle hooks are owned by relay; `familiar setup relay` prints its observer entries.
+  See the [operator cutover instructions](docs/install.md#relay-observers-and-lifecycle-hooks-operator-cutover).
 - Requires Node.js 22+ and Git 2.31+; see [installation and integration setup](docs/install.md).
 - Linux and macOS 14+ on Apple Silicon. On macOS, terminal rendering is still
   provisional — see [surfaces](docs/surfaces.md) for what each platform claims.

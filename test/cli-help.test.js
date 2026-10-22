@@ -94,9 +94,9 @@ test('root and bare families print offline help with status zero', (t) => {
   }
   for (const command of [
     'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
-    'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup codex', 'hook EVENT', 'statusline', 'reap',
+    'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup relay', 'observe', 'statusline', 'reap',
   ]) {
-    assert.equal(root.split(command).length - 1, 1, command);
+    assert.equal(root.split('\n').filter((line) => line.startsWith(`  ${command} `)).length, 1, command);
   }
   assert.deepEqual(readdirSync(f.state).sort(), ['sentinel']);
   assert.deepEqual(readdirSync(f.xdg).sort(), []);
@@ -105,7 +105,7 @@ test('root and bare families print offline help with status zero', (t) => {
 const leaves = [
   ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
-  ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'codex'], ['hook'], ['statusline'], ['reap'],
+  ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'relay'], ['observe'], ['statusline'], ['reap'],
 ];
 
 test('every leaf owns -h and --help before config or work', (t) => {

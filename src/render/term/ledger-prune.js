@@ -12,7 +12,7 @@ export async function pruneLedgers({
   lockWith = withLock, readdir = readdirDefault, now = () => Date.now(),
 }) {
   let names;
-  try { names = await readdir(transmitDir); } catch (error) {
+  try { names = await readdir(transmitDir, { withFileTypes: true }); } catch (error) {
     if (error.code === 'ENOENT') return { removed: [], skipped: [] };
     throw error;
   }
@@ -20,7 +20,9 @@ export async function pruneLedgers({
   const liveNames = new Set(Object.keys(agents).map(ledgerName));
   const removed = [];
   const skipped = [];
-  for (const file of names) {
+  for (const item of names) {
+    if (!item.isFile()) continue;
+    const file = item.name;
     if (!file.endsWith('.json')) continue;
     const name = file.slice(0, -'.json'.length);
     if (liveNames.has(name)) continue;

@@ -1,4 +1,4 @@
-// Real-Git fixtures for worktree tests and the hook benchmark. Commands use argv, a bounded
+// Real-Git fixtures for worktree tests. Commands use argv, a bounded
 // timeout and a command-local hooks path; the environment drops every inherited GIT_* binding
 // and the system/global config, so a developer's Git setup cannot change a fixture.
 import { spawnSync } from 'node:child_process';

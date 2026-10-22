@@ -176,7 +176,7 @@ export async function withLock(lockPath, fn, opts = {}) {
     // critical section itself. It gets consumed waiting out a DEAD holder, not
     // a live one.
     //
-    // WHAT IS ACTUALLY IN THE CRITICAL SECTION (src/bus/transaction.js, commit):
+    // WHAT IS ACTUALLY IN THE CRITICAL SECTION (src/observe/run.js, project):
     // the identity resolve, the ASSET RESOLVE (familiar-theme's assetsFor),
     // and two atomic writes. `git` is the one thing deliberately kept out — it
     // spawns up to two subprocesses on every single tool call, and serializing
@@ -194,7 +194,7 @@ export async function withLock(lockPath, fn, opts = {}) {
     // The asset resolve IS in the lock, and stays there — the surviving half of the
     // old argument, and it survives unchanged. It is the price of failure atomicity:
     // the intent has to be fully earned — every sprite path proven to exist — before
-    // agents.json is allowed to move, or a resolve that throws leaves a record on the
+    // sessions.json is allowed to move, or a resolve that throws leaves a record on the
     // bus that nothing can resolve, and every subsequent transaction for every
     // session throws on it. Hoisting it out of the lock would mean resolving against
     // an `agents` snapshot read outside it, which is a race, not a saving.

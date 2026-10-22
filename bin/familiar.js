@@ -1,13 +1,13 @@
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { loadContext as context, makePrepareSprites } from '../src/observe/context.js';
+export { makePrepareSprites } from '../src/observe/context.js';
+import { readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { adapterFor, AGENTS } from '../src/adapters/index.js';
 import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
-import { convergeCodexProject, shouldConverge } from '../src/install/codex-converge.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
@@ -18,22 +18,25 @@ import { readReceipt, receiptPath } from '../src/theme/receipt.js';
 import { slotSpec } from '../src/protocol/slot-hues.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
-import { applyHookEvent, reap } from '../src/bus/transaction.js';
+import { reapRegistry, readSnapshot, adapterFor, createProcessOps as createRelayProcessOps } from 'relay';
+import { observe, reconcile } from '../src/observe/run.js';
+import { readSessions, writeSessions } from '../src/bus/sessions.js';
+import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
-import { resolveIdentity, resolveIdentities, resolveAll } from '../src/bus/resolve.js';
+import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
-import { emit, settle } from '../src/render/term/emit.js';
+import { settle } from '../src/render/term/emit.js';
 import { terminalTarget } from '../src/render/term/target.js';
 import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js';
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
 import { sweepTemps } from '../src/bus/temp-sweep.js';
-import { composeForIntent, textLines } from '../src/render/term/statusline.js';
+import { composeForIntent } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
 import { readJson } from '../src/bus/store.js';
@@ -41,7 +44,6 @@ import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capa
 import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
 import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
-import { preflightKittyPrograms } from '../src/render/term/kitty-animation.js';
 import {
   loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
   assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
@@ -148,12 +150,12 @@ Set up
   install pets                 Install the active theme as Codex pets
   install opencode             Install the OpenCode integration
   setup claude-code            Print Claude Code integration settings
-  setup codex                  Print Codex integration settings
+  setup relay                  Print familiar's relay observer entries
 
 Runtime
-  hook EVENT                   Record an agent lifecycle event
+  observe                      Project relay's registry into presentation state
   statusline                   Render the Claude Code status line
-  reap                         Remove sessions whose agent has exited
+  reap                         Prune relay's registry and reconcile presentation
 
 Examples:
   familiar whoami
@@ -368,11 +370,11 @@ Usage:
 
 Commands:
   claude-code     Print Claude Code integration settings
-  codex           Print Codex integration settings
+  relay           Print familiar's relay observer entries
 
 Examples:
   familiar setup claude-code
-  familiar setup codex
+  familiar setup relay
 `,
   'setup claude-code': `Print Claude Code integration settings.
 
@@ -384,32 +386,22 @@ Prints JSON for you to merge into Claude Code settings; it never reads or writes
 Examples:
   familiar setup claude-code
 `,
-  'setup codex': `Print Codex integration settings.
+  'setup relay': `Print familiar's relay observer entries.
 
 Usage:
-  familiar setup codex
+  familiar setup relay
 
-Prints JSON for you to merge into Codex settings; it never reads or writes those settings.
-Codex draws its own pet, so this configures lifecycle hooks only — see \`familiar install pets\`.
+Prints JSON for you to merge into relay's subscribers.json; it writes nothing.
 
 Examples:
-  familiar setup codex
+  familiar setup relay
 `,
-  hook: `Record an agent lifecycle event.
+  observe: `Project relay's registry into presentation state.
 
 Usage:
-  familiar hook EVENT [--agent NAME] [--trace FILE]
+  familiar observe
 
-Arguments:
-  EVENT           Agent lifecycle event
-
-Options:
-  --agent NAME    Agent adapter: ${AGENTS.join(', ')}
-  --trace FILE    Append metadata-only lifecycle records as JSONL
-
-Examples:
-  familiar hook SessionStart
-  familiar hook Stop --agent codex
+Reads one relay observer envelope on stdin. Faults exit 1; success or staleness exits 0.
 `,
   statusline: `Render the Claude Code status line.
 
@@ -423,7 +415,7 @@ Examples:
   familiar statusline
   familiar statusline --with "printf ready"
 `,
-  reap: `Remove sessions whose agent has exited. No output means nothing was reaped.
+  reap: `Prune relay's registry and reconcile presentation.
 
 Usage:
   familiar reap
@@ -447,19 +439,7 @@ export function renderHelp(key, { color = false } = {}) {
     ? `${BOLD}${fg(HELP_ACCENT)}${line}${RESET}` : line).join('\n');
 }
 
-// The OTHER promise in the hook path that could never settle (the first was the
-// un-timed `git` — see gitContext). This one resolves on `end` or `error`, so a
-// parent that writes the payload and then holds the pipe open without closing it
-// leaves the hook waiting forever, and claude-code kills it at 60s.
-//
-// So EOF gets a deadline. On expiry we resolve with whatever arrived rather than
-// rejecting, because by then one of two things is true, and both are handled
-// downstream: either the payload is complete and only the EOF was missing — in
-// which case parsing it is exactly right — or it is short, and parsePayload says
-// "hook payload is not JSON" on one line through the boundary. Neither hangs.
-//
-// The timer is unref'd: it must never hold the process open on the normal path,
-// which is every hook, every tool call.
+// Bound stdin reads when the sender does not close its pipe.
 const STDIN_EOF_TIMEOUT_MS = 5_000;
 
 // A PINNABLE CLOCK, for the decay tests only. Nothing in production sets this; without it
@@ -511,185 +491,6 @@ function runWrapped(command, input) {
   return result.stdout;
 }
 
-// Everything the resolver needs, assembled once. This is the composition root:
-// the only place that knows where files live.
-async function context({ paths = resolvePaths(), config } = {}) {
-  const [{ themeId, motionPolicy }, tone] = await Promise.all([
-    config ?? loadConfig({ paths }),
-    loadTone({ paths }),
-  ]);
-  const pack = await loadThemePack(themeDirFor(paths, themeId));
-  const catalog = await loadIdentities(paths.identitiesPath);
-  return { paths, themeId, motionPolicy, tone, pack, catalog };
-}
-
-// Resolve every live record's identity ONCE — one per project in practice, and a
-// cache hit on every event after the first. Nothing is BAKED any more: the sprite
-// baker is gone, the terminal ships the master's bytes to kitty verbatim. Animation
-// manifests and their program budgets are admitted at this same member boundary
-// before anything reaches the bus.
-//
-// The identity map is RETURNED, not thrown away: resolveAll needs exactly the
-// same map, and recomputing it there would mean a second full pin-match +
-// realpathSync sweep over every record, on every tool call, for nothing.
-//
-// BOTH passes fault per RECORD, never per BUS. Everything here can fail — an
-// unpopulated slot, a pin contradicting its member, a deleted sprite PNG — and
-// any of it can start failing for a record that was fine a moment ago, because
-// all of it is read from files the user edits. A failure that escaped this
-// function would be a failure of the whole transaction, for every session on the
-// machine, including the ones whose config nobody touched.
-//
-// So faults are collected, not thrown, and handed to the transaction — which is
-// the only layer that knows whether a faulted record is the incoming one (abort)
-// or a pre-existing one (evict). See commit() in src/bus/transaction.js.
-export function makePrepareSprites(ctx, {
-  loadAnimationMember: loadMember = loadAnimationMember,
-  preflightKittyPrograms: preflight = preflightKittyPrograms,
-  readFrame = readFileSync,
-} = {}) {
-  return async (agents) => {
-    const { identities, faults } = resolveIdentities({ agents, catalog: ctx.catalog, pack: ctx.pack });
-
-    // Keyed by MEMBER, because that is what an asset or animation failure is
-    // about: a deleted PNG or malformed manifest belongs to a member, and faults
-    // exactly the sessions resolving to that member — not its bus neighbours.
-    //
-    // Nothing is generated here any more: the assets are committed, and this
-    // pass RESOLVES and VALIDATES them. The recolouring died with the indexed
-    // codec; the per-member fault isolation did not, and it is the reason a
-    // missing sprite cannot write a dangling path onto a surface with no error
-    // channel.
-    const cache = new Map();
-    const memberFaults = new Map();
-    for (const { member } of identities.values()) {
-      if (cache.has(member) || memberFaults.has(member)) continue;
-      try {
-        const assets = assetsFor(ctx.pack, member, ctx.tone.mode);
-        const { ref: animationRef, set: animationSet } = await loadMember(ctx.pack, member);
-        const animationPreflight = animationSet.kind === 'clips'
-          ? preflight(animationSet, {
-            memberId: member,
-            roots: Object.fromEntries(
-              STATES.map((state) => [state, assets[state].terminal]),
-            ),
-            readFrame,
-          })
-          : null;
-        cache.set(member, {
-          assets,
-          animationRef,
-          animationSet,
-          preflight: animationPreflight,
-        });
-      } catch (error) {
-        memberFaults.set(member, error.message);
-      }
-    }
-
-    for (const [sessionId, identity] of [...identities]) {
-      if (!memberFaults.has(identity.member)) continue;
-      faults.set(sessionId, memberFaults.get(identity.member));
-      identities.delete(sessionId);
-    }
-
-    // Named, not `cache.get(id)[state]`. If the identity pass and the asset pass
-    // ever disagree, the bare version says "Cannot read properties of undefined"
-    // and names neither the member nor the state — an anonymous failure in the
-    // one place that has both facts to hand. Every surviving identity now has
-    // resolved assets by construction, so reaching either throw is a bug here,
-    // not a user's config.
-    const spriteFor = (memberId, state) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) {
-        throw new Error(`no assets for member "${memberId}" (needed for state "${state}")`);
-      }
-      const { assets } = admitted;
-      const sprite = assets[state];
-      if (!sprite) throw new Error(`member "${memberId}" has no asset for state "${state}"`);
-      return sprite;
-    };
-
-    const animationFor = (memberId) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) throw new Error(`no animation for member "${memberId}"`);
-      return admitted.animationRef;
-    };
-
-    const animationSetFor = (memberId) => {
-      const admitted = cache.get(memberId);
-      if (!admitted) throw new Error(`no animation set for member "${memberId}"`);
-      return admitted.animationSet;
-    };
-
-    return { identities, spriteFor, animationFor, animationSetFor, faults };
-  };
-}
-
-// An eviction is not an error — the transaction succeeded, for everyone who could
-// be resolved. It is a report: this session's record left the bus, and here is the
-// misconfiguration that put it out. One line each, on stderr, exactly like the
-// boundary below.
-function reportEvictions(evicted) {
-  for (const { sessionId, reason } of evicted) {
-    process.stderr.write(`familiar: evicted session ${sessionId} from the bus — ${reason}\n`);
-  }
-}
-
-export function appendHookTrace(path, { timestamp, agent, event, stdin, prev, next }) {
-  const payload = JSON.parse(stdin);
-  appendFileSync(path, `${JSON.stringify({
-    timestamp,
-    agent,
-    event,
-    hook_event_name: payload.hook_event_name ?? null,
-    source: payload.source ?? null,
-    session_id: payload.session_id,
-    turn_id: payload.turn_id ?? null,
-    prev_state: prev?.state ?? null,
-    next_state: next?.state ?? null,
-  })}\n`);
-}
-
-// Probe before taking the transmission lock: tmux and Darwin process queries spawn.
-// Await the whole emission section so its failures reach the hook's error boundary.
-export async function emitHookTransition({
-  prev, next, intent, seq, transmitSprite, provisional = false,
-  paths,
-  processOps = defaultProcessOps,
-  platform = process.platform,
-  hookEnv = process.env,
-  probe = tmuxFacts,
-  lockWith = withLock,
-}) {
-  const record = next ?? prev;
-  if (record === null) return { kind: 'noop' };
-  const terminal = terminalTarget(record.pid, {
-    platform,
-    record: processOps.recordOf(record.pid),
-    hookEnv,
-    probe,
-  });
-  const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
-  const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
-  const lock = (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf }));
-  return emit({
-    prev,
-    next,
-    seq,
-    transmitSprite,
-    provisional,
-    terminal,
-    ledger: fileLedger(entryPath),
-    lock,
-    ownerAlive,
-    // The emitter takes the Intent, not its record. SessionEnd needs only identity.
-    intent: next !== null
-      ? intent[next.sessionId].current
-      : { identity: { project: prev.project }, pid: prev.pid, sessionId: prev.sessionId },
-  });
-}
-
 // The status line's half of a provisional SessionStart transmission (see settle() in
 // src/render/term/emit.js). The unlocked read is the common path: every refresh of every
 // session pays one small file read, and only provisional evidence goes on to probe the
@@ -705,20 +506,24 @@ export async function settleStatusline({
   const { entryPath, lockPath } = ledgerPaths(paths.transmitDir, record.sessionId);
   const ledger = fileLedger(entryPath);
   if (!(await ledger.read()).held?.provisional) return { kind: 'noop' };
-  const terminal = terminalTarget(record.pid, {
-    platform,
-    record: processOps.recordOf(record.pid),
-    hookEnv,
-    probe,
-  });
   const ownerAlive = (pid, { starttime }) => processOps.ownerAlive(pid, { starttime });
-  return settle({
-    owner: record,
-    intent,
-    terminal,
-    ledger,
-    lock: (fn) => lockWith(lockPath, fn, transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf })),
-    ownerAlive,
+  const lockOptions = transmitLockOptions({ ownerAlive, startTimeOf: processOps.startTimeOf });
+  return withTerminal({ transmitDir: paths.transmitDir, terminal: record,
+    sessionId: record.sessionId, seq: null, lockWith, lockOptions }, () => {
+    const terminal = terminalTarget(record.pid, {
+      platform,
+      record: processOps.recordOf(record.pid),
+      hookEnv,
+      probe,
+    });
+    return settle({
+      owner: record,
+      intent,
+      terminal,
+      ledger,
+      lock: (fn) => lockWith(lockPath, fn, lockOptions),
+      ownerAlive,
+    });
   });
 }
 
@@ -774,12 +579,47 @@ async function identityResolver() {
   };
 }
 
+export async function reap({ deps: given }) {
+  const deps = { renderProcess: defaultProcessOps, now: Date.now, ...given };
+  const { paths, renderProcess, now } = deps;
+  const lock = deps.lockWith ?? withLock;
+  deps.lockWith = (path, fn, options) => lock(path, fn, {
+    ...options, now, startTimeOf: renderProcess.startTimeOf,
+    isAlive: renderProcess.lockHolderAlive ?? renderProcess.ownerAlive,
+  });
+  const { reaped } = await deps.relay.reapRegistry();
+  const { awaiting, lines } = await reconcile({ deps });
+  const ended = [];
+  const ownerAlive = (pid, stamp) => renderProcess.ownerAlive(pid, stamp);
+  const sessions = await deps.lockWith(paths.presentationLockPath, async () => {
+    const current = await readSessions(paths.sessionsPath);
+    for (const [sid, record] of Object.entries(current.ended)) {
+      if (ownerAlive(record.pid, { starttime: record.starttime })) continue;
+      delete current.ended[sid];
+      ended.push(sid);
+    }
+    if (ended.length) await writeSessions(paths.sessionsPath, current);
+    return current.sessions;
+  });
+  const { removed } = await pruneLedgers({
+    transmitDir: paths.transmitDir, agents: sessions, ownerAlive,
+    startTimeOf: renderProcess.startTimeOf, lockWith: deps.lockWith, now,
+  });
+  await pruneTerminalOwners({ transmitDir: paths.transmitDir, ownerAlive, lockWith: deps.lockWith });
+  const { removed: swept } = await sweepTemps({
+    dirs: [paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals')],
+    pidExists: renderProcess.pidExists, now,
+  });
+  return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length,
+    lines: lines.map((line) => line.replace(/^familiar: observe:/, 'familiar: reap:')) };
+}
+
 async function main({ command, args: rest, color, mode }) {
   // Every leaf's options and positional bounds come from the same declared row
   // completion and the conformance test read -- one source, not a hand-kept mirror.
   const cmd = commandAt(command.split(' '));
   const leafOptions = { options: parseArgsOptions(cmd), ...positionalBounds(cmd), help: command };
-  if (command === 'setup claude-code' || command === 'setup codex') {
+  if (command === 'setup claude-code' || command === 'setup relay') {
     parseLeaf(rest, leafOptions);
     // The launcher, not this file: what setup writes into a config must be what the
     // agent invokes, and the launcher is the one that checks dependencies first.
@@ -917,87 +757,14 @@ async function main({ command, args: rest, color, mode }) {
       }
       process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
     }
-  } else if (command === 'hook') {
-    const { positionals, values } = parseLeaf(rest, leafOptions);
-    const name = values.agent ?? 'claude-code';
-    const adapter = adapterFor(name);          // throws on an unknown agent, before any work
-    const ctx = await context();
-    const stdin = await readStdin();
-
-    const { prev, next, seq, intent, evicted, warnings } = await applyHookEvent({
-      event: positionals[0],
-      stdin,
-      deps: { ...ctx, adapter, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
-    });
-    for (const warning of warnings) process.stderr.write(`familiar: tasks: ${warning}\n`);
-    reportEvictions(evicted);
-    if (values.trace !== undefined) {
-      appendHookTrace(values.trace, {
-        timestamp: new Date(now()).toISOString(),
-        agent: name,
-        event: positionals[0],
-        stdin,
-        prev,
-        next,
-      });
-    }
-
-    await emitHookTransition({
-      prev, next, intent, seq,
-      transmitSprite: adapter.printsPlaceholderCells,
-      // SessionStart fires before the agent's UI is up: a fullscreen TUI may not yet be on the
-      // screen it will draw the placeholder cells on (see emit()'s `provisional`).
-      provisional: positionals[0] === 'SessionStart',
-      paths: ctx.paths,
-      processOps: defaultProcessOps,
-    });
-
-    // Prune after the transaction releases the bus lock: fresh Darwin liveness spawns.
-    await pruneLedgers({
-      transmitDir: ctx.paths.transmitDir,
-      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
-      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
-      startTimeOf: defaultProcessOps.startTimeOf,
-    });
-    await sweepTemps({
-      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
-    });
-
-    // CODEX ONLY, SessionStart ONLY. Codex draws its own pet from a file rather
-    // than from the bus, so the file has to be kept true. Everything needed is
-    // already in hand: `next` is the record the transaction just wrote, and the
-    // member came out of the same resolve that fed the bus -- so nothing here
-    // re-runs git or re-matches a pin.
-    //
-    // `next` is null on SessionEnd, which removes a record rather than writing one.
-    if (shouldConverge({ agent: name, event: positionals[0] }) && next) {
-      try {
-        const result = await convergeCodexProject({
-          repoRoot: next.repoRoot,
-          member: intent[next.sessionId].current.identity.member,
-          catalog: ctx.catalog,
-          pack: ctx.pack,
-          themeId: ctx.themeId,
-          petsDir: join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
-        });
-        // ORDINARY NO-OPS ARE SILENT; ANYTHING A USER COULD ACT ON IS NOT.
-        // `quiet` and `unchanged` are the common cases and say nothing. But an
-        // unmanaged config, a tracked one, missing pets, a symlink refusal or a
-        // wedged git all mean the pet on screen is NOT the one Familiar
-        // resolved -- and saying nothing there is the same silent drift this
-        // whole mechanism exists to end.
-        if (result.outcome === 'actionable' || result.outcome === 'error') {
-          process.stderr.write(`familiar: ${result.reason}\n`);
-        }
-      } catch (error) {
-        // The cosmetic layer never degrades the tool it decorates. The
-        // top-level boundary in this file already turns a throw into exit 0
-        // plus one stderr line; this narrower catch keeps a convergence failure
-        // from skipping anything after it.
-        process.stderr.write(
-          `familiar: could not converge the Codex pet config: ${error.message}\n`);
-      }
-    }
+  } else if (command === 'observe') {
+    parseLeaf(rest, leafOptions);
+    const result = await observe({ text: await readStdin(), deps: {
+      paths: resolvePaths(), relay: { readSnapshot }, relayProcess: createRelayProcessOps(),
+      renderProcess: defaultProcessOps, adapterFor,
+    } });
+    for (const line of result.lines) process.stderr.write(`${line}\n`);
+    process.exitCode = result.exitCode;
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, leafOptions);
     // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
@@ -1008,36 +775,37 @@ async function main({ command, args: rest, color, mode }) {
     // It transmits nothing of its own. See src/render/term/statusline.js -- two processes
     // chunking graphics escapes into one fd is a corrupt escape stream. The one exception is
     // settling a provisional SessionStart image, which it does inside the hooks' own
-    // per-session transmit lock (settleStatusline below).
+    // terminal ownership and per-session transmit locks (settleStatusline below).
     const stdin = await readStdin();
     const payload = JSON.parse(stdin || '{}');
     const sessionId = payload.session_id;
 
     const ctx = await context();
-    const agents = (await readJson(ctx.paths.agentsPath)) ?? {};
-    const record = sessionId ? agents[sessionId] : undefined;
+    const { sessions } = await readSessions(ctx.paths.sessionsPath);
+    const record = sessionId ? sessions[sessionId] : undefined;
 
     // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
     // much of the wrapped text fits beside it. Resolve one session only: a broken config in
     // ANOTHER project must not fault this status line.
     let intent;
+    let visualFault;
     if (record) {
       const one = { [sessionId]: record };
-      const { identities, spriteFor, animationFor } = await makePrepareSprites(ctx)(one);
-      // THE DECAY CONTRACT (src/protocol/intent.js:40), not `.current`. `.current` discards
-      // expiresAt, which was survivable while this ran about once a turn -- but with
-      // refreshInterval set it is permanent: `done` carries an 8s TTL and `error` a 30s one,
-      // so a polled HUD reading `.current` would show `done` every two seconds, forever,
-      // until the next hook fired. The other polling renderer already follows this contract.
-      const intentRecord = resolveAll({
-        agents: one,
-        identities,
-        tone: ctx.tone,
-        spriteFor,
-        animationFor,
-        motionPolicy: ctx.motionPolicy,
-      })[sessionId];
-      intent = displayedIntent(intentRecord, now());
+      const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
+      if (faults.has(sessionId)) {
+        visualFault = `session ${sessionId}: ${faults.get(sessionId)}`;
+      } else {
+        // Keep the decay contract: polling must not show done/error forever.
+        const intentRecord = resolveAll({
+          agents: one,
+          identities,
+          tone: ctx.tone,
+          spriteFor,
+          animationFor,
+          motionPolicy: ctx.motionPolicy,
+        })[sessionId];
+        intent = displayedIntent(intentRecord, now());
+      }
     }
 
     const wrapped = values.with ?? null;
@@ -1052,10 +820,12 @@ async function main({ command, args: rest, color, mode }) {
     // No identity means no hue and no state — so the HUD renders uncoloured, with the state
     // slot reading as absent, at the full four rows (there is no cat here to fit against).
     if (!intent) {
-      const lines = wrapped
-        ? textLines(rawOutput, Infinity)
-        : hudLines({ intent: null, fields: readFields(payload), rows: 4 });
-      process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+      const output = wrapped ? rawOutput
+        : hudLines({ intent: null, fields: readFields(payload), rows: 4 }).join('\n') + '\n';
+      process.stdout.write(output);
+      if (visualFault !== undefined) {
+        process.stderr.write(`familiar: statusline: ${visualFault.replace(/[\r\n]+/g, ' ')}\n`);
+      }
       return;
     }
 
@@ -1206,27 +976,21 @@ async function main({ command, args: rest, color, mode }) {
     }
   } else if (command === 'reap') {
     parseLeaf(rest, leafOptions);
-    const ctx = await context();
-    const { reaped, evicted } = await reap({
-      deps: { ...ctx, processOps: defaultProcessOps, prepareSprites: makePrepareSprites(ctx) },
+    const { lines, ...result } = await reap({
+      deps: { paths: resolvePaths(), relay: { reapRegistry, readSnapshot } },
     });
-    reportEvictions(evicted);
-    const { removed } = await pruneLedgers({
-      transmitDir: ctx.paths.transmitDir,
-      agents: (await readJson(ctx.paths.agentsPath)) ?? {},
-      ownerAlive: (pid, { starttime }) => defaultProcessOps.ownerAlive(pid, { starttime }),
-      startTimeOf: defaultProcessOps.startTimeOf,
-    });
-    const { removed: swept } = await sweepTemps({
-      dirs: [ctx.paths.stateDir, ctx.paths.transmitDir], pidExists: defaultProcessOps.pidExists,
-    });
+    for (const line of lines) process.stderr.write(`${line}\n`);
+    if (lines.length) process.exitCode = 1;
     if (mode === 'json') {
-      process.stdout.write(`${JSON.stringify({ reaped, pruned: removed.length, swept: swept.length })}\n`);
+      process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
+    const { reaped, awaiting, ended, pruned, swept } = result;
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
-    if (removed.length > 0) process.stdout.write(`pruned ${removed.length} transmission ledger(s)\n`);
-    if (swept.length > 0) process.stdout.write(`swept ${swept.length} orphaned temp file(s)\n`);
+    if (awaiting.length > 0) process.stdout.write(`awaiting ${awaiting.join(' ')}\n`);
+    if (ended.length > 0) process.stdout.write(`ended ${ended.join(' ')}\n`);
+    if (pruned > 0) process.stdout.write(`pruned ${pruned} transmission ledger(s)\n`);
+    if (swept > 0) process.stdout.write(`swept ${swept} orphaned temp file(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Its output is
@@ -1696,30 +1460,17 @@ async function main({ command, args: rest, color, mode }) {
   }
 }
 
-// THE ERROR BOUNDARY, and the one place in this codebase that formats a thrown error.
-//
-// Every module below fails early and loudly, which is right — but `familiar hook`
-// runs on EVERY TOOL CALL of the user's coding agent. An uncaught throw here is a
-// Node stack trace in their transcript, on every Bash, forever. The failure is
-// still reported once, on one line. Hook and statusline remain exit-zero protocols;
-// every human-invoked command fails nonzero.
-//
-// A cosmetic layer must never be able to degrade the tool it decorates. That is
-// worth exactly one catch, and this is it.
-//
-const COSMETIC_COMMANDS = new Set(['hook', 'statusline']);
-// A usage error (bad argv shape) always exits 2, plain text -- reportCosmeticError's
-// one line plus, where the error names a help scope, the "Run ... --help" line, same
-// as before this command table existed. A RUNTIME failure (parsing succeeded, the
-// work did not) exits 1, and under --json on a non-protocol command it is the error
-// object on stderr instead of the plain line -- the general contract's json-failure
-// shape. Protocol commands (hook, statusline) keep exiting 0 either way: a cosmetic
-// layer must never be able to degrade the tool it decorates.
+// Status-line failures are cosmetic; observer faults must reach relay.
+const COSMETIC_COMMANDS = new Set(['statusline']);
 export function reportCommandError(error, resolved, {
   write = (line) => process.stderr.write(line),
   mode = 'pretty',
 } = {}) {
   const cosmetic = COSMETIC_COMMANDS.has(resolved?.command);
+  if (resolved?.command === 'reap' && error.help === undefined) {
+    write(`familiar: reap: ${error.code ? `${error.code}: ` : ''}${error.message.replace(/[\r\n]+/g, ' ')}\n`);
+    return 1;
+  }
   if (!cosmetic && error.help === undefined && mode === 'json') {
     write(`${JSON.stringify({ error: { kind: 'familiar', detail: error.message } })}\n`);
     return 1;

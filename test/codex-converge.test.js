@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { loadThemePack } from 'familiar-theme';
-import { convergeCodexProject, shouldConverge } from '../src/install/codex-converge.js';
+import { convergeCodexProject } from '../src/install/codex-converge.js';
 import { addWorktree, seedRepo } from './fixtures/git-worktree.mjs';
 import { stampFor, STAMP_FILE } from '../src/install/pet-stamp.js';
 import { SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
@@ -49,13 +49,7 @@ const run = (root, petsDir, member, catalog = { identities: [] }) =>
 
 const readConfig = (root) => readFileSync(join(root, '.codex', 'config.toml'), 'utf8');
 
-test('the routing predicate fires for Codex SessionStart and nothing else', () => {
-  assert.equal(shouldConverge({ agent: 'codex', event: 'SessionStart' }), true);
-  assert.equal(shouldConverge({ agent: 'codex', event: 'PreToolUse' }), false);
-  assert.equal(shouldConverge({ agent: 'codex', event: 'Stop' }), false);
-  assert.equal(shouldConverge({ agent: 'claude-code', event: 'SessionStart' }), false);
-  assert.equal(shouldConverge({ agent: 'opencode', event: 'SessionStart' }), false);
-});
+
 
 test('a repository with no config gets one, and the exclude entry with it', async (t) => {
   const root = repo(t);
@@ -155,13 +149,7 @@ test('a session with no repository root is a quiet no-op', async (t) => {
   assert.equal(result.changed, false);
 });
 
-test('the hook branch actually calls the predicate — wiring guard', () => {
-  const source = readFileSync(
-    fileURLToPath(new URL('../bin/familiar.js', import.meta.url)), 'utf8');
-  assert.match(source, /shouldConverge\(\{\s*agent: name, event: positionals\[0\]\s*\}\)/,
-    'bin/familiar must route convergence through shouldConverge');
-  assert.match(source, /convergeCodexProject\(/);
-});
+
 
 // The hook hands convergence the member it already resolved for this worktree. Convergence
 // writes that member into the worktree's own config; it does not re-resolve, even when the

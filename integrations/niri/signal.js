@@ -87,7 +87,7 @@ function setArgs(windowId, slot, now) {
 // Plans one resync.
 //
 //   intent          intent.json, sessionId -> { current, expiresAt, after }
-//   agents          agents.json, for each record's bus `seq` (the tie-break)
+//   sessions        sessions.json, for each record's bus `seq` (the tie-break)
 //   sessionWindows  niri-windows.json as mapSessionsToWindows computed it
 //   windows         `niri msg -j windows`, niri's truth about which windows exist
 //                   and which already carry a familiar slot
@@ -99,7 +99,7 @@ function setArgs(windowId, slot, now) {
 // fresh process, which is what makes a restart safe: every window gets its slot
 // again, and no stale transition is pulsed.
 export function planWindowSignals({
-  intent, agents, sessionWindows, windows, sent, states, themeId, now,
+  intent, sessions, sessionWindows, windows, sent, states, themeId, now,
 }) {
   // Several sessions in one terminal share one slot. The one that most needs the
   // user wins it — highest level, ties to the latest on the bus — and its accent,
@@ -109,7 +109,7 @@ export function planWindowSignals({
   const nextStates = new Map();
   for (const [sessionId, { windowId }] of Object.entries(sessionWindows)) {
     const record = intent[sessionId];
-    // agents.json and intent.json are two atomic renames, agents first. A resync
+    // sessions.json and intent.json are two atomic renames, sessions first. A resync
     // landing between them sees a session intent does not have yet; the rename
     // that follows fires another resync, which places it. Its last seen state is
     // carried so that resync can still pulse the transition.
@@ -119,7 +119,7 @@ export function planWindowSignals({
     }
 
     const slot = sessionSlot(record, { themeId, now });
-    const seq = agents[sessionId]?.seq ?? -1;
+    const seq = sessions[sessionId]?.seq ?? -1;
     const rank = LEVELS.indexOf(slot.level);
     const held = winners.get(windowId);
     if (!held || rank > held.rank || (rank === held.rank && seq > held.seq)) {

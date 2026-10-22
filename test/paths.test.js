@@ -27,3 +27,11 @@ test('the transmission ledger and the event counter live under the state dir', (
   assert.equal(p.transmitDir, '/s/transmit');
   assert.equal(p.seqPath, '/s/events.seq');
 });
+
+test('presentation sessions and lock live under the state dir', () => {
+  const p = paths({ FAMILIAR_STATE_DIR: '/s' });
+  assert.equal(p.sessionsPath, '/s/sessions.json');
+  assert.equal(p.presentationLockPath, '/s/presentation.lock');
+  assert.equal(Object.hasOwn(p, 'agentsPath'), false);
+  assert.equal(Object.hasOwn(p, 'lockPath'), false);
+});

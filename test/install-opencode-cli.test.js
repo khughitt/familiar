@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,13 +32,13 @@ test('familiar-opencode: a malformed config exits nonzero and writes nothing', (
   assert.deepEqual(readdirSync(dir).sort(), before); // no tui.json, no .tmp — nothing changed
 });
 
-test('familiar-opencode: a clean config writes both files and exits 0', () => {
+test('familiar-opencode: a clean config writes only tui.json and exits 0', () => {
   const dir = mkdir();
   const res = run([OPENCODE_BIN, '--config-dir', dir], mkdir());
   assert.equal(res.status, 0);
   const files = readdirSync(dir).sort();
   assert.ok(files.includes('tui.json'));
-  assert.ok(files.includes('opencode.json'));
+  assert.deepEqual(files, ['tui.json']);
 });
 
 test('familiar-opencode: --project-dir with no value is rejected, writes nothing to the global dir', () => {
@@ -119,7 +119,7 @@ test('familiar install opencode --project-dir writes into DIR/.opencode', () => 
   const dir = mkdir();
   const res = run([FAMILIAR_BIN, 'install', 'opencode', '--project-dir', dir], mkdir());
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(readdirSync(join(dir, '.opencode')).sort(), ['opencode.json', 'tui.json']);
+  assert.deepEqual(readdirSync(join(dir, '.opencode')).sort(), ['tui.json']);
 });
 
 test('familiar install opencode --help is owned by the installer and writes nothing', () => {
@@ -132,3 +132,67 @@ test('familiar install opencode --help is owned by the installer and writes noth
   assert.match(res.stdout, /mutually exclusive/);
   assert.deepEqual(readdirSync(sandbox), []);
 });
+
+for (const kind of ['this checkout', 'renamed checkout', 'relay', 'gone', 'no legacy']) {
+  test(`familiar install opencode retires legacy entries: ${kind}`, (t) => {
+    const dir = mkdir();
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const checkout = kind === 'this checkout' ? root : join(dir, kind === 'relay' ? 'node_modules/relay' : 'pets-x');
+    const entry = kind === 'no legacy' ? '/another/plugin.js' : join(checkout, 'integrations/opencode/plugin.js');
+    if (kind === 'renamed checkout' || kind === 'relay') {
+      mkdirSync(join(checkout, 'integrations/opencode'), { recursive: true });
+      writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: kind === 'relay' ? 'relay' : 'familiar' }));
+      writeFileSync(entry, '');
+    }
+    const config = join(dir, 'opencode.json');
+    const original = `{ // keep formatting when unchanged
+ "plugin": ${JSON.stringify([entry, 'other'])}
+}
+`;
+    writeFileSync(config, original);
+    const result = run([FAMILIAR_BIN, 'install', 'opencode', '--config-dir', dir], dir);
+    assert.equal(result.status, kind === 'gone' ? 1 : 0, result.stderr);
+    assert.ok(readdirSync(dir).includes('tui.json'));
+    if (kind === 'this checkout' || kind === 'renamed checkout') {
+      assert.deepEqual(JSON.parse(readFileSync(config, 'utf8')).plugin, ['other']);
+      assert.ok(result.stdout.includes(`removed familiar's legacy OpenCode server plugin ${entry} from ${config}`));
+    } else {
+      assert.equal(readFileSync(config, 'utf8'), original);
+      if (kind === 'gone') assert.ok(result.stdout.includes(`kept ${entry}: cannot tell whether it is familiar's (no package.json beside it); remove it by hand if so`));
+    }
+  });
+}
+
+for (const kind of ['empty', 'relay', 'familiar', 'unknown', 'malformed']) {
+  test(`familiar install opencode preserves server JSONC and reports only required edits: ${kind}`, (t) => {
+    const dir = mkdir();
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const checkout = join(dir, 'pets-x');
+    const entry = join(checkout, 'integrations/opencode/plugin.js');
+    if (kind === 'relay' || kind === 'familiar') {
+      mkdirSync(checkout);
+      writeFileSync(join(checkout, 'package.json'), JSON.stringify({ name: kind }));
+    }
+    const config = join(dir, 'opencode.jsonc');
+    const original = kind === 'malformed' ? '{ "plugin": ['
+      : `{ // retain this comment\n "plugin": ${JSON.stringify(kind === 'empty' ? [] : [entry])},\n}\n`;
+    writeFileSync(config, original);
+    const result = run([FAMILIAR_BIN, 'install', 'opencode', '--config-dir', dir], dir);
+    assert.equal(result.status, ['empty', 'relay'].includes(kind) ? 0 : 1, result.stderr);
+    assert.equal(readFileSync(config, 'utf8'), original);
+    assert.equal(readdirSync(dir).includes('opencode.json'), false);
+    assert.equal(readdirSync(dir).includes('tui.json'), kind !== 'malformed');
+    if (kind === 'malformed') assert.match(result.stderr, /opencode\.jsonc: unparseable JSONC/);
+    else if (kind === 'unknown') assert.ok(result.stdout.includes(`kept ${entry}: cannot tell whether it is familiar's`));
+    else if (kind === 'familiar') {
+      assert.ok(result.stdout.includes(entry));
+      assert.match(result.stdout, /by hand/);
+      writeFileSync(config, '{ // user retired the entry\n "plugin": []\n}');
+      const retry = run([FAMILIAR_BIN, 'install', 'opencode', '--config-dir', dir], dir);
+      assert.equal(retry.status, 0, retry.stderr);
+    } else {
+      assert.equal(result.stderr, '');
+      assert.doesNotMatch(result.stdout, /left for you:/);
+    }
+  });
+}

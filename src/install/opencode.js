@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, dirname, resolve, isAbsolute } from 'node:path';
 import { parse, printParseErrorCode } from 'jsonc-parser';
 
 // opencode config files are JSONC (comments, trailing commas), so we cannot merge with
@@ -15,7 +15,7 @@ import { parse, printParseErrorCode } from 'jsonc-parser';
 // "an empty/blank file" message. A genuinely truncated file (e.g. `{ "plugin": [`) still records a
 // CloseBracket/CloseBrace error and is refused as unparseable — `allowEmptyContent` only affects the
 // wholly-empty case, nothing else.
-export function mergePlugin(jsoncText, absPath) {
+function parseConfig(jsoncText) {
   const errors = [];
   const config = parse(jsoncText, errors, { allowTrailingComma: true, allowEmptyContent: true });
   if (errors.length) {
@@ -32,9 +32,23 @@ export function mergePlugin(jsoncText, absPath) {
   if ('plugin' in obj && !Array.isArray(obj.plugin)) {
     throw new Error(`"plugin" must be an array or absent, found ${typeof obj.plugin}`);
   }
-  const plugin = Array.isArray(obj.plugin) ? obj.plugin.slice() : [];
+  return obj;
+}
+
+export function mergePlugin(jsoncText, absPath) {
+  const obj = parseConfig(jsoncText);
+  const plugin = obj.plugin?.slice() ?? [];
   if (!plugin.includes(absPath)) plugin.push(absPath);
   return `${JSON.stringify({ ...obj, plugin }, null, 2)}\n`;
+}
+
+export function legacyServerPlugin(entry, { readFile }) {
+  if (typeof entry !== 'string' || !isAbsolute(entry) || !entry.endsWith('/integrations/opencode/plugin.js')) return 'other';
+  try {
+    const text = readFile(resolve(dirname(entry), '../..', 'package.json'));
+    if (text === null) return 'unknown';
+    return JSON.parse(text).name === 'familiar' ? 'familiar' : 'other';
+  } catch { return 'unknown'; }
 }
 
 function readText(path, read) {
@@ -45,29 +59,7 @@ function readText(path, read) {
   return text;
 }
 
-// OPENCODE READS `<name>.json` OR `<name>.jsonc`, AND THIS INSTALLER WRITES ONLY THE FIRST.
-// Ignoring the second is not harmless: a machine whose real config is `opencode.jsonc` used to get
-// a brand-new `opencode.json` created beside it, which is either ignored or shadows the file the
-// user actually maintains -- silently, either way. It was found on a real Mac, and it is not a
-// macOS bug.
-//
-// The `.jsonc` case is REFUSED rather than merged. mergePlugin normalizes its output through
-// JSON.stringify, so merging would rewrite the file as plain JSON and delete the comments that are
-// the entire reason someone chose that extension. Refusing with the exact entry to add is the same
-// answer `install pets` already gives for a tracked `.codex/config.toml`: do not rewrite a config
-// this tool cannot reproduce faithfully, print what to add.
-//
-// Both present is ambiguous, so it is also refused. Familiar does not get to guess which file
-// opencode is reading.
-//
-// A refusal is returned, NOT thrown, and it is PER FILE. These two configs are independent: tui.json
-// registers the sprite renderer and opencode.json registers the server plugin, and neither is made
-// unwritable by the other's extension. Throwing here used to abort both, so a `.jsonc` on the server
-// side silently took the RENDERER's registration down with it -- the physical-Mac terminal gate hit
-// exactly that and ran its OpenCode cells with no sprite at all, with nothing on screen to say why.
-// A `.jsonc` is not a broken config; it is one this tool declines to rewrite, which is a hand-off
-// for that file alone. Malformed input is the different case, and it still aborts everything --
-// see installOpencode.
+// JSONC can be inspected, but changes need a manual edit to preserve comments.
 function resolveTarget(configDir, base, pluginPath, read) {
   const jsonPath = join(configDir, `${base}.json`);
   const jsoncPath = join(configDir, `${base}.jsonc`);
@@ -80,6 +72,7 @@ function resolveTarget(configDir, base, pluginPath, read) {
       + 'guess which. Keep one and re-run.' };
   }
   if (jsoncText !== null) {
+    if (pluginPath === null) return { path: jsoncPath, text: jsoncText, readOnly: true };
     return { manual:
       `${jsoncPath}: add ${JSON.stringify(pluginPath)} to its "plugin" array by hand. Merging it `
       + 'here would rewrite the file as plain JSON and drop its comments.' };
@@ -87,29 +80,33 @@ function resolveTarget(configDir, base, pluginPath, read) {
   return { path: jsonPath, text: jsonText };
 }
 
-// ALL-OR-NOTHING FOR MALFORMED INPUT, still: every writable target is merged in memory BEFORE any
-// of them is written, so a config this tool cannot parse aborts the whole run rather than leaving
-// the pair half-updated. What is NOT all-or-nothing is a per-file hand-off -- a `.jsonc`, or a
-// `.json`/`.jsonc` pair -- which takes only its own file out of the run. Returns what it wrote and
-// what it is asking the user to do by hand; a partial install is incomplete, and the caller says so.
-export function installOpencode({ configDir, tuiPluginPath, serverPluginPath, read, writeAtomic }) {
-  const targets = [
-    { resolved: resolveTarget(configDir, 'tui', tuiPluginPath, read), pluginPath: tuiPluginPath },
-    { resolved: resolveTarget(configDir, 'opencode', serverPluginPath, read), pluginPath: serverPluginPath },
-  ];
-
-  // Attach the source path at the orchestration boundary. mergePlugin stays a pure text transform,
-  // while every user-facing refusal identifies WHICH of the two configs is malformed and why.
-  const mergeAt = ({ path, text }, pluginPath) => {
-    try { return mergePlugin(text === null ? '{}' : text, pluginPath); }
-    catch (err) { throw new Error(`${path}: ${err.message}`); }
-  };
-
-  const manual = targets.filter((t) => t.resolved.manual).map((t) => t.resolved.manual);
-  const planned = targets
-    .filter((t) => !t.resolved.manual)
-    .map(({ resolved, pluginPath }) => ({ path: resolved.path, text: mergeAt(resolved, pluginPath) }));
-
+// Validate both configurations before writing either; manual hand-offs are per file.
+export function installOpencode({ configDir, tuiPluginPath, read, writeAtomic }) {
+  const tui = resolveTarget(configDir, 'tui', tuiPluginPath, read);
+  const server = resolveTarget(configDir, 'opencode', null, read);
+  const manual = [tui.manual, server.manual].filter(Boolean);
+  const messages = [], planned = [];
+  if (!tui.manual) {
+    try { planned.push({ path: tui.path, text: mergePlugin(tui.text === null ? '{}' : tui.text, tuiPluginPath) }); }
+    catch (error) { throw new Error(`${tui.path}: ${error.message}`); }
+  }
+  if (!server.manual && server.text !== null) {
+    let config;
+    try { config = parseConfig(server.text); }
+    catch (error) { throw new Error(`${server.path}: ${error.message}`); }
+    const plugin = (config.plugin ?? []).filter((entry) => {
+      const owner = legacyServerPlugin(entry, { readFile: read });
+      if (owner === 'unknown') manual.push(`kept ${entry}: cannot tell whether it is familiar's (no package.json beside it); remove it by hand if so`);
+      if (owner !== 'familiar') return true;
+      if (server.readOnly) {
+        manual.push(`${server.path}: remove familiar's legacy OpenCode server plugin ${entry} by hand; rewriting it here would drop its comments.`);
+        return true;
+      }
+      messages.push(`removed familiar's legacy OpenCode server plugin ${entry} from ${server.path}`);
+      return false;
+    });
+    if (messages.length) planned.push({ path: server.path, text: `${JSON.stringify({ ...config, plugin }, null, 2)}\n` });
+  }
   for (const { path, text } of planned) writeAtomic(path, text);
-  return { written: planned.map((p) => p.path), manual };
+  return { written: planned.map((p) => p.path), manual, messages };
 }

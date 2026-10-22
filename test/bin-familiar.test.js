@@ -1,9 +1,15 @@
+import { emitTransition } from '../src/observe/emission.js';
+import { applyEvent, readSnapshot, reapRegistry, paths as relayPaths, createProcessOps as relayProcessOps } from 'relay';
+import { observe } from '../src/observe/run.js';
+import { loadContext } from '../src/observe/context.js';
+import { readSessions } from '../src/bus/sessions.js';
+import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
-  symlinkSync, utimesSync,
+  chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
+  openSync, symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,9 +19,7 @@ import { parse } from 'yaml';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 import { fg } from '../src/render/term/sgr.js';
 import { CAPS, truncEnd } from '../src/render/term/hud.js';
-import { adapterFor } from '../src/adapters/index.js';
-import { projectKeyFor, displayProject } from '../src/bus/identity.js';
-import { applyHookEvent } from '../src/bus/transaction.js';
+import { displayProject } from '../src/bus/identity.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
 import { parseIdentities } from '../src/bus/pins.js';
@@ -26,7 +30,7 @@ import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import {
-  appendHookTrace, emitHookTransition, makePrepareSprites, settleStatusline, reportCommandError,
+  makePrepareSprites, settleStatusline, reportCommandError,
   reportCosmeticError, sheetRowCaptions,
 } from '../bin/familiar.js';
 
@@ -53,10 +57,12 @@ const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-shipped-themes
 cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
 
 function env(over = {}) {
+  const stateDir = mkdtempSync(join(tmpdir(), 'familiar-state-'));
   return {
     ...process.env,
     FAMILIAR_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'familiar-cfg-')),
-    FAMILIAR_STATE_DIR: mkdtempSync(join(tmpdir(), 'familiar-state-')),
+    FAMILIAR_STATE_DIR: stateDir,
+    RELAY_STATE_DIR: join(stateDir, 'relay'),
     FAMILIAR_THEMES_DIR: shippedThemesFixture,
     ...over,
   };
@@ -73,45 +79,23 @@ test('setup claude-code prints exact JSON without reading configuration', () => 
   assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
 });
 
-test('setup codex prints exact JSON without reading configuration', () => {
+test('setup relay prints exact JSON without reading configuration', () => {
   const runEnv = env();
-  const result = spawnSync(process.execPath, [bin, 'setup', 'codex'], {
+  const result = spawnSync(process.execPath, [bin, 'setup', 'relay'], {
     encoding: 'utf8', env: runEnv,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.equal(result.stdout, `${JSON.stringify(setupDocument('codex', realpathSync(bin)), null, 2)}\n`);
+  assert.equal(result.stdout, `${JSON.stringify(setupDocument('relay', realpathSync(bin)), null, 2)}\n`);
   assert.deepEqual(readdirSync(runEnv.FAMILIAR_STATE_DIR), []);
-});
-
-// Codex hands its single-string hook command to `/bin/zsh -c` -- measured on a real Mac with a
-// deliberately unquoted path and a `; :` canary (docs/ref/2026-08-23-macos-agent-process-spike.md).
-// So the emitted string is shell source, and a checkout path with a space or an apostrophe is
-// where naive concatenation breaks. Run it through a POSIX shell against a stand-in that reports
-// its own argv: the path must arrive as one argument, with `--agent codex` trailing the event.
-test('a generated Codex command survives a shell with an awkward checkout path', (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'familiar-codex-quote-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const checkout = join(root, "Keith's Familiar Build");
-  mkdirSync(checkout, { recursive: true });
-  const stand = join(checkout, 'familiar');
-  writeFileSync(stand, '#!/bin/sh\nprintf \'%s\\n\' "$0" "$@"\n');
-  chmodSync(stand, 0o755);
-
-  const command = setupDocument('codex', stand).hooks.Stop[0].hooks[0].command;
-  const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.stdout.split('\n').slice(0, -1), [
-    stand, 'hook', 'Stop', '--agent', 'codex',
-  ]);
 });
 
 test('setup rejects extra arguments and unknown flags before work', () => {
   for (const args of [
     ['setup', 'claude-code', 'extra'],
     ['setup', 'claude-code', '--write'],
-    ['setup', 'codex', 'extra'],
-    ['setup', 'codex', '--write'],
+    ['setup', 'relay', 'extra'],
+    ['setup', 'relay', '--write'],
   ]) {
     const runEnv = env();
     const result = spawnSync(process.execPath, [bin, ...args], {
@@ -147,68 +131,30 @@ test('setup resolves an npm-style link to a checkout path containing spaces', (t
     `'${join(checkout, 'bin', 'familiar')}' statusline`);
 });
 
-test('hook trace appends lifecycle metadata without prompt or tool contents', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'familiar-hook-trace-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const path = join(dir, 'codex.jsonl');
-
-  appendHookTrace(path, {
-    timestamp: '2026-08-03T12:34:56.000Z',
-    agent: 'codex',
-    event: 'SessionStart',
-    stdin: JSON.stringify({
-      session_id: 's1', turn_id: 't1', hook_event_name: 'SessionStart', source: 'compact',
-      prompt: 'secret prompt', tool_input: { command: 'secret command' },
-    }),
-    prev: { projectColor: null, state: 'working' },
-    next: { projectColor: null, state: 'idle' },
-  });
-
-  assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
-    timestamp: '2026-08-03T12:34:56.000Z',
-    agent: 'codex',
-    event: 'SessionStart',
-    hook_event_name: 'SessionStart',
-    source: 'compact',
-    session_id: 's1',
-    turn_id: 't1',
-    prev_state: 'working',
-    next_state: 'idle',
-  });
-});
-
-// THE ERROR BOUNDARY. `familiar hook` runs on every tool call of the user's
-// coding agent — an uncaught throw there must never surface as a non-zero
-// exit or a stack trace, or a cosmetic layer would be able to break the tool
-// it decorates. Here the throw is real and unforced: no scheme.json exists in
-// the temp config dir, so loadTone() throws from deep inside context() —
-// well before the locked transaction — and the top-level try/catch in
-// bin/familiar is what has to catch it.
-test('a hook invocation that throws internally still exits 0 and prints exactly one line to stderr', () => {
-  const result = spawnSync(process.execPath, [bin, 'hook', 'UserPromptSubmit'], {
-    input: JSON.stringify({ session_id: 's1', cwd: '/tmp' }),
-    encoding: 'utf8',
-    env: env(),
-  });
-
-  assert.equal(result.status, 0);
+test('observe reconciles through the CLI and reports malformed envelopes as faults', () => {
+  const runEnv = env();
+  writeFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  const input = JSON.stringify({ schema: 1, type: 'reconcile', subscriber: 'familiar', event: null, registry: { generation: null, revision: null }, changed: false, reaped: [] });
+  const result = spawnSync(process.execPath, [bin, 'observe'], { input, encoding: 'utf8', env: runEnv });
+  assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '');
-
-  const lines = result.stderr.split('\n').filter((line) => line !== '');
-  assert.equal(lines.length, 1, `expected exactly one stderr line, got:\n${result.stderr}`);
-  assert.match(lines[0], /^familiar: no scheme at .* — run: familiar scheme set dark\|light$/);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(readFileSync(join(runEnv.FAMILIAR_STATE_DIR, 'sessions.json'))).sessions, {});
+  const bad = spawnSync(process.execPath, [bin, 'observe'], { input: '{', encoding: 'utf8', env: runEnv });
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /familiar: observe:/);
 });
 
-test('a completed hook transition with no Darwin tty is one exit-zero diagnostic', async () => {
+test('an observer transition with no Darwin tty reports a fault', async () => {
   let targetError;
-  await assert.rejects(emitHookTransition({
+  await assert.rejects(emitTransition({
     prev: null,
     next: { sessionId: 's1', projectColor: null, pid: 42 },
     seq: 1,
     paths: paths(env()),
-    intent: { s1: { current: {} } },
-    transmitSprite: true,
-    processOps: {
+    intent: {},
+    harness: 'claude-code',
+    renderProcess: {
       recordOf: () => ({ pid: 42, tty: null }),
       ownerAlive: () => true,
       startTimeOf: () => 1,
@@ -222,11 +168,11 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
   });
 
   const lines = [];
-  const status = reportCommandError(targetError, { command: 'hook' }, {
+  const status = reportCommandError(targetError, { command: 'observe' }, {
     write: (line) => lines.push(line),
   });
 
-  assert.equal(status, 0);
+  assert.equal(status, 1);
   assert.deepEqual(lines, [
     'familiar: terminal target: agent pid 42 has no validated Darwin tty\n',
   ]);
@@ -234,7 +180,7 @@ test('a completed hook transition with no Darwin tty is one exit-zero diagnostic
 
 // The owner-dead gate keeps every terminal unopened while the real emission
 // section writes ordering evidence, including SessionEnd's tombstone.
-test('emitHookTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
+test('emitTransition writes a stamped ledger entry under transmit/ and a tombstone on SessionEnd', async () => {
   const p = paths(env());
   const sessionId = 'ledger/../session';
   const agent = { sessionId, state: 'working', pid: process.pid, starttime: 1, project: 'api' };
@@ -247,9 +193,9 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
     sessionId, pid: process.pid, identity: { project: 'api' }, state: 'working', motionPolicy: 'full',
     animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
   } } };
-  const first = await emitHookTransition({
-    prev: null, next: agent, intent, seq: 1, transmitSprite: true,
-    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  const first = await emitTransition({
+    prev: null, next: agent, intent: intent[sessionId].current, seq: 1, harness: 'claude-code',
+    paths: p, renderProcess: processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
   assert.equal(first.kind, 'suppressed');
   assert.equal(first.reason, 'owner-dead');
@@ -259,9 +205,9 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
   const entry = JSON.parse(readFileSync(entryPath, 'utf8'));
   assert.deepEqual(entry, { seq: 1, pid: process.pid, starttime: 1, held: null, presented: null, ended: false });
 
-  const end = await emitHookTransition({
-    prev: agent, next: null, intent, seq: 2, transmitSprite: true,
-    paths: p, processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
+  const end = await emitTransition({
+    prev: agent, next: null, intent: null, seq: 2, harness: 'claude-code',
+    paths: p, renderProcess: processOps, platform: 'darwin', hookEnv: { TERM: 'xterm-256color' }, probe: () => null,
   });
   assert.equal(end.kind, 'suppressed');
   assert.equal(end.reason, 'owner-dead');
@@ -271,7 +217,7 @@ test('emitHookTransition writes a stamped ledger entry under transmit/ and a tom
 
 // A provisional (SessionStart) section publishes no held evidence even where the previous
 // entry had some, so the first event after the agent's UI is up creates the image again.
-test('emitHookTransition passes provisional through: the ledger keeps no held evidence', async () => {
+test('emitTransition passes provisional through: the ledger keeps no held evidence', async () => {
   const p = paths(env());
   const sessionId = 's-provisional';
   const agent = { sessionId, state: 'idle', pid: process.pid, starttime: 1, project: 'api' };
@@ -285,10 +231,10 @@ test('emitHookTransition passes provisional through: the ledger keeps no held ev
     sessionId, pid: process.pid, identity: { project: 'api' }, state: 'idle', motionPolicy: 'full',
     animation: { kind: 'static' }, color: { backdrop: '#000000', base: '#ffffff' }, sprite: { terminal: '/nonexistent.png', rows: 4 },
   } } };
-  const result = await emitHookTransition({
-    prev: agent, next: agent, intent, seq: 2, transmitSprite: true, provisional: true,
+  const result = await emitTransition({
+    prev: agent, next: agent, intent: intent[sessionId].current, seq: 2, harness: 'claude-code', provisional: true,
     paths: p,
-    processOps: { recordOf: () => ({ pid: process.pid, tty: 'ttys999' }), ownerAlive: () => false, startTimeOf: () => 1 },
+    renderProcess: { recordOf: () => ({ pid: process.pid, tty: 'ttys999' }), ownerAlive: () => false, startTimeOf: () => 1 },
     platform: 'darwin', hookEnv: { TERM: 'xterm-kitty' }, probe: () => null,
   });
   assert.equal(result.kind, 'suppressed');
@@ -303,6 +249,9 @@ test('settleStatusline probes the terminal only for provisional evidence', async
   mkdirSync(dirname(entryPath), { recursive: true });
   const held = { transport: 'direct', capability: 'kitty-animation', id: 1, intent: { state: 'idle' } };
   let probed = 0;
+  const owner = terminalOwnerPaths(p.transmitDir, record);
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId, seq: 1 }));
   const run = () => settleStatusline({
     record, intent: {}, paths: p,
     processOps: { recordOf: () => { probed += 1; return { pid: process.pid, tty: 'ttys999' }; }, ownerAlive: () => false, startTimeOf: () => 1 },
@@ -318,17 +267,45 @@ test('settleStatusline probes the terminal only for provisional evidence', async
   assert.equal(probed, 1, 'provisional evidence reaches the terminal target and the lock');
 });
 
-test('hook rejects unknown flags before state work but remains cosmetic', () => {
-  const e = env();
-  const result = spawnSync(process.execPath, [bin, 'hook', 'SessionStart', '--bogus'], {
-    encoding: 'utf8', env: e,
-  });
-  assert.equal(result.status, 0);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /unknown option.*bogus/i);
-  assert.doesNotMatch(result.stderr, /place it at the end/i);
-  assert.match(result.stderr, /familiar hook --help/);
-  assert.deepEqual(readdirSync(e.FAMILIAR_STATE_DIR), []);
+test('statusline settles only for the recorded terminal owner', async () => {
+  const p = paths(env());
+  const record = { sessionId: 'old', pid: process.pid, starttime: 1 };
+  const { entryPath, lockPath } = ledgerPaths(p.transmitDir, 'old');
+  const owner = terminalOwnerPaths(p.transmitDir, record);
+  mkdirSync(dirname(entryPath), { recursive: true });
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(entryPath, JSON.stringify({ seq: 1, pid: process.pid, starttime: 1,
+    ended: false, held: { provisional: true }, presented: 'idle' }));
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'new', seq: 2 }));
+  const locks = [];
+  const { withLock } = await import('../src/bus/lock.js');
+  const args = { record, intent: {}, paths: p,
+    processOps: { recordOf: () => { throw new Error('superseded session probed the terminal'); },
+      ownerAlive: () => false, startTimeOf: () => 1 },
+    lockWith: (path, fn, options) => { locks.push(path); return withLock(path, fn, options); },
+  };
+  const before = readFileSync(entryPath, 'utf8');
+  assert.deepEqual(await settleStatusline(args), { kind: 'superseded', reason: 'terminal' });
+  assert.deepEqual(locks, [owner.lockPath]);
+  assert.equal(readFileSync(entryPath, 'utf8'), before);
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'old', seq: 2 }));
+  locks.length = 0;
+  assert.deepEqual(await settleStatusline({ ...args,
+    processOps: { ...args.processOps, recordOf: () => null },
+  }), { kind: 'noop' });
+  assert.deepEqual(locks, [owner.lockPath, lockPath]);
+  assert.deepEqual(JSON.parse(readFileSync(owner.entryPath, 'utf8')), { sessionId: 'old', seq: 2 });
+});
+
+test('removed hook and setup codex commands are usage errors before state work', () => {
+  for (const args of [['hook', 'SessionStart'], ['setup', 'codex']]) {
+    const e = env();
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: e });
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /unknown/i);
+    assert.deepEqual(readdirSync(e.FAMILIAR_STATE_DIR), []);
+  }
 });
 
 test('statusline keeps malformed input cosmetic', () => {
@@ -347,7 +324,7 @@ test('reap failures are nonzero', () => {
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /^familiar: no scheme at /);
+  assert.match(result.stderr, /^familiar: reap: no scheme at /);
 });
 
 test('reap prunes a dead transmission owner absent from the bus and reports only removals', () => {
@@ -377,7 +354,7 @@ test('reap sweeps an orphaned atomic-write temp from the state dir and reports i
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   mkdirSync(p.stateDir, { recursive: true });
   // Our own pid is alive, so only the age bound can call this one an orphan.
-  const temp = `${p.lockPath}.tmp.${process.pid}.0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44`;
+  const temp = `${p.presentationLockPath}.tmp.${process.pid}.0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44`;
   writeFileSync(temp, '');
   const old = (Date.now() - 10 * 60_000) / 1000;
   utimesSync(temp, old, old);
@@ -387,6 +364,160 @@ test('reap sweeps an orphaned atomic-write temp from the state dir and reports i
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, 'swept 1 orphaned temp file(s)\n');
   assert.equal(existsSync(temp), false);
+});
+
+// Real relay publication and observer admission; only process/terminal discovery is controlled.
+function reapFixture(t) {
+  const e = env();
+  const p = paths(e);
+  const registryPaths = relayPaths(e);
+  t.after(() => {
+    rmSync(e.FAMILIAR_CONFIG_DIR, { recursive: true, force: true });
+    rmSync(e.FAMILIAR_STATE_DIR, { recursive: true, force: true });
+  });
+  writeFileSync(p.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 }));
+  const processOps = relayProcessOps();
+  const handle = processOps.handleOf(process.pid);
+  const emitted = [];
+  const deps = {
+    paths: p,
+    relay: {
+      readSnapshot: () => readSnapshot({ paths: registryPaths }),
+      reapRegistry: () => reapRegistry({ paths: registryPaths }),
+    },
+    relayProcess: processOps,
+    renderProcess: {
+      startTimeOf: () => 20, ownerAlive: () => true,
+      lockHolderAlive: () => true, pidExists: () => true,
+    },
+    adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => 84 }),
+    gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
+    emitTransition: async (args) => { emitted.push(args); return { kind: 'unchanged' }; },
+    env: {},
+  };
+  const event = (kind = 'session-start', sid = 'reap-session') => ({
+    schema: 1, kind, harness: 'claude-code',
+    nativeEvent: { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', 'session-end': 'SessionEnd' }[kind],
+    sessionId: sid, agentId: `claude-code:${sid}`, cwd: '/repo', tool: null,
+  });
+  const publish = (ev, processHandle = handle) => applyEvent(ev, {
+    paths: registryPaths,
+    processOps: { ...processOps, handleOf: () => processHandle, probe: () => ({ status: 'alive' }) },
+    resolveSessionPid: () => process.pid, gitContext: deps.gitContext,
+  });
+  const admit = async (sid) => {
+    const ev = event('session-start', sid);
+    const { snapshot } = await publish(ev);
+    const result = await observe({ text: JSON.stringify({
+      schema: 1, type: 'event', subscriber: 'familiar', event: ev,
+      registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+    }), deps });
+    assert.deepEqual(result, { exitCode: 0, lines: [] });
+  };
+  const run = async () => {
+    const { reap } = await import('../bin/familiar.js');
+    assert.equal(typeof reap, 'function', 'reap exposes the env-free presentation transaction');
+    return reap({ deps });
+  };
+  return { e, p, deps, handle, emitted, event, publish, admit, run };
+}
+
+test('reap prunes a dead relay agent and reconciles even when nothing was pruned', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  await f.publish(f.event('prompt'));
+  assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'idle');
+  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, lines: [] });
+  assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'working');
+  await f.publish(f.event('prompt'), { ...f.handle, start: String(BigInt(f.handle.start) + 1n) });
+  const result = await f.run();
+  assert.deepEqual(result.reaped, ['claude-code:reap-session']);
+  assert.deepEqual(JSON.parse(readFileSync(f.p.intentPath)), {});
+  assert.deepEqual(Object.keys((await readSessions(f.p.sessionsPath)).ended), ['reap-session']);
+});
+
+test('reap lists registry agents awaiting their first event in JSON and pretty output', async (t) => {
+  const f = reapFixture(t);
+  await f.publish(f.event());
+  for (const args of [['--json', 'reap'], ['reap']]) {
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: f.e });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    if (args[0] === '--json') assert.deepEqual(JSON.parse(result.stdout), {
+      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, swept: 0,
+    });
+    else assert.equal(result.stdout, 'awaiting reap-session\n');
+  }
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
+});
+
+test('reap drops ended evidence only for a dead terminal owner under the presentation lock', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  await f.publish(f.event('session-end'));
+  assert.deepEqual((await f.run()).ended, [], 'a live owner keeps its cleanup evidence');
+  const { entryPath } = terminalOwnerPaths(f.p.transmitDir, { pid: 84, starttime: 20 });
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(entryPath, JSON.stringify({ sessionId: 'reap-session', seq: 1 }));
+  let probes = 0;
+  f.deps.renderProcess.ownerAlive = (pid, stamp) => {
+    if (probes++ === 0) assert.equal(existsSync(f.p.presentationLockPath), true);
+    assert.deepEqual([pid, stamp], [84, { starttime: 20 }]);
+    return false;
+  };
+  const result = await f.run();
+  assert.deepEqual(result.ended, ['reap-session']);
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+  assert.equal(existsSync(entryPath), false, 'terminal ownership evidence is pruned too');
+});
+
+test('reap reports removed ended evidence in pretty output', async (t) => {
+  const f = reapFixture(t);
+  f.deps.adapterFor = () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid });
+  f.deps.renderProcess.startTimeOf = () => startTimeOf(process.pid) + 1;
+  await f.admit();
+  await f.publish(f.event('session-end'));
+  const result = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: f.e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, 'ended reap-session\n');
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+});
+
+test('reap never emits and never touches familiar old agents or lock files', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  f.emitted.length = 0;
+  writeFileSync(join(f.p.stateDir, 'agents.json'), 'old familiar agents');
+  writeFileSync(join(f.p.stateDir, 'agents.lock'), 'old familiar lock');
+  await f.publish(f.event('prompt'));
+  await f.run();
+  assert.deepEqual(f.emitted, []);
+  assert.equal(readFileSync(join(f.p.stateDir, 'agents.json'), 'utf8'), 'old familiar agents');
+  assert.equal(readFileSync(join(f.p.stateDir, 'agents.lock'), 'utf8'), 'old familiar lock');
+});
+
+test('reap rejects an existing relay directory at 0755 before changing sessions', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const before = readFileSync(f.p.sessionsPath, 'utf8');
+  chmodSync(f.e.RELAY_STATE_DIR, 0o755);
+  for (const args of [['reap'], ['--json', 'reap']]) {
+    const result = spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env: f.e });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /^familiar: reap: IO_ERROR: [^\n]+\n$/);
+    assert.equal(readFileSync(f.p.sessionsPath, 'utf8'), before);
+  }
+});
+
+test('reap accepts an absent relay directory and reconciles to no sessions', async (t) => {
+  const f = reapFixture(t);
+  const result = spawnSync(process.execPath, [bin, '--json', 'reap'], { encoding: 'utf8', env: f.e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0 });
+  assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
 });
 
 test('an animation asset fault is one concise cosmetic line at the CLI boundary', () => {
@@ -538,20 +669,14 @@ test('statusline --with reports a failing wrapped command, not its undrained std
   assert.doesNotMatch(out.stderr, /EPIPE/, 'the stdin handoff was reported instead of the real failure');
 });
 
-test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', () => {
+test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', async () => {
   const e = env();
   mkdirSync(e.FAMILIAR_CONFIG_DIR, { recursive: true });
   mkdirSync(e.FAMILIAR_STATE_DIR, { recursive: true });
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'identities: []\n');
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
-    s1: {
-      sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, repositoryRoot: null, projectColor: null, cwd: '/tmp/api', pid: process.pid, starttime: 1,
-      state: 'working', updatedAt: 1,
-    },
-  }));
+  await seedBus(e, 's1', { cwd: '/tmp/api', repository: false });
 
   const empty = spawnSync(process.execPath, [bin, 'statusline'], {
     input: JSON.stringify({ session_id: 's1' }), encoding: 'utf8', env: e,
@@ -689,7 +814,7 @@ test('preview on a terminal WITHOUT graphics prints the poses and no escape at a
   }
 });
 
-test('an incoming malformed animation reports its member fault and writes neither bus file', async (t) => {
+test('an incoming malformed animation reports its member fault before preflight', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-malformed-animation-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const poses = STATES.map((state) => `      ${state}: ${state} pose`).join('\n');
@@ -714,13 +839,6 @@ ${poses}
   }
   pack.members.get('broken-cat').assetDirProof = 'filesystem';
 
-  const paths = {
-    agentsPath: join(dir, 'state', 'agents.json'),
-    intentPath: join(dir, 'state', 'intent.json'),
-    lockPath: join(dir, 'state', 'agents.lock'),
-    seqPath: join(dir, 'state', 'events.seq'),
-    transmitDir: join(dir, 'state', 'transmit'),
-  };
   const namedFault = 'animation: member "broken-cat" manifest has unknown role "wobble"';
   let preflights = 0;
   const prepareSprites = makePrepareSprites({
@@ -732,35 +850,12 @@ ${poses}
     preflightKittyPrograms: () => { preflights++; },
   });
 
-  await assert.rejects(
-    applyHookEvent({
-      event: 'UserPromptSubmit',
-      stdin: JSON.stringify({ session_id: 'bad', cwd: '/repos/api' }),
-      deps: {
-        paths,
-        tone: { mode: 'dark', satScale: 1 },
-        motionPolicy: 'full',
-        prepareSprites,
-        adapter: adapterFor('claude-code'),
-        gitContext: async () => ({
-          remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api',
-        }),
-        resolveAgentPid: () => 4242,
-        processOps: {
-          ancestors: () => [],
-          recordOf: () => null,
-          startTimeOf: () => 123,
-          isAlive: () => true,
-          lockHolderAlive: () => true,
-        },
-        now: () => 1_000,
-      },
-    }),
-    new RegExp(namedFault.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-  );
+  const result = await prepareSprites({ bad: {
+    sessionId: 'bad', projectKey: 'github.com/me/api', project: 'api',
+    remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api', projectColor: null,
+  } });
+  assert.equal(result.faults.get('bad'), namedFault);
   assert.equal(preflights, 0, 'preflight ran after validation failed');
-  assert.equal(existsSync(paths.agentsPath), false);
-  assert.equal(existsSync(paths.intentPath), false);
 });
 
 test('install pets --help documents the full, reduced, and off policies without loading config', () => {
@@ -1212,35 +1307,34 @@ const statusline = (e, args, payload) => spawnSync(process.execPath, [bin, 'stat
   env: e,
 });
 
-// SEED agents.json DIRECTLY. Firing a real `familiar hook` cannot work here and is unsafe:
-//
-//   1. transaction.js:124 calls resolveAgentPid(), which requires an ancestor with
-//      comm === 'claude' AND a controlling tty. `node --test` has none, so the hook throws.
-//   2. bin/familiar's error boundary converts that throw to EXIT 0 plus one stderr line --
-//      so a status-only assertion would accept total failure and the test would seed nothing.
-//   3. Worse, when the suite IS run under a real Claude session, resolveAgentPid SUCCEEDS and
-//      emit() writes graphics escapes to /proc/<claude>/fd/1 -- the developer's live terminal.
-//      A test that scribbles on the terminal running it is not a test.
-//
-// The record shape is transaction.js:163-174. pid/starttime are this process's, so nothing
-// downstream can mistake the record for a dead session's.
-function seedBus(e, sessionId, { state = 'working', cwd = process.cwd() } = {}) {
-  const record = {
-    sessionId,
-    projectKey: projectKeyFor({ remote: null, repositoryRoot: cwd, cwd }),
-    project: displayProject({ repoRoot: cwd, cwd }),
-    remote: null,
-    repoRoot: cwd,
-    repositoryRoot: cwd,
-    projectColor: null,
-    cwd,
-    pid: process.pid,
-    starttime: startTimeOf(process.pid),
-    state,
-    updatedAt: Date.now(),
-  };
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({ [sessionId]: record }));
-  return record;
+// Publish through relay and admit through the observer without touching the live terminal.
+async function seedBus(e, sessionId, {
+  state = 'working', cwd = process.cwd(), projectColor = null, repository = true,
+} = {}) {
+  const p = paths(e);
+  const registryPaths = relayPaths(e);
+  const processOps = relayProcessOps();
+  const gitContext = async () => ({ remote: null, repoRoot: repository ? cwd : null,
+    repositoryRoot: repository ? cwd : null });
+  const kind = { working: 'prompt', idle: 'session-start', done: 'turn-end', error: 'turn-error' }[state];
+  const nativeEvent = { working: 'UserPromptSubmit', idle: 'SessionStart', done: 'Stop', error: 'StopFailure' }[state];
+  const event = { schema: 1, kind, harness: 'claude-code', nativeEvent,
+    sessionId, agentId: `claude-code:${sessionId}`, cwd, tool: null };
+  const { snapshot } = await applyEvent(event, { paths: registryPaths, processOps,
+    resolveSessionPid: () => process.pid, gitContext });
+  const result = await observe({ text: JSON.stringify({
+    schema: 1, type: 'event', subscriber: 'familiar', event,
+    registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+  }), deps: {
+    paths: p, relay: { readSnapshot: () => readSnapshot({ paths: registryPaths }) },
+    relayProcess: processOps,
+    adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid }),
+    gitContext, lookupProjectColor: async () => ({ color: projectColor, warnings: [] }),
+    loadContext: () => loadContext({ paths: p }),
+    emitTransition: async () => ({ kind: 'unchanged' }), env: e,
+  } });
+  assert.deepEqual(result, { exitCode: 0, lines: [] });
+  return (await readSessions(p.sessionsPath)).sessions[sessionId];
 }
 
 // The trap this guards: bin/familiar's no-intent branch printed `rawOutput ?? ''`. With
@@ -1266,12 +1360,47 @@ test('statusline with no --with prints the HUD for a session not on the bus', ()
   assert.ok(!result.stdout.includes('\x1b['), 'no identity means no hue');
 });
 
+for (const wrapped of [false, true]) {
+  test(`statusline keeps ${wrapped ? '--with output unchanged' : 'the HUD'} when its session's visuals fault`, async () => {
+    const e = statuslineEnv();
+    await seedBus(e, 'faulted');
+    writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
+      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+    const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
+    const payload = { session_id: 'faulted', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } };
+    const ledger = ledgerPaths(paths(e).transmitDir, 'faulted').entryPath;
+    mkdirSync(dirname(ledger), { recursive: true });
+    writeFileSync(ledger, '{not json');
+    const result = statusline(e, args, payload);
+    assert.equal(result.status, 0);
+    if (wrapped) assert.equal(result.stdout, 'custom\n\nlast');
+    else {
+      assert.match(result.stdout, /Opus 4\.8/);
+      assert.equal(result.stdout.trimEnd().split('\n').length, 4);
+    }
+    assert.doesNotMatch(result.stdout, /\x1b\[|\u{10EEEE}/u);
+    assert.match(result.stderr, /^familiar: statusline: session faulted: .*missing-cat.*\n$/);
+    assert.equal(result.stderr.trimEnd().split('\n').length, 1);
+    assert.equal(readFileSync(ledger, 'utf8'), '{not json', 'faulted visuals must skip settling');
+    const combined = join(e.FAMILIAR_STATE_DIR, 'output-order');
+    const fd = openSync(combined, 'w');
+    try {
+      const ordered = spawnSync(process.execPath, [bin, 'statusline', ...args], {
+        input: JSON.stringify(payload), env: e, stdio: ['pipe', fd, fd],
+      });
+      assert.equal(ordered.status, 0);
+    } finally { closeSync(fd); }
+    assert.equal(readFileSync(combined, 'utf8'), result.stdout + result.stderr,
+      'the diagnostic must follow the complete rendered output');
+  });
+}
+
 // THE ONE THAT PROVES THE COMPOSED PATH. The test above deliberately uses an unknown session,
 // so it exercises neither intent resolution nor composeForIntent -- on its own it would leave
 // the entire composed path unproven while LOOKING like coverage.
-test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', () => {
+test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', async () => {
   const e = statuslineEnv();
-  seedBus(e, 'on-the-bus');
+  await seedBus(e, 'on-the-bus');
   const result = statusline(e, [], {
     session_id: 'on-the-bus',
     cwd: process.cwd(),
@@ -1292,10 +1421,10 @@ test('a session on the bus gets four placeholder-prefixed, coloured HUD rows', (
 // basename(cwd) and identity.project are the same repo-root label and the test passes either way.
 // Here the bus identity is the repo root while the payload points at a subdirectory, so the
 // two answers differ and only the correct one passes.
-test('the project label is the identity\'s, not the payload directory\'s', () => {
+test('the project label is the identity\'s, not the payload directory\'s', async () => {
   const e = statuslineEnv();
   const root = process.cwd();
-  const seeded = seedBus(e, 'monorepo', { cwd: root });
+  const seeded = await seedBus(e, 'monorepo', { cwd: root });
   assert.notEqual(seeded.project, 'src');
 
   const result = statusline(e, [], {
@@ -1318,7 +1447,7 @@ test('statusline still honours --with, unchanged', () => {
   assert.doesNotMatch(result.stdout, /Opus/);
 });
 
-test('a bus-backed statusline with --with bypasses HUD field collection and git', (t) => {
+test('a bus-backed statusline with --with bypasses HUD field collection and git', async (t) => {
   const e = statuslineEnv();
   const probe = mkdtempSync(join(tmpdir(), 'familiar-statusline-no-git-'));
   const fakeBin = join(probe, 'bin');
@@ -1337,7 +1466,7 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
     rmSync(probe, { recursive: true, force: true });
   });
 
-  seedBus(e, 'wrapped-no-fields');
+  await seedBus(e, 'wrapped-no-fields');
   const result = statusline(e, ['--with', 'printf custom'], {
     session_id: 'wrapped-no-fields',
     cwd: process.cwd(),
@@ -1359,10 +1488,10 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
 // forever.
 
 for (const state of ['done', 'error']) {
-  test(`an expired ${state} decays to idle rather than showing ${state} forever`, () => {
+  test(`an expired ${state} decays to idle rather than showing ${state} forever`, async () => {
     const e = statuslineEnv();
     const sessionId = `decays-${state}`;
-    seedBus(e, sessionId, { state });
+    await seedBus(e, sessionId, { state });
     const result = statusline({ ...e, FAMILIAR_NOW_MS: String(Date.now() + 60_000) }, [], {
       session_id: sessionId, cwd: process.cwd(),
     });
@@ -1387,7 +1516,7 @@ for (const state of ['done', 'error']) {
 // So assert the thing the comment always MEANT: exactly one git call, and a cheap one.
 // `symbolic-ref --short HEAD` reads one ref file. It cannot become `status` or `log`
 // without this failing, deterministically, on any machine at any load.
-test('a status line invocation makes exactly one cheap git call', (t) => {
+test('a status line invocation makes exactly one cheap git call', async (t) => {
   const e = statuslineEnv();
   const probe = mkdtempSync(join(tmpdir(), 'familiar-statusline-git-calls-'));
   const fakeBin = join(probe, 'bin');
@@ -1419,7 +1548,7 @@ test('a status line invocation makes exactly one cheap git call', (t) => {
   // Exercise the shim directly until it is warm; a genuine extra git call still fails the count.
   for (let i = 0; i < 5; i++) spawnSync(join(fakeBin, 'git'), ['--version'], { env: e });
 
-  seedBus(e, 'timed');
+  await seedBus(e, 'timed');
   const payload = { session_id: 'timed', cwd: process.cwd() };
   const warm = statusline(e, [], payload);
   assert.equal(warm.status, 0, warm.stderr);          // ASSERT SUCCESS BEFORE COUNTING:
@@ -1473,9 +1602,9 @@ function projectsJson(e, dirs) {
   return JSON.parse(r.stdout).projects;
 }
 
-const benchWrapper = fileURLToPath(new URL('fixtures/bench-hook-cli.mjs', import.meta.url));
-function hookIdentity(e, dir) {
-  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+const observeFixture = fileURLToPath(new URL('fixtures/observe-event.mjs', import.meta.url));
+function observerIdentity(e, dir) {
+  const r = spawnSync(process.execPath, [observeFixture], {
     cwd: dir, encoding: 'utf8', env: e,
     input: JSON.stringify({ session_id: `cli-parity-${basenameOf(dir)}`, cwd: dir }),
   });
@@ -1491,7 +1620,7 @@ const resolvedAs = (color, warnings = []) => JSON.stringify({
   warnings,
 });
 
-test('a registered colour reaches whoami, projects and the hook on every worktree', (t) => {
+test('a registered colour reaches whoami, projects and the observer on every worktree', (t) => {
   const { main, internal, external } = worktreeLayout(t);
   const e = { ...pinned('identities: []\n'), FAKE_TASKS_OUTPUT: resolvedAs('#317d01') };
   for (const dir of [main, internal, external]) {
@@ -1500,7 +1629,7 @@ test('a registered colour reaches whoami, projects and the hook on every worktre
   }
   assert.deepEqual(projectsJson(e, [main, internal]).map((p) => [p.slot, p.color, p.source]),
     [[3, '#317d01', 'colour'], [3, '#317d01', 'colour']]);
-  const hooked = hookIdentity(e, internal);
+  const hooked = observerIdentity(e, internal);
   assert.deepEqual([hooked.slot, hooked.projectColor, hooked.source], [3, '#317d01', 'colour']);
 });
 
@@ -1570,7 +1699,7 @@ test('unpinned remote-less worktrees share the repository slot and keep their la
   const seen = [main, internal, external, link].map((dir) => whoami(e, dir));
   assert.deepEqual(seen.map((s) => s.project), ['api', 'fix-api', 'fix-ext', 'fix-ext']);
   assert.equal(new Set(seen.map((s) => s.slot)).size, 1);
-  assert.equal(hookIdentity(e, external).slot, seen[0].slot);
+  assert.equal(observerIdentity(e, external).slot, seen[0].slot);
 });
 
 test('a main path pin reaches every worktree on every surface', (t) => {
@@ -1581,7 +1710,7 @@ test('a main path pin reaches every worktree on every surface', (t) => {
   assert.deepEqual(listed.map((p) => [p.project, p.slot, p.source]), [
     ['api', 7, 'pin'], ['fix-api', 7, 'pin'], ['fix-ext', 7, 'pin'], ['fix-ext', 7, 'pin'],
   ]);
-  const hooked = hookIdentity(e, internal);
+  const hooked = observerIdentity(e, internal);
   assert.deepEqual([hooked.slot, hooked.member, hooked.project], [7, whoami(e, internal).member.id, 'fix-api']);
 });
 
@@ -1605,7 +1734,7 @@ test('a matching remote pin dominates every path pin', (t) => {
   const e = pinned(`identities:\n  - path: ${JSON.stringify(main)}\n    slot: 7\n`
     + `  - path: ${JSON.stringify(internal)}\n    slot: 3\n  - remote: github.com/example/api\n    slot: 6\n`);
   for (const dir of [main, internal, external]) assert.equal(whoami(e, dir).slot, 6);
-  assert.equal(hookIdentity(e, internal).slot, 6);
+  assert.equal(observerIdentity(e, internal).slot, 6);
 });
 
 test('projects with no directories lists path pins only, never their worktrees', (t) => {
@@ -1614,30 +1743,24 @@ test('projects with no directories lists path pins only, never their worktrees',
   assert.deepEqual(projectsJson(e, []).map((p) => p.project), ['api']);
 });
 
-test('the hook writes tasks warnings to stderr and still records the session', (t) => {
+test('the observer writes tasks warnings to stderr and still records the session', (t) => {
   const { main } = worktreeLayout(t);
   const e = { ...pinned('identities: []\n'),
     FAKE_TASKS_OUTPUT: JSON.stringify({ results: [{ input: main, kind: 'path', status: 'unregistered' }],
       warnings: ['nexc: its checkout is not matched and its color is not reported (bad)'] }) };
-  const r = spawnSync(process.execPath, [benchWrapper, bin, 'hook', 'PreToolUse', '--agent', 'claude-code'], {
+  const r = spawnSync(process.execPath, [observeFixture], {
     cwd: main, encoding: 'utf8', env: e, input: JSON.stringify({ session_id: 'warn', cwd: main }) });
   assert.equal(r.status, 0);
   assert.equal(r.stderr,
-    'familiar: tasks: nexc: its checkout is not matched and its color is not reported (bad)\n');
-  const agents = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), 'utf8'));
+    'familiar: observe: nexc: its checkout is not matched and its color is not reported (bad)\n');
+  const agents = JSON.parse(readFileSync(join(e.FAMILIAR_STATE_DIR, 'sessions.json'), 'utf8')).sessions;
   assert.equal(agents.warn.projectColor, null);
 });
 
-test('the status line paints the label in the colour its record carries', () => {
+test('the status line paints the label in the colour its record carries', async () => {
   const e = pinned('identities: []\n');
   e.FAKE_TASKS_LOG = join(e.FAMILIAR_STATE_DIR, 'tasks.log');
-  writeFileSync(join(e.FAMILIAR_STATE_DIR, 'agents.json'), JSON.stringify({
-    s1: {
-      sessionId: 's1', projectKey: 'path:/tmp/api', project: 'api', remote: null,
-      repoRoot: null, repositoryRoot: null, projectColor: '#317d01', cwd: '/tmp/api', pid: process.pid, starttime: 1,
-      state: 'working', updatedAt: 1,
-    },
-  }));
+  await seedBus(e, 's1', { cwd: '/tmp/api', projectColor: '#317d01' });
   const r = spawnSync(process.execPath, [bin, 'statusline'], {
     input: JSON.stringify({ session_id: 's1' }), encoding: 'utf8', env: e,
   });

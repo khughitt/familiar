@@ -21,11 +21,10 @@ export const COMMANDS = [
   { path: ['install', 'opencode'], summary: 'Install the OpenCode integration', options: [{ names: ['--project-dir'], value: 'path' }, { names: ['--config-dir'], value: 'path' }] },
   { path: ['setup'], summary: "Print a harness's integration settings" },
   { path: ['setup', 'claude-code'], summary: 'Print Claude Code integration settings', protocol: 'harness settings document: stdout is the JSON settings file in any mode' },
-  { path: ['setup', 'codex'], summary: 'Print Codex integration settings', protocol: 'harness settings document: stdout is the JSON settings file in any mode' },
-  { path: ['hook'], summary: 'Record an agent lifecycle event', protocol: 'harness hook: reads the harness payload on stdin',
-    args: [{ name: 'event', value: 'string', required: true }], options: [{ names: ['--agent'], value: 'string' }, { names: ['--trace'], value: 'path' }] },
+  { path: ['setup', 'relay'], summary: "Print familiar's relay observer entries", protocol: 'relay subscribers fragment: stdout is the JSON subscribers list in any mode' },
+  { path: ['observe'], summary: "Project relay's registry into presentation state", protocol: 'relay observer: reads one observer envelope on stdin' },
   { path: ['statusline'], summary: 'Render the Claude Code status line', protocol: 'Claude Code status line: stdout is the rendered line', options: [{ names: ['--with'], value: 'string' }] },
-  { path: ['reap'], summary: 'Remove sessions whose agent has exited' },
+  { path: ['reap'], summary: "Prune relay's registry and reconcile presentation" },
 ];
 
 export const FAMILIES = new Map(COMMANDS.filter((c) => c.path.length === 1 && COMMANDS.some((d) => d.path.length === 2 && d.path[0] === c.path[0]))
