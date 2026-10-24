@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:19:45Z
+updated: 2026-10-24T20:22:40Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -109,3 +109,5 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:04:03Z (feat/desktop-attention): review: impl round 2 — verdict: revise; findings: Critical 0, Important 1, Minor 5; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T20:09:14Z (feat/desktop-attention): Corrective round 2 committed (d0e5c13); scoped re-review (round 3) next.
 - 2026-10-24T20:19:45Z (feat/desktop-attention): review: impl round 3 — verdict: accept; findings: Minor 8; reviewer: claude-code/claude-opus-5-5
+- 2026-10-24T20:22:39Z (feat/desktop-attention): attached: execution-ledger.md (32709 bytes): Execution ledger for plan d1776d0: per-task completion lines, every Ruling and every deferred minor through final review round 3
+- 2026-10-24T20:22:40Z (feat/desktop-attention): attached: final-review-round-1-report.md (6830 bytes): Final whole-branch review round 1 (claude-code/claude-opus-5-5), full text
