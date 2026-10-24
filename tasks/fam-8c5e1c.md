@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/attention-health
 created: 2026-10-24T21:32:07Z
-updated: 2026-10-24T23:47:34Z
+updated: 2026-10-24T23:47:35Z
 started: 2026-10-24T21:41:33Z
 depends: [fam-9c8dd1]
 tags: [attention]
@@ -27,3 +27,4 @@ Final review round 3 of fam-9c8dd1 found that a familiar-niri watch coordinator 
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-24T23:44:24Z (feat/attention-health): resumed
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T23:47:35Z (feat/attention-health): user: 'merges approved' (desktop attention merged to main as 6847632); branch rebuilt on main 745b291. Proceeding on own judgement (bar question unanswered). Spec amendment frozen at f2a317a (sha256 48dc5c65…): heartbeat schema 2 with stopped + crashedAt; unstable = healthy and >=2 crashes in 10 min; warning only, gates unchanged. Spec review round 1 dispatched.
