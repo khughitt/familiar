@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:17:25Z
+updated: 2026-10-24T13:18:54Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -39,3 +39,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:16:31Z (feat/desktop-attention): review: spec round 3 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T13:17:24Z (feat/desktop-attention): attached: spec-round-3-report.md (5467 bytes): Full evidence review of 929d0a1 by codex/gpt-6.1-sol: eight prior corrections confirmed; 1 Important passive-idle retention contradiction
 - 2026-10-24T13:17:25Z (feat/desktop-attention): Round 3 Important accepted: OpenCode queue forwards repeated idle, and adapter reduces done to idle, so generic different-state closure would erase completion. Corrective spec commit 4fdcb54ae7335e594b95b9578360cdcdbaac02e1 explicitly preserves completion ID/dispositions/delivery through passive idle/reconcile/restart and defines genuine new activity; required working→done→idle→idle regression case added. Fresh scoped read-only reviewer dispatched against the new frozen commit. Original eight round-2 corrections otherwise confirmed in the full round-3 evidence review.
+- 2026-10-24T13:18:54Z (feat/desktop-attention): review: spec round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
