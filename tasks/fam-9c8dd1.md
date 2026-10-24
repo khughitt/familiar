@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T15:35:21Z
+updated: 2026-10-24T15:35:23Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -79,3 +79,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T15:35:18Z (feat/desktop-attention): Revision verification: just check, tasks check and git diff --check passed with zero task errors/warnings. Private Luau 0.743 interpreter passed three capability checks; Linux and macOS release archive digests verified. An initial universal-macOS-archive assertion failed; header inspection corrected it to arm64, matching the current macos-14 runner. No plugin, native focus/DND/notification or latency acceptance ran. Full-suite baseline remains deferred until execution Setup. Read-only inspection false-positive filed as ops-336b9e; single-command inspection succeeded.
 - 2026-10-24T15:35:20Z (feat/desktop-attention): attached: plan-round-1-external-report.md (5632 bytes): Full external plan round-1 review of e7fd381 by claude-code/claude-opus-5-5: revise, Important 4 and Minor 1
 - 2026-10-24T15:35:21Z (feat/desktop-attention): attached: plan-revision-check-report.md (4089 bytes): Author checklist for replacement d1776d0: five dispositions, interface/dependency checks, runtime evidence and native limits; not user acceptance
+- 2026-10-24T15:35:23Z (feat/desktop-attention): attached: plan-revision-ledger.md (21829 bytes): Full ledger through external plan round 1; five Why/Cost rulings for d1776d0 and unchanged spec round-7 deferred minor
