@@ -110,6 +110,7 @@ test('completion callback and scripts', () => {
   const root = candidates(['familiar', ''], 1);
   for (const cmd of COMMANDS) if (cmd.path.length === 1) assert.ok(root.includes(cmd.path[0]), cmd.path[0]);
   assert.ok(candidates(['familiar', 'theme', ''], 2).includes('preview'));
+  assert.deepEqual(candidates(['familiar', 'attention', ''], 2).sort(), ['dismiss', 'popup', 'status']);
   assert.ok(candidates(['familiar', 'projects', '--'], 2).includes('--rows'));
   assert.deepEqual(candidates(['familiar', 'scheme', 'set', ''], 3).sort(), ['dark', 'light']);
   assert.deepEqual(candidates(['familiar', 'th'], 1), ['theme']);
