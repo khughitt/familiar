@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T16:22:33Z
+updated: 2026-10-24T16:22:35Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -96,3 +96,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T16:22:02Z (feat/desktop-attention): attached: plan-acceptance-ledger.md (25471 bytes): Ledger through plan round-3 acceptance: execution handoff ruling and three deferred minors with reasons, costs and owners
 - 2026-10-24T16:22:31Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Retained locked worktree for fresh-session execution Setup, full-suite baseline and implementation of accepted plan d1776d0; no execution has started.","cleanup_trigger":"After reviewed implementation is integrated under approved activation, inspect host pointers, ignored files and evidence dispositions before considering removal."}
 - 2026-10-24T16:22:33Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention","purpose":"Accepted plan/spec reviews, deferred-minor rulings and execution handoff; latest report and ledger copies are verified attachments.","cleanup_trigger":"After final rulings and deferred-minor dispositions reach the user and required attachments are verified, reassess scratch retention.","manifest":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention/retained-manifest.json","sha256":"389be8f941dc1eb2f6f7868579cd6f775465a2c9359a6243747cf5817b3f86b2"}
+- 2026-10-24T16:22:35Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"scratch","path":"$WORK_ROOT/familiar/fam-9c8dd1","purpose":"Canonical persistent container for source/probe evidence used by the plan review and later native rollout validation.","cleanup_trigger":"After implementation and native validation are recorded, verify evidence preservation/dispositions and reassess container retention; keep any unreleased evidence.","manifest":"$WORK_ROOT/familiar/fam-9c8dd1/retained-manifest.json","sha256":"f023e1122347a581e348decaca12dc8265fb40e2567c47084032c92e5706d060"}
