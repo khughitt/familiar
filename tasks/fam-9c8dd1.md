@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:05:02Z
+updated: 2026-10-24T22:05:03Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -135,3 +135,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T22:04:59Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
 - 2026-10-24T22:05:00Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
 - 2026-10-24T22:05:02Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"session:claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Disposed of by this session in the approved integration: contents attached to fam-9c8dd1 (ledger as portable derivative, reports) or regenerable; rulings and deferred minors already reported.","cleanup_trigger":"After the user-approved merge into main lands with a green suite: tt-report, ignored-file and host-pointer checks, then remove."}
+- 2026-10-24T22:05:03Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"session:claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/2026-10-24-desktop-attention","purpose":"Disposed of by this session in the approved integration: contents attached to fam-9c8dd1 (ledger as portable derivative, reports) or regenerable; rulings and deferred minors already reported.","cleanup_trigger":"After the user-approved merge into main lands with a green suite: tt-report, ignored-file and host-pointer checks, then remove."}
