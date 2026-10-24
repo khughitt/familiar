@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T16:23:27Z
+updated: 2026-10-24T16:30:14Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -101,3 +101,5 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T16:22:38Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence","purpose":"Pinned Niri/Noctalia source, verified Luau release archives and private interpreter capability probe for replacement plan d1776d0; no native plugin/focus/latency acceptance claimed.","cleanup_trigger":"After the replacement plan and implemented runtime/socket tests are reviewed and native acceptance limits are recorded, reassess which raw sources/archives/probe results remain needed.","manifest":"$WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence/sha256-manifest.json","sha256":"f28d6334b973c38fe4f461d00839e99ea91b37c857d5c5c4c9a5c5565f612071"}
 - 2026-10-24T16:23:27Z (feat/desktop-attention): parked (waiting on agent, session): Fresh execution session resumes fam-9c8dd1 in .worktrees/desktop-attention, reads accepted spec 2b58b29 and plan d1776d018ebd018bdeea467bf7ce62185c96dd81 at .worktrees/desktop-attention/docs/plans/2026-10-24-desktop-attention.md, verifies the five current retained-item checkpoints, re-enters worktree/executing-plans Setup, and runs just test as the full-suite baseline, recording actual counts/results before the first product change. Then start/arm the first implementation child and implement inline with final independent review. Plan round 3 accept is recorded; seven steps plus ops-f800b0 are unblocked with dependencies intact. Full acceptance report and plan-acceptance-ledger attached. Deferred minors: runAsync timeout proof/enforcement (fam-4796ce), CLI startup and native click-to-focus measurement (fam-e810ef/fam-fa17bb), and normal Codex workers withholding completion with no replay (hq-4c954d). just check, tasks check and git diff --check passed with zero task warnings; no Setup, baseline, product/plugin/native work or live changes ran. User explicitly requested this fresh-session handoff. No checks, children or session processes remain; clean locked worktree retained. No live desktop, gestures, focus, notifications, host-pointer changes, push or activation is authorized.
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T16:30:14Z (feat/desktop-attention): resumed
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
