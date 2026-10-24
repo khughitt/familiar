@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:05:27Z
+updated: 2026-10-24T22:07:07Z
 started: 2026-10-24T12:20:23Z
 completed: 2026-10-24T22:05:27Z
 closed: 2026-10-24T22:05:27Z
@@ -143,3 +143,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-24T22:05:27Z (feat/desktop-attention): Desktop attention implemented per plan d1776d0 (reducer, store/capture, CLI, Niri coordinator, popup, Noctalia plugin, e2e, docs, runbook); final review accepted at round 3; merged into main with user approval; live activation continues under ops-e40874.
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T22:07:07Z (main): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Removed after the approved merge 6847632 (merged suite green); tt-report run; ignored files were node_modules (regenerable) and .superpowers (plan workspaces, attached); no host pointer resolved into it; branch deleted.","cleanup_trigger":"none"}
