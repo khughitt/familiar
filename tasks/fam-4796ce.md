@@ -1,13 +1,13 @@
 ---
 id: fam-4796ce
 title: Build the native Noctalia workspace consumer
-status: blocked
+status: todo
 priority: 2
 size: l
 complexity: high
 process: direct
 created: 2026-10-24T14:35:12Z
-updated: 2026-10-24T16:20:59Z
+updated: 2026-10-24T16:21:36Z
 depends: [fam-e810ef]
 parent: fam-9c8dd1
 tags: []
