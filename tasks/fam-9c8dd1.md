@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:04:03Z
+updated: 2026-10-24T20:09:14Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -107,3 +107,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T19:24:32Z (feat/desktop-attention): Implementation of plan d1776d0 complete on feat/desktop-attention (Tasks 1-7 committed, head b1ca56a; children fam-2b65f5, fam-14cb56, fam-c58260, fam-e810ef, fam-f34642, fam-4796ce closed; fam-fa17bb open pending final review). ops-f800b0 landed in ops main (314675f, local, unpushed). just test green twice; tasks check clean. Final whole-branch review dispatched (fresh reviewer, claude-code/opus) against d332737..b1ca56a. Rulings and deferred minors are in the execution ledger.
 - 2026-10-24T19:43:16Z (feat/desktop-attention): review: impl round 1 — verdict: revise; findings: Critical 0, Important 3, Minor 10; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T20:04:03Z (feat/desktop-attention): review: impl round 2 — verdict: revise; findings: Critical 0, Important 1, Minor 5; reviewer: claude-code/claude-opus-5-5
+- 2026-10-24T20:09:14Z (feat/desktop-attention): Corrective round 2 committed (d0e5c13); scoped re-review (round 3) next.
