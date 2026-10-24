@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:22:43Z
+updated: 2026-10-24T20:22:44Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -113,3 +113,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:22:40Z (feat/desktop-attention): attached: final-review-round-1-report.md (6830 bytes): Final whole-branch review round 1 (claude-code/claude-opus-5-5), full text
 - 2026-10-24T20:22:42Z (feat/desktop-attention): attached: final-review-round-2-report.md (3913 bytes): Final whole-branch review round 2 (claude-code/claude-opus-5-5), full text
 - 2026-10-24T20:22:43Z (feat/desktop-attention): attached: final-review-round-3-report.md (2381 bytes): Final whole-branch review round 3 (claude-code/claude-opus-5-5), full text
+- 2026-10-24T20:22:44Z (feat/desktop-attention): attached: noctalia-api-report.md (10224 bytes): Noctalia 5.3.0 Luau plugin API reference extracted from pinned sources (closes plan M1: runAsync timeout enforced)
