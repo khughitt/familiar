@@ -188,7 +188,8 @@ test('Luau marker rules agree with the Node statement of them on the same state'
   // The fixture's encoder writes an empty table as {}; an empty ID list is still a list.
   const list = (ids) => (Array.isArray(ids) ? ids : []);
   const shape = (group) => ({ kind: group.kind ?? null, winnerId: group.winnerId ?? null, count: group.count,
-    episodeIds: list(group.episodeIds), diagnosticIds: list(group.diagnosticIds) });
+    episodeIds: list(group.episodeIds), diagnosticIds: list(group.diagnosticIds),
+    dismissedDiagnosticIds: list(group.dismissedDiagnosticIds) });
   for (const [workspace, group] of Object.entries(node.workspaces)) {
     assert.deepEqual(shape({ kind: null, winnerId: null, ...luauView.workspaces[workspace] }), shape(group), workspace);
   }
@@ -453,7 +454,7 @@ test('a first start with no familiar files navigates from Niri and reports the m
     local b = Host.widget("HDMI-A-1")
     Host.advance(5000)
     local early = b:find("status-health")
-    Host.advance(7000)
+    Host.advance(9000)
     emit({ keys = b:keys("ws-"), early = early ~= nil, late = b:find("status-health") ~= nil, notices = #Host.notifications })
   `, { extraDecoded: [OUTPUTS] }));
   assert.deepEqual(result.keys.sort(), ['ws-20', 'ws-21']);
@@ -540,7 +541,7 @@ test('an off reply that arrives after recovery sends no stale notice', () => {
 
 test('a mismatched boot, a future heartbeat or a stale one is disconnected; recovery clears it', () => {
   const { t } = attentionScene();
-  for (const bad of [healthAt(T0, { epoch: { bootId: 'other', desktopSession: SOCKET } }), healthAt(T0 + 60_000)]) {
+  for (const [bad, early] of [[healthAt(T0, { epoch: { bootId: 'other', desktopSession: SOCKET } }), false], [healthAt(T0 + 60_000), true]]) {
     const scene = steady(t.state, 20_000);
     scene.health = bad;
     scene.events = scene.events.filter((e) => e.file !== 'attention-health.json');
@@ -548,9 +549,11 @@ test('a mismatched boot, a future heartbeat or a stale one is disconnected; reco
       Host.service()
       local b = Host.widget("HDMI-A-1")
       Host.advance(3000)
-      emit({ health = b:find("status-health") ~= nil })
+      local early = b:find("status-health") ~= nil
+      Host.advance(11000)
+      emit({ early = early, health = b:find("status-health") ~= nil })
     `, scene));
-    assert.equal(result.health, true, JSON.stringify(bad.epoch));
+    assert.deepEqual(result, { early, health: true }, JSON.stringify(bad.epoch));
   }
   const scene = steady(t.state, 40_000);
   scene.events = scene.events.filter((e) => e.file !== 'attention-health.json' || e.at > T0 + 25_000);
@@ -563,6 +566,90 @@ test('a mismatched boot, a future heartbeat or a stale one is disconnected; reco
     emit({ down = down, up = b:find("status-health") == nil })
   `, scene));
   assert.deepEqual(result, { down: true, up: true });
+});
+
+// Login: the state directory still holds the previous boot's heartbeat until the new
+// coordinator writes its own, here five seconds in (longer than the confirmation wait,
+// within the startup grace). That is not a disconnection.
+test('a heartbeat left from the previous boot raises no alarm while the coordinator starts', () => {
+  const { t } = attentionScene();
+  const scene = steady(t.state, 20_000);
+  scene.health = healthAt(T0 - 500_000, { epoch: { bootId: 'previous-boot', desktopSession: '/run/user/1000/old.sock' } });
+  scene.events = scene.events.filter((e) => e.file !== 'attention-health.json');
+  for (let at = T0 + 5000; at <= T0 + 20_000; at += 2000) scene.events.push({ at, file: 'attention-health.json', value: healthAt(at) });
+  const [result] = out(luau(`
+    Host.processHandler = function(argv) return { exitCode = 0, stdout = "off" } end
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    local alarmed = false
+    for _ = 1, 300 do
+      Host.advance(50)
+      if b:find("status-health") ~= nil then alarmed = true end
+    end
+    emit({ alarmed = alarmed, notices = #Host.notifications })
+  `, scene));
+  assert.deepEqual(result, { alarmed: false, notices: 0 });
+});
+
+// A coordinator restart: the saved state and the heartbeat change instance a moment
+// apart, in either order. Neither moment is a disconnection.
+for (const [name, stateAt, healthFrom] of [['state first', 20_000, 20_300], ['heartbeat first', 20_300, 20_000]]) {
+  test(`a coordinator restart raises no alarm (${name})`, () => {
+    const { t } = attentionScene();
+    const scene = steady(t.state, 40_000);
+    scene.events = scene.events.filter((e) => e.file !== 'attention-health.json' || e.at < T0 + healthFrom);
+    const restarted = structuredClone(t.state);
+    restarted.desktop.instanceId = 'coordinator-2';
+    scene.events.push({ at: T0 + stateAt, file: 'attention.json', value: restarted });
+    for (let at = T0 + healthFrom; at <= T0 + 40_000; at += 2000) {
+      scene.events.push({ at, file: 'attention-health.json', value: healthAt(at, { instanceId: 'coordinator-2' }) });
+    }
+    const [result] = out(luau(`
+      Host.processHandler = function(argv) return { exitCode = 0, stdout = "off" } end
+      Host.service()
+      local b = Host.widget("HDMI-A-1")
+      Host.advance(19000)
+      local alarmed = false
+      for _ = 1, 400 do
+        Host.advance(50)
+        if b:find("status-health") ~= nil then alarmed = true end
+      end
+      emit({ alarmed = alarmed, notices = #Host.notifications,
+        attributed = string.find(b:find("ws-21").props.tooltip or "", "Approval", 1, true) ~= nil })
+    `, scene));
+    assert.deepEqual(result, { alarmed: false, notices: 0, attributed: true });
+  });
+}
+
+test('a dismissed withheld-completion diagnostic stays in the tooltip and says what dismissal does', () => {
+  const { t } = attentionScene();
+  const [diagnosticId] = Object.keys(t.state.diagnostics);
+  t.dismiss([diagnosticId]);
+  const [result] = out(luau(`
+    local view = Host.decoded[Host.files["${STATE}/attention.json"]]
+    local topology = Host.decoded[Host.files["${STATE}/niri-workspaces.json"]]
+    local pill = nil
+    for _, p in P.pillsFor(view, topology, "DP-1", { now = Host.now }) do if p.workspaceId == "11" then pill = p end end
+    emit({ tooltip = pill.tooltip, withheld = pill.withheld, dismiss = P.dismissIds(pill) })
+  `, { state: t.state, topology: topologyAt(T0) }));
+  assert.match(result.tooltip, /Completion withheld — worker status unconfirmed \(dismissed\): codex:w1/);
+  assert.match(result.tooltip, /completions stay withheld until the worker reports or the session ends/);
+  assert.equal(result.withheld, false);
+  assert.equal(result.dismiss.includes(diagnosticId), false);
+});
+
+test('an unknown Do Not Disturb status is shown, not mistaken for a quiet desktop', () => {
+  const { t } = attentionScene();
+  const state = structuredClone(t.state);
+  state.desktop.dnd = 'unknown';
+  const [result] = out(luau(`
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(2000)
+    local node = b:find("status-dnd")
+    emit({ tip = node and node.props.tooltip })
+  `, steady(state)));
+  assert.equal(result.tip, 'Do Not Disturb status unknown — toasts and popups held back');
 });
 
 test('an invalid attention file is shown as a fault, not as no attention', () => {

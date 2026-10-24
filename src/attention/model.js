@@ -489,6 +489,9 @@ function finish(state, input) {
 function recover(state, input) {
   exactKeys(input, ['type', 'instanceId', 'ids', 'now'], [], 'recover input');
   check(bounded(input.instanceId), 'recover.instanceId is invalid');
+  // The saved state names its new coordinator before that coordinator's first
+  // heartbeat, so no consumer ever sees a heartbeat the state does not vouch for.
+  state.desktop.instanceId = input.instanceId;
   const result = { uncertainIds: [], suppressedIds: [] };
   for (const episode of Object.values(state.episodes)) {
     const toast = episode.delivery.toast;

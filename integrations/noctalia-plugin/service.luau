@@ -15,6 +15,10 @@ local SLOW_EVERY = 5
 local FALLBACK_SPACING_MS = 250
 local FALLBACK_CURRENT_MS = 2000
 local NOTICE_SPACING_MS = 60000
+-- A missing or mismatched heartbeat is also what a coordinator starting or restarting
+-- looks like for a moment; only one that persists this long is a disconnection. A stale
+-- heartbeat (over ten seconds) needs no such wait.
+local CONFIRM_MS = 3000
 
 local startedAt = noctalia.nowMs()
 local desktopSession = noctalia.getenv("NIRI_SOCKET") or ""
@@ -54,6 +58,7 @@ local feedTrusted = false
 local lastRows: any = nil
 
 local disconnected = false
+local unhealthySince: number? = nil
 local failureGeneration = 0
 local noticeAt = -math.huge
 
@@ -166,8 +171,14 @@ function evaluate()
     local options: any = { now = now, bootId = bootId, desktopSession = desktopSession }
     if view ~= nil and view.desktop.instanceId ~= nil then options.instanceId = view.desktop.instanceId end
     local status = if healthInvalid then "invalid" else P.healthStatus(healthRecord, options)
-    local starting = status == "missing" and now - startedAt < P.HEALTH_GRACE_MS
-    local down = status ~= "healthy" and not starting
+    -- A heartbeat left from another boot or desktop session counts as missing during the
+    -- startup grace: the new coordinator has not written its own yet.
+    local transitional = status == "missing" or status == "mismatched"
+    local starting = transitional and now - startedAt < P.HEALTH_GRACE_MS
+    local unhealthy = status ~= "healthy" and not starting
+    if not unhealthy then unhealthySince = nil
+    elseif unhealthySince == nil then unhealthySince = now end
+    local down = unhealthy and (not transitional or now - (unhealthySince :: number) >= CONFIRM_MS)
     if down ~= disconnected then
         disconnected = down
         failureGeneration += 1

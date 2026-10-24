@@ -7,7 +7,12 @@ import "logic.js" as Logic
 ShellRoot {
     id: root
 
-    readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/familiar"
+    // The same directory the `familiar` CLI it drives uses: FAMILIAR_STATE_DIR when it is
+    // an absolute path, otherwise the default.
+    readonly property string stateDir: {
+        const override = Quickshell.env("FAMILIAR_STATE_DIR") || "";
+        return override.startsWith("/") ? override : Quickshell.env("HOME") + "/.local/state/familiar";
+    }
     // One consumer identity per shell start; its reservations are its own.
     readonly property string consumerId: "popup-" + Date.now() + "-" + Math.floor(Math.random() * 1e9)
     property string attentionText: ""
@@ -16,6 +21,9 @@ ShellRoot {
     // undefined until this consumer has attached, then null (idle) or the playing job.
     property var activeJob: undefined
     property bool attaching: false
+    // After a failed request or an empty claim, nothing is claimed or attached again
+    // until the backoff ends: a broken CLI must not become a loop of processes.
+    property bool claimHeld: false
     property var requests: []
     property var currentRequest: null
     property var queryCandidate: null
@@ -51,7 +59,7 @@ ShellRoot {
     }
 
     function attach(view) {
-        if (attaching) return;
+        if (attaching || claimHeld) return;
         const batches = Logic.initialBatches(view);
         if (batches.length === 0) {
             activeJob = null;
@@ -65,7 +73,7 @@ ShellRoot {
     }
 
     function claim() {
-        if (currentRequest !== null || requests.length > 0) return;
+        if (claimHeld || currentRequest !== null || requests.length > 0) return;
         send({ op: "claim", consumerId: consumerId }, {});
     }
 
@@ -115,17 +123,40 @@ ShellRoot {
         Qt.callLater(startNextRequest);
     }
 
+    function holdClaims() {
+        claimHeld = true;
+        claimBackoff.restart();
+    }
+
+    // A request whose process never started (or never exited) within the timeout is
+    // released as a failure, so the queue moves on instead of wedging.
+    function controlTimedOut() {
+        if (control.running) {
+            control.running = false;
+            return;
+        }
+        if (currentRequest === null) return;
+        const stuck = currentRequest;
+        currentRequest = null;
+        handleReply(stuck, { reply: null, error: stuck.request.op + " did not start" });
+        Qt.callLater(startNextRequest);
+    }
+
     function handleReply(finished, parsed) {
         const op = finished.request.op;
         if (parsed.error !== null) console.warn("[familiar-desktop] " + parsed.error);
         if (op === "initialise") {
-            // Attached only once every batch succeeded; a failure retries the attach.
-            if (parsed.error !== null) attaching = false;
+            // Attached only once every batch succeeded; a failure retries after the backoff.
+            if (parsed.error !== null) {
+                attaching = false;
+                holdClaims();
+            }
             else if (finished.context.last) {
                 attaching = false;
                 activeJob = null;
             }
         } else if (op === "claim") {
+            if (parsed.error !== null || parsed.reply.job === null) holdClaims();
             if (parsed.error === null && parsed.reply.job !== null) {
                 // A reservation this consumer cannot play right now is handed back.
                 if (activeJob === null) startJob(parsed.reply);
@@ -450,7 +481,17 @@ ShellRoot {
         id: controlTimeout
         interval: 2000
         repeat: false
-        onTriggered: if (control.running) control.running = false
+        onTriggered: root.controlTimedOut()
+    }
+
+    Timer {
+        id: claimBackoff
+        interval: 2000
+        repeat: false
+        onTriggered: {
+            root.claimHeld = false;
+            root.evaluate();
+        }
     }
 
     Process {

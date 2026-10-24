@@ -236,3 +236,13 @@ test('missing identity or art is neutral and diagnosed, never another state imag
   assert.equal(broken.presentations[id].sprite, null);
   assert.match(broken.diagnostics[0], /theme exploded/);
 });
+
+test('a dismissed withheld-completion diagnostic leaves the marker but stays explained', () => {
+  const state = withheld({ focused: false, mapped: true });
+  const [id] = Object.keys(state.diagnostics);
+  const dismissed = reduceAttention(state, { type: 'dismiss', ids: [id], now: 9_999_999 }).state;
+  const group = attentionByWorkspace(dismissed).workspaces['2'];
+  assert.deepEqual(group.diagnosticIds, []);
+  assert.deepEqual(group.dismissedDiagnosticIds, [id]);
+  assert.equal(group.count, 1);
+});

@@ -52,10 +52,10 @@ const marked = (episode) => !episode.closed && !episode.dismissed
 
 export function attentionByWorkspace(state) {
   const workspaces = {};
-  const unmapped = { count: 0, episodeIds: [], diagnosticIds: [] };
+  const unmapped = { count: 0, episodeIds: [], diagnosticIds: [], dismissedDiagnosticIds: [] };
   const originOf = (rootKey) => rootKey === null ? null : state.desktop.origins[rootKey]?.workspaceId ?? null;
   const groupFor = (workspaceId) => (workspaceId === null ? unmapped
-    : workspaces[workspaceId] ??= { kind: null, winnerId: null, count: 0, episodeIds: [], diagnosticIds: [] });
+    : workspaces[workspaceId] ??= { kind: null, winnerId: null, count: 0, episodeIds: [], diagnosticIds: [], dismissedDiagnosticIds: [] });
   const ranked = Object.values(state.episodes).filter(marked)
     .sort((a, b) => PRIORITY[a.kind] - PRIORITY[b.kind] || b.order - a.order || (a.id < b.id ? -1 : 1));
   for (const episode of ranked) {
@@ -70,9 +70,11 @@ export function attentionByWorkspace(state) {
     group.count += 1;
     group.episodeIds.push(episode.id);
   }
+  // A dismissed diagnostic loses its glyph, never its explanation: the completion gate
+  // it describes is still closed.
   for (const diagnostic of Object.values(state.diagnostics)) {
-    if (diagnostic.dismissed) continue;
-    groupFor(originOf(diagnostic.rootKey)).diagnosticIds.push(diagnostic.id);
+    const group = groupFor(originOf(diagnostic.rootKey));
+    (diagnostic.dismissed ? group.dismissedDiagnosticIds : group.diagnosticIds).push(diagnostic.id);
   }
   return { workspaces, unmapped };
 }

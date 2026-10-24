@@ -15,6 +15,8 @@ P.NAVIGATION_UNAVAILABLE_LABEL = "Workspace navigation unavailable"
 P.DISMISS_HINT = "Right-click to dismiss current alerts (requests in the agent are unaffected)"
 P.CLAUDE_HINT = "Claude sub-agents share one session here: another sub-agent's activity can close this alert while its prompt is still open"
 P.WITHHELD_LABEL = "Completion withheld — worker status unconfirmed"
+P.DIAGNOSTIC_HINT = "Dismissing the withheld-completion notice only hides it: completions stay withheld until the worker reports or the session ends"
+P.DND_UNKNOWN_LABEL = "Do Not Disturb status unknown — toasts and popups held back"
 
 P.HEALTH_STALE_MS = 10000
 P.HEALTH_GRACE_MS = 10000
@@ -202,7 +204,7 @@ end
 -- to have finished.
 function P.attentionByWorkspace(view: any): any
     local workspaces = {}
-    local unmapped = { count = 0, episodeIds = {}, diagnosticIds = {} }
+    local unmapped = { count = 0, episodeIds = {}, diagnosticIds = {}, dismissedDiagnosticIds = {} }
     local ranked = {}
     for _, episode in view.episodes do
         if marked(episode) then table.insert(ranked, episode) end
@@ -215,7 +217,7 @@ function P.attentionByWorkspace(view: any): any
     local function groupFor(workspaceId: string?): any
         if workspaceId == nil then return unmapped end
         if workspaces[workspaceId] == nil then
-            workspaces[workspaceId] = { count = 0, episodeIds = {}, diagnosticIds = {} }
+            workspaces[workspaceId] = { count = 0, episodeIds = {}, diagnosticIds = {}, dismissedDiagnosticIds = {} }
         end
         return workspaces[workspaceId]
     end
@@ -231,13 +233,14 @@ function P.attentionByWorkspace(view: any): any
             table.insert(group.episodeIds, episode.id)
         end
     end
+    -- A dismissed diagnostic loses its glyph, never its explanation.
     local diagnosticIds = {}
-    for id, diagnostic in view.diagnostics do
-        if not diagnostic.dismissed then table.insert(diagnosticIds, id) end
-    end
+    for id in view.diagnostics do table.insert(diagnosticIds, id) end
     table.sort(diagnosticIds)
     for _, id in diagnosticIds do
-        table.insert(groupFor(originOf(view, view.diagnostics[id].rootKey)).diagnosticIds, id)
+        local diagnostic = view.diagnostics[id]
+        local group = groupFor(originOf(view, diagnostic.rootKey))
+        table.insert(if diagnostic.dismissed then group.dismissedDiagnosticIds else group.diagnosticIds, id)
     end
     return { workspaces = workspaces, unmapped = unmapped }
 end
@@ -265,7 +268,7 @@ local function episodeLine(view: any, id: string, now: number): string
     return line
 end
 
-local function diagnosticLine(view: any, id: string, now: number): string
+local function diagnosticLine(view: any, id: string, now: number, dismissed: boolean): string
     local diagnostic = view.diagnostics[id]
     local parts = {}
     for _, key in diagnostic.blockers do
@@ -274,7 +277,7 @@ local function diagnosticLine(view: any, id: string, now: number): string
             table.insert(parts, source.agentId .. " " .. tostring(source.state) .. ", seen " .. ageText(now - source.observedAt))
         end
     end
-    return P.WITHHELD_LABEL .. ": " .. table.concat(parts, "; ")
+    return P.WITHHELD_LABEL .. (if dismissed then " (dismissed)" else "") .. ": " .. table.concat(parts, "; ")
 end
 
 -- Pills for one output, from fresh compositor rows. `attribution` is false whenever the
@@ -308,7 +311,9 @@ function P.pillsFor(view: any, topology: any, outputName: string?, options: any?
                 end
                 local lines = {}
                 for _, id in attention.episodeIds do table.insert(lines, episodeLine(view, id, now)) end
-                for _, id in attention.diagnosticIds do table.insert(lines, diagnosticLine(view, id, now)) end
+                for _, id in attention.diagnosticIds do table.insert(lines, diagnosticLine(view, id, now, false)) end
+                for _, id in attention.dismissedDiagnosticIds do table.insert(lines, diagnosticLine(view, id, now, true)) end
+                if #attention.diagnosticIds > 0 or #attention.dismissedDiagnosticIds > 0 then table.insert(lines, P.DIAGNOSTIC_HINT) end
                 if #attention.episodeIds > 0 or #attention.diagnosticIds > 0 then table.insert(lines, P.DISMISS_HINT) end
                 pill.tooltip = table.concat(lines, "\n")
                 pill.withheld = #attention.diagnosticIds > 0

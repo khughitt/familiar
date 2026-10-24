@@ -62,6 +62,7 @@ function toastFor(state, ids) {
 function attentionPass({ paths, execFile, lockWith, loadContext, relay, clock, instanceId, log, syncWindows, topology, stopped }) {
   const mutate = (fn) => mutateAttention({ paths, lockWith }, fn);
   let dnd;
+  let dndError = null;
   let lastDiagnostics = '';
 
   const resync = async () => {
@@ -77,8 +78,12 @@ function attentionPass({ paths, execFile, lockWith, loadContext, relay, clock, i
       log(`windows: ${error.message}`);
     }
     if (syncWindows) await syncWindows(windows).catch((error) => log(error.message));
-    dnd = await readDnd({ execFile }).catch((error) => {
-      log(error.message);
+    dnd = await readDnd({ execFile }).then((answer) => {
+      dndError = null;
+      return answer;
+    }, (error) => {
+      if (error.message !== dndError) log(error.message);
+      dndError = error.message;
       return 'unknown';
     });
     const intent = (await readJson(paths.intentPath).catch(() => null)) ?? {};

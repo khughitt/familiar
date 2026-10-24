@@ -701,3 +701,13 @@ test('finish can settle part of a reservation by explicit IDs', () => {
   assert.equal(out.state.episodes[ids[0]].delivery.toast.status, 'delivered');
   assert.equal(out.state.episodes[ids[1]].delivery.toast.status, 'reserved');
 });
+
+test('recovery records the new coordinator before it can publish a heartbeat', () => {
+  const { t, send } = scenario();
+  send('codex', 'PermissionRequest', { session: 'a' });
+  t.desktop({ focused: '1', origins: { 'codex:a': '2' } });
+  assert.equal(t.state.desktop.instanceId, 'coordinator-1');
+  t.restart('coordinator-2');
+  assert.equal(t.state.desktop.instanceId, 'coordinator-2');
+  assert.equal(t.state.desktop.status, 'known');
+});

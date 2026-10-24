@@ -140,6 +140,9 @@ local function draw()
         table.insert(children, statusNode("status-health", "⚠", "error", fault))
     elseif attention ~= nil and attention.health.disconnected then
         table.insert(children, statusNode("status-health", "⚠", "error", P.DISCONNECTED_LABEL))
+    elseif healthy and view ~= nil and view.desktop.dnd == "unknown" then
+        -- Everything not yet shown is being held back, which a quiet bar would hide.
+        table.insert(children, statusNode("status-dnd", "◐", "outline", P.DND_UNKNOWN_LABEL))
     end
     if trusted then
         local unmapped = P.attentionByWorkspace(view).unmapped

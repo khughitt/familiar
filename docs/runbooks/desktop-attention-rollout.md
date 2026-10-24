@@ -88,11 +88,12 @@ systemd-run --user --unit=familiar-attention --service-type=exec \
   "$(command -v familiar-niri)" watch
 ```
 
-Readiness, within 10 s:
+Readiness, within 10 s, read from what the unit itself published (a DND check from this
+shell would not prove the unit's environment can reach Noctalia):
 
 ```sh
-familiar attention status | jq -r .health.status     # healthy
-familiar-noctalia dnd                                 # on | off (exit 1: unknown)
+familiar attention status | jq -r '.health.status, .desktop.status, .desktop.dnd'
+# healthy / known / on|off   ("unknown" DND holds back every popup and toast)
 ```
 
 Status, logs and stop:
@@ -102,6 +103,10 @@ systemctl --user status familiar-attention
 journalctl --user -u familiar-attention
 systemctl --user stop familiar-attention
 ```
+
+From here until step 7 both the coordinator and the harnesses' native notifications
+can announce the same event: expect duplicates in that window, and keep it short by
+having hq-d6e13a's change ready to apply right after readiness passes.
 
 A transient unit does not survive a reboot or a new Niri session. Making it start with
 the desktop (and removing the old `spawn-sh-at-startup` line) is the dotfiles change.

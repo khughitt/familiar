@@ -264,3 +264,23 @@ test('the shell consumes shared attention through one serialized, EOF-closed con
   assert.match(qml, /id: controlTimeout\s+interval: 2000/);
   assert.match(qml, /id: watchdog[\s\S]*?interval: 6000/);
 });
+
+test('a failed or empty claim backs off instead of spinning, and a request that never starts is released', () => {
+  const qml = readFileSync(fileURLToPath(new URL('./shell.qml', import.meta.url)), 'utf8');
+  assert.match(qml, /id: claimBackoff\s+interval: 2000/);
+  const claim = qml.slice(qml.indexOf('function claim()'), qml.indexOf('function finish('));
+  assert.match(claim, /if \(claimHeld/);
+  const attach = qml.slice(qml.indexOf('function attach('), qml.indexOf('function claim()'));
+  assert.match(attach, /if \(attaching \|\| claimHeld\) return;/);
+  const reply = qml.slice(qml.indexOf('function handleReply('), qml.indexOf('function startJob('));
+  assert.match(reply, /holdClaims\(\)/);
+  const timeout = qml.slice(qml.indexOf('id: controlTimeout'), qml.indexOf('id: controlTimeout') + 600);
+  assert.match(timeout, /root\.controlTimedOut\(\)/);
+  const timedOut = qml.slice(qml.indexOf('function controlTimedOut()'), qml.indexOf('function handleReply('));
+  assert.match(timedOut, /did not start/);
+});
+
+test('the shell reads the same state directory as the CLI it drives', () => {
+  const qml = readFileSync(fileURLToPath(new URL('./shell.qml', import.meta.url)), 'utf8');
+  assert.match(qml, /Quickshell\.env\("FAMILIAR_STATE_DIR"\)/);
+});

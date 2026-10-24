@@ -118,9 +118,15 @@ own output:
   every 250 ms and never overlapping: navigation continues, marked "Workspace feed
   reconnecting". If Niri fails too, the last rows stay as disabled stale labels,
   "Workspace navigation unavailable".
-- A missing heartbeat gets a 10 s grace at startup; otherwise an unhealthy coordinator
-  shows "Agent alerts disconnected — toasts unavailable" and sends one notice through
-  Noctalia (only on an exact DND `off`, at most one a minute, never as a backlog).
+- A missing heartbeat, or one left from another boot or desktop session, gets a 10 s
+  grace at startup; a missing or mismatched one (a coordinator restarting) must persist
+  3 s before it counts. Otherwise an unhealthy coordinator shows "Agent alerts
+  disconnected — toasts unavailable" and sends one notice through Noctalia (only on an
+  exact DND `off`, at most one a minute, never as a backlog).
+- An unknown Do Not Disturb status is shown ("toasts and popups held back"), since it
+  suppresses everything not yet shown.
+- A dismissed withheld-completion diagnostic loses its glyph but stays in the tooltip,
+  marked dismissed: the completion gate it describes is still closed.
 - Motion: a finite arrival (about 300 ms at 16 ms updates), then a slow pulse (200 ms
   updates) for an unseen request; otherwise static at 2 s updates. Reduced or off
   policy, DND, or an untrusted coordinator mean static distinctions only.

@@ -560,3 +560,31 @@ test('a one-shot sync leaves attention to a running coordinator', async (t) => {
   assert.equal(await readFile(h.paths.attentionPath, 'utf8'), before);
   await h.stop();
 });
+
+test('the first heartbeat names the coordinator the saved state already records', async (t) => {
+  const h = await harness(t);
+  await mutateAttention({ paths: h.paths }, async (state) => reduceAttention(state, { type: 'desktop', instanceId: 'old-instance',
+    status: 'known', dnd: 'off', workspaces: [], origins: {}, enrichment: {}, now: h.clock.now() }));
+  const instances = [];
+  const write = h.deps.writeAtomic;
+  h.deps.writeAtomic = async (path, value) => {
+    if (path === h.paths.attentionHealthPath) instances.push(JSON.parse(readFileSync(h.paths.attentionPath, 'utf8')).desktop.instanceId);
+    return write(path, value);
+  };
+  await h.boot();
+  assert.ok(instances.length > 0);
+  assert.ok(instances.every((instance) => instance === 'coordinator-1'), JSON.stringify(instances));
+  await h.stop();
+});
+
+test('an unknown DND is reported when it starts, not on every pass', async (t) => {
+  const h = await harness(t, { dnd: () => 'maybe', windows: onWorkspace({ 101: 2 }) });
+  await h.boot();
+  for (let i = 0; i < 5; i++) {
+    h.touch('sessions.json');
+    await h.clock.advance(300);
+  }
+  await h.quiesce();
+  assert.equal(h.stderr().split('do not disturb status unavailable').length - 1, 1, h.stderr());
+  await h.stop();
+});
