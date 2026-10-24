@@ -1,13 +1,13 @@
 ---
 id: fam-fa17bb
 title: Verify the attention pipeline and prepare gated rollout
-status: blocked
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 created: 2026-10-24T14:35:15Z
-updated: 2026-10-24T16:21:04Z
+updated: 2026-10-24T16:21:42Z
 depends: [fam-f34642, fam-4796ce]
 parent: fam-9c8dd1
 tags: []
