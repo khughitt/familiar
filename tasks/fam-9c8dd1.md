@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:26:10Z
+updated: 2026-10-24T22:04:14Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -125,4 +125,6 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:25:40Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention","purpose":"Planning workspace: spec/plan review reports and rulings, already attached; unchanged since the plan was accepted.","cleanup_trigger":"After the final report is delivered, reassess with the execution workspace; delete only with its attachments verified.","manifest":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention/retained-manifest.json","sha256":"389be8f941dc1eb2f6f7868579cd6f775465a2c9359a6243747cf5817b3f86b2"}
 - 2026-10-24T20:25:42Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Reviewed, unmerged feat/desktop-attention (final review accepted at round 3); merging into main is activation (Niri, the npm-linked familiar and relay observers run from main), so it waits for the user's integration approval and the rollout prerequisites.","cleanup_trigger":"After an approved merge or an explicit decision to discard: run tt-report, inspect ignored files (node_modules, the Luau cache, .superpowers) and host pointers, then remove."}
 - 2026-10-24T20:26:10Z (feat/desktop-attention): parked (waiting on user, approval): User decides integration of reviewed feat/desktop-attention (head after d0e5c13, in .worktrees/desktop-attention): merging into main is activation (Niri starts familiar-niri watch and the popup from main; familiar on PATH and relay observers run main), so first the owner prerequisites hq-4c954d, hq-d6e13a, dots-dfecf1 land, ops main (314675f, unpushed) is pushed, then the user approves the merge per docs/runbooks/desktop-attention-rollout.md; the agent then runs the runbook steps one approval at a time.
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T22:04:14Z (feat/desktop-attention): resumed
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
