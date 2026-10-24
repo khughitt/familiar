@@ -2,7 +2,7 @@
 // behaves as the CLI vocabulary requires (ops docs/specs/2026-09-20-cli-conventions-design.md).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -110,6 +110,7 @@ test('completion callback and scripts', () => {
   const root = candidates(['familiar', ''], 1);
   for (const cmd of COMMANDS) if (cmd.path.length === 1) assert.ok(root.includes(cmd.path[0]), cmd.path[0]);
   assert.ok(candidates(['familiar', 'theme', ''], 2).includes('preview'));
+  assert.deepEqual(candidates(['familiar', 'attention', ''], 2).sort(), ['dismiss', 'popup', 'status']);
   assert.ok(candidates(['familiar', 'projects', '--'], 2).includes('--rows'));
   assert.deepEqual(candidates(['familiar', 'scheme', 'set', ''], 3).sort(), ['dark', 'light']);
   assert.deepEqual(candidates(['familiar', 'th'], 1), ['theme']);
@@ -158,7 +159,15 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
     'install pets': () => ['install', 'pets', '--out', scratch()],
     'install opencode': () => ['install', 'opencode', '--config-dir', scratch()],
     reap: () => ['reap'],
+    'niri focus': () => ['niri', 'focus', '21'],
   };
+  // `niri focus` succeeds against a fake Niri socket in its own process (this test's
+  // spawnSync blocks the event loop an in-process server would need).
+  const niriDir = scratch();
+  const socketPath = path.join(niriDir, 'niri.sock');
+  const server = spawn(process.execPath, [path.join(ROOT, 'test', 'fixtures', 'fake-niri-socket.mjs'), socketPath, path.join(niriDir, 'log')],
+    { env: { PATH: process.env.PATH }, stdio: 'ignore' });
+  for (let i = 0; i < 500 && !fs.existsSync(socketPath); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
 
   const uncovered = [];
   for (const cmd of COMMANDS) {
@@ -166,10 +175,13 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
     const key = cmd.path.join(' ');
     const build = invocations[key];
     if (!build) { uncovered.push(key); continue; }
-    const r = run(['--json', ...build()]);
+    const r = run(['--json', ...build()], { NIRI_SOCKET: socketPath });
     assert.equal(r.status, 0, `${key}: ${r.stderr}`);
-    assert.doesNotThrow(() => JSON.parse(r.stdout), `${key} did not print exactly one JSON value: ${JSON.stringify(r.stdout)}`);
+    // A command that never has a result prints nothing, --json or not.
+    if (cmd.output === 'none') assert.equal(r.stdout, '', `${key} printed output`);
+    else assert.doesNotThrow(() => JSON.parse(r.stdout), `${key} did not print exactly one JSON value: ${JSON.stringify(r.stdout)}`);
   }
+  server.kill('SIGTERM');
   // Every non-family, non-protocol row must be named above -- silently sampling a
   // subset would let a future command ship with no json branch unnoticed.
   assert.deepEqual(uncovered, []);

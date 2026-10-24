@@ -25,6 +25,13 @@ export const COMMANDS = [
   { path: ['observe'], summary: "Project relay's registry into presentation state", protocol: 'relay observer: reads one observer envelope on stdin' },
   { path: ['statusline'], summary: 'Render the Claude Code status line', protocol: 'Claude Code status line: stdout is the rendered line', options: [{ names: ['--with'], value: 'string' }] },
   { path: ['reap'], summary: "Prune relay's registry and reconcile presentation" },
+  { path: ['attention'], summary: 'Desktop attention: status, dismiss, popup' },
+  { path: ['attention', 'status'], summary: 'Print the desktop attention view', protocol: 'attention view: stdout is one schema-1 attention view JSON document in any mode' },
+  { path: ['attention', 'dismiss'], summary: 'Dismiss attention episodes and diagnostics by ID', protocol: 'attention dismissal: stdout is one JSON result naming dismissed and missing IDs in any mode',
+    args: [{ name: 'id', value: 'string', required: true, variadic: true }] },
+  { path: ['attention', 'popup'], summary: 'Serve one familiar popup control request', protocol: 'popup control: reads one JSON request on stdin and writes one JSON reply on stdout' },
+  { path: ['niri'], summary: 'Niri desktop actions' },
+  { path: ['niri', 'focus'], summary: 'Focus a Niri workspace by its stable ID', output: 'none', args: [{ name: 'id', value: 'string', required: true }] },
 ];
 
 export const FAMILIES = new Map(COMMANDS.filter((c) => c.path.length === 1 && COMMANDS.some((d) => d.path.length === 2 && d.path[0] === c.path[0]))

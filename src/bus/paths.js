@@ -23,6 +23,11 @@ export function paths(env = process.env) {
     sessionsPath: join(stateDir, 'sessions.json'),
     presentationLockPath: join(stateDir, 'presentation.lock'),
     intentPath: join(stateDir, 'intent.json'),
+    // Desktop attention (docs/attention.md): episodes under the presentation lock, the
+    // coordinator heartbeat beside them without it, and the coordinator's singleton lock.
+    attentionPath: join(stateDir, 'attention.json'),
+    attentionHealthPath: join(stateDir, 'attention-health.json'),
+    attentionCoordinatorLockPath: join(stateDir, 'attention-coordinator.lock'),
     // The transmission ledger (spec §3.5): one entry and one lock per session, named by
     // ledgerName() so a session id can never be a path. And the bus-wide event counter.
     transmitDir: join(stateDir, 'transmit'),

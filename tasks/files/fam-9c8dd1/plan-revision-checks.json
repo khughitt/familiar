@@ -1,0 +1,23 @@
+{
+  "reviewedPlan": "e7fd381ec655fd3d9c434836c9e5ac5225cb61b1",
+  "niriProtocolSource": "v26.04",
+  "idReferenceVerifiedInSource": true,
+  "crossOutputActionBranchVerifiedInSource": true,
+  "focusActionSentToDesktop": false,
+  "luauRuntime": "0.743",
+  "luauCapabilityChecksPassed": 3,
+  "pluginCodeRun": false,
+  "macosReleaseArchitectures": [
+    "arm64"
+  ],
+  "initialUniversalMacArchiveAssumption": "rejected by header inspection; corrected to arm64 matching current macos-14 runner",
+  "runnerArchitectureSource": "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+  "releaseArchiveDigestsVerified": true,
+  "healthyLatencyBudgetMs": 100,
+  "nativeLatencyMeasured": false,
+  "nativeGestureAndDndAcceptanceRun": false,
+  "specRound7Minor": "deferred",
+  "externalReviewNumber": 1,
+  "replacementPlan": "d1776d018ebd018bdeea467bf7ce62185c96dd81",
+  "replacementPlanSha256": "43596da61ad4c32898d4cd7f69c51a23278b3fa9b5c79ebc13b8bec85edfcdcd"
+}

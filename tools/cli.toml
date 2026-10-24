@@ -4,9 +4,10 @@
 # Design: ops docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
-# option or command anywhere is an edit here first; then each project runs
-# `python3 bin/vendored adopt cli.toml` in its checkout and commits the copy together
-# with its implementation. Never hand-copy a table.
+# option or command anywhere is an edit here first; then each project runs ops's
+# `bin/vendored adopt cli.toml` in its own checkout (`python3 <ops checkout>/bin/vendored
+# adopt cli.toml`; only ops holds `bin/vendored`) and commits the copy together with
+# its implementation. Never hand-copy a table.
 #
 # Row shapes (spec "The table"):
 #   option: names | shared (+ role), value, values, default, arity, repeatable, required, exception
@@ -271,6 +272,7 @@ summary = "Initialize tasks/ in this repository and register it"
 options = [
   { names = ["--prefix"], value = "string" },
   { names = ["--checkout"], value = "path" },
+  { names = ["--records"], value = "path" },
   { shared = "force", value = "none" },
 ]
 
@@ -375,6 +377,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -394,10 +397,10 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["doc"]
-summary = "Print a linked plan or spec body"
+summary = "Print a linked plan or spec body, or a referenced document"
 protocol = "raw UTF-8 document body on stdout"
 exception = "document export is raw even under JSON/pretty flags; noun command names its exported artifact"
-args = [{ name = "id", value = "ref", required = true }]
+args = [{ name = "id", value = "ref", required = true }, { name = "handle", value = "string", required = false }]
 options = [
   { names = ["--plan"], value = "none" },
   { names = ["--spec"], value = "none" },
@@ -419,6 +422,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--plan"], value = "string" },
+  { names = ["--ref"], value = "string" },
   { names = ["--parent"], value = "ref" },
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
@@ -449,6 +453,7 @@ options = [
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
   { names = ["--plan"], value = "string" },
+  { names = ["--ref"], value = "string" },
   { names = ["--parent"], value = "ref" },
   { names = ["--under"], value = "ref" },
   { names = ["--parallel"], value = "none" },
@@ -519,6 +524,7 @@ verb = "edit"
 summary = "Edit fields, or open the task in $EDITOR when no field flags are given"
 args = [{ name = "id", value = "ref", required = true }]
 options = [
+  { names = ["--editor"], value = "none" },
   { names = ["--title"], value = "string" },
   { shared = "status", role = "set", value = "enum", values = ["idea", "todo", "doing", "blocked", "done", "dropped", "moved"], repeatable = false },
   { shared = "force", value = "none" },
@@ -543,6 +549,8 @@ options = [
   { names = ["--no-tags"], value = "none" },
   { names = ["--rm-need"], value = "string", repeatable = true },
   { names = ["--no-needs"], value = "none" },
+  { names = ["--rm-ref"], value = "string", repeatable = true },
+  { names = ["--no-refs"], value = "none" },
   { names = ["--no-depends"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
@@ -558,6 +566,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
   { names = ["--step"], value = "string" },
@@ -691,6 +700,7 @@ options = [
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
   { names = ["--closed"], value = "none" },
+  { names = ["--summary"], value = "none" },
   { names = ["--without"], value = "string", repeatable = true },
 ]
 
@@ -1538,6 +1548,84 @@ options = [
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { shared = "project", role = "select", value = "string", repeatable = false },
+]
+
+[[cli.science.commands]]
+path = ["publish"]
+summary = "Publish a project's view to a local directory or a git remote, or resume a stranded attempt"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--target"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+  { names = ["--resume"], value = "string" },
+]
+
+[[cli.science.commands]]
+path = ["publish-preview"]
+summary = "Show what publishing a project's view would freeze, without writing anything"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--target"], value = "string", required = true },
+  { names = ["--to"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["provider-inspect"]
+summary = "Show the world a publication at a provider's location claims, verifying it and recording nothing"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["provider-bind"]
+summary = "Bind a provider's location to the world its publication claims, when the given world id matches"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+  { names = ["--world"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["adopt"]
+summary = "Fetch, verify and admit a publication from a bound provider's location, and mount it at the next open"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--location"], value = "string", required = true },
+  { names = ["--corpus-id"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["fetch"]
+summary = "Hold a mounted dataset's bytes from a local path or an https URL, after checking the declared digest"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--dataset"], value = "string", required = true },
+  { names = ["--source"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
+path = ["show"]
+summary = "Show one pin: its state, source, kernel status, acceptance and verification picture"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--corpus-id"], value = "string", required = true },
 ]
 
 [[cli.science.commands]]
@@ -2628,6 +2716,36 @@ summary = "Project relay's registry into presentation state"
 path = ["reap"]
 summary = "Prune relay's registry and reconcile presentation"
 
+[[cli.familiar.commands]]
+path = ["attention"]
+summary = "Desktop attention: status, dismiss, popup"
+
+[[cli.familiar.commands]]
+path = ["attention", "status"]
+protocol = "attention view: stdout is one schema-1 attention view JSON document in any mode"
+summary = "Print the desktop attention view"
+
+[[cli.familiar.commands]]
+path = ["attention", "dismiss"]
+protocol = "attention dismissal: stdout is one JSON result naming dismissed and missing IDs in any mode"
+summary = "Dismiss attention episodes and diagnostics by ID"
+args = [{ name = "id", value = "string", required = true, variadic = true }]
+
+[[cli.familiar.commands]]
+path = ["attention", "popup"]
+protocol = "popup control: reads one JSON request on stdin and writes one JSON reply on stdout"
+summary = "Serve one familiar popup control request"
+
+[[cli.familiar.commands]]
+path = ["niri"]
+summary = "Niri desktop actions"
+
+[[cli.familiar.commands]]
+path = ["niri", "focus"]
+output = "none"
+summary = "Focus a Niri workspace by its stable ID"
+args = [{ name = "id", value = "string", required = true }]
+
 # ---- forge
 
 [[cli.forge.commands]]
@@ -2747,6 +2865,16 @@ options = [
 ]
 
 [[cli.relay.commands]]
+path = ["inbox", "ask"]
+summary = "Post a detached question from a JSON file"
+options = [{ names = ["--file"], value = "path", required = true }]
+
+[[cli.relay.commands]]
+path = ["inbox", "take"]
+summary = "Receive a detached question answer"
+args = [{ name = "id", value = "string", required = true }]
+
+[[cli.relay.commands]]
 path = ["inbox", "show"]
 verb = "show"
 summary = "One inbox entry in full"
@@ -2758,6 +2886,7 @@ summary = "Answer a pending question from this desk"
 args = [{ name = "id", value = "string", required = true }, { name = "value", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--decline"], value = "none" },
+  { names = ["--surface"], value = "enum", values = ["cli", "terminal"] },
 ]
 
 [[cli.relay.commands]]
@@ -2769,6 +2898,8 @@ args = [{ name = "id", value = "string", required = true }]
 path = ["inbox", "withdraw"]
 summary = "Withdraw a pending question"
 args = [{ name = "id", value = "string", required = true }]
+
+options = [{ names = ["--reason"], value = "enum", values = ["user", "asker"] }]
 
 [[cli.relay.commands]]
 path = ["presence"]
@@ -2802,4 +2933,17 @@ options = [
   {names = ["--purpose"], value = "string", required = true},
   {names = ["--name"], value = "string"},
   {names = ["--explain"], value = "none"},
+]
+
+# Minimal adoption surface; existing doc-review options remain outside this inventory.
+[cli.doc-review]
+project = "ops"
+tier = "automation"
+default_output = "pretty"
+env = "DOC-REVIEW"
+
+[[cli.doc-review.commands]]
+path = []
+options = [
+  {names = ["--acknowledge-only"], value = "none"},
 ]

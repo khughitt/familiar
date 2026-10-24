@@ -95,5 +95,32 @@ test('an unknown command prints usage to stderr and exits non-zero', () => {
   const result = run(home, ['bogus']);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /usage: familiar-noctalia scheme-sync/);
+  assert.match(result.stderr, /usage: familiar-noctalia <scheme-sync \| dnd>/);
+});
+
+// A test-owned fake noctalia on PATH, with an environment built key by key.
+function fakeNoctalia(output, status = 0) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-noctalia-bin-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'answer'), output);
+  writeFileSync(join(dir, 'bin', 'noctalia'), `#!/bin/sh\ncat '${join(dir, 'answer')}'\nexit ${status}\n`, { mode: 0o755 });
+  return { HOME: dir, PATH: `${join(dir, 'bin')}:/usr/bin:/bin` };
+}
+const runEnv = (env, args) => spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', env });
+
+test('dnd prints the validated live status', () => {
+  for (const status of ['on', 'off']) {
+    const result = runEnv(fakeNoctalia(`${status}\n`), ['dnd']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `${status}\n`);
+  }
+});
+
+test('dnd reports an unusable answer as unknown and exits 1', () => {
+  for (const [output, status] of [['maybe\n', 0], ['', 3]]) {
+    const result = runEnv(fakeNoctalia(output, status), ['dnd']);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /do not disturb status unavailable/);
+  }
 });

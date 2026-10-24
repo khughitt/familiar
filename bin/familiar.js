@@ -20,6 +20,7 @@ import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, fg, RESET, sanitize } from '../src/render/term/sgr.js';
 import { reapRegistry, readSnapshot, adapterFor, createProcessOps as createRelayProcessOps } from 'relay';
 import { observe, reconcile } from '../src/observe/run.js';
+import { runAttentionCommand } from '../src/attention/commands.js';
 import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
@@ -156,6 +157,12 @@ Runtime
   observe                      Project relay's registry into presentation state
   statusline                   Render the Claude Code status line
   reap                         Prune relay's registry and reconcile presentation
+
+Desktop
+  niri focus ID                Focus a Niri workspace by its stable ID
+  attention status             Print the desktop attention view
+  attention dismiss ID...      Dismiss attention episodes and diagnostics by ID
+  attention popup              Serve one familiar popup control request
 
 Examples:
   familiar whoami
@@ -415,6 +422,78 @@ Examples:
   familiar statusline
   familiar statusline --with "printf ready"
 `,
+  niri: `Niri desktop actions.
+
+Usage:
+  familiar niri <command>
+
+Commands:
+  focus ID        Focus a Niri workspace by its stable ID
+
+Run \`familiar niri <command> --help\` for details.
+`,
+  'niri focus': `Focus a Niri workspace by its stable ID.
+
+Usage:
+  familiar niri focus ID
+
+Arguments:
+  ID              The workspace's stable Niri ID (a decimal integer), not its index
+
+Speaks to the compositor at NIRI_SOCKET. An already focused workspace is left as it is.
+Prints nothing on success; Niri's acknowledgement does not confirm the focus moved.
+
+Examples:
+  familiar niri focus 21
+`,
+  attention: `Desktop attention: which agents need you, shared by the popup, the bar and toasts.
+
+Usage:
+  familiar attention <command>
+
+Commands:
+  status          Print the desktop attention view
+  dismiss ID...   Dismiss attention episodes and diagnostics by ID
+  popup           Serve one familiar popup control request
+
+Run \`familiar attention <command> --help\` for details.
+`,
+  'attention status': `Print the desktop attention view.
+
+Usage:
+  familiar attention status
+
+Prints one JSON document in any output mode: the saved attention state plus the
+coordinator's health, read live. It changes nothing.
+
+Examples:
+  familiar attention status
+`,
+  'attention dismiss': `Dismiss attention episodes and diagnostics by ID.
+
+Usage:
+  familiar attention dismiss ID...
+
+Arguments:
+  ID              An episode or diagnostic ID from \`attention status\`
+
+Hides those alerts and cancels their queued popups and toasts. It never answers a
+request, grants an approval or stops an agent. Prints {"dismissedIds", "missingIds"}.
+
+Examples:
+  familiar attention dismiss e12 e14
+`,
+  'attention popup': `Serve one familiar popup control request.
+
+Usage:
+  familiar attention popup
+
+Reads one JSON request (at most 65536 bytes) on stdin and writes one JSON reply:
+  {"op":"initialise","consumerId":ID,"ids":[...]}   history at attachment
+  {"op":"claim","consumerId":ID}                    reserve the next moment to play
+  {"op":"finish","consumerId":ID,"token":T,"outcome":O}
+O is delivered, failed, suppressed or interrupted. A bad request exits 1.
+`,
   reap: `Prune relay's registry and reconcile presentation.
 
 Usage:
@@ -428,7 +507,7 @@ Examples:
 
 const HELP_ACCENT = '#5f87af';
 const HELP_HEADINGS = new Set([
-  'Usage:', 'Explore', 'Set up', 'Runtime', 'Commands:', 'Arguments:', 'Options:', 'Examples:',
+  'Usage:', 'Explore', 'Set up', 'Runtime', 'Desktop', 'Commands:', 'Arguments:', 'Options:', 'Examples:',
 ]);
 
 export function renderHelp(key, { color = false } = {}) {
@@ -765,6 +844,22 @@ async function main({ command, args: rest, color, mode }) {
     } });
     for (const line of result.lines) process.stderr.write(`${line}\n`);
     process.exitCode = result.exitCode;
+  } else if (command === 'niri focus') {
+    // A bounded user click: no attention lock, no state, one socket exchange. The
+    // integration is loaded only here so other commands never pay for it.
+    const { positionals: [id] } = parseLeaf(rest, leafOptions);
+    const { focusWorkspace, parseWorkspaceId } = await import('../integrations/niri/ipc.js');
+    try {
+      parseWorkspaceId(id);
+    } catch (error) {
+      throw usageError(error.message.replace(/^niri: /, ''), command);
+    }
+    await focusWorkspace(id, { socketPath: process.env.NIRI_SOCKET, timeoutMs: 2000 });
+  } else if (command.startsWith('attention ')) {
+    const { positionals } = parseLeaf(rest, leafOptions);
+    await runAttentionCommand(command, positionals, {
+      paths: resolvePaths(), stdin: readStdin, stdout: process.stdout, now,
+    });
   } else if (command === 'statusline') {
     const { values } = parseLeaf(rest, leafOptions);
     // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under

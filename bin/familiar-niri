@@ -1,26 +1,34 @@
 #!/usr/bin/env node
+// The Niri integration's composition root. `watch` is the one long-running desktop
+// coordinator (window map and material signals, workspace feed, attention attribution,
+// toasts, heartbeat); `sync` is one pass of the same work. Every default dependency is
+// bound here; the integration modules take them as arguments.
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { watch, mkdirSync } from 'node:fs';
-import { basename } from 'node:path';
+import { watch } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { createProcessOps } from 'relay';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { readJson, writeJsonAtomic } from '../src/bus/store.js';
 import { readSessions } from '../src/bus/sessions.js';
 import { loadConfig } from '../src/config.js';
-import { mapSessionsToWindows, niriWindowsPath, shouldResync } from '../integrations/niri/window.js';
+import { loadContext } from '../src/observe/context.js';
+import { currentEpoch } from '../src/attention/store.js';
+import { mapSessionsToWindows, niriWindowsPath } from '../integrations/niri/window.js';
 import { niriHasSignals, planWindowSignals } from '../integrations/niri/signal.js';
+import { runCoordinator, syncOnce } from '../integrations/niri/coordinator.js';
 
 const exec = promisify(execFile);
 const [command, ...rest] = process.argv.slice(2);
-
-if (rest.length > 0) {
+const usage = () => {
   process.stderr.write('usage: familiar-niri <sync | watch>\n');
   process.exit(1);
-}
+};
+if (rest.length > 0 || !['sync', 'watch'].includes(command)) usage();
 
 const paths = resolvePaths();
 const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not name niri
+const processOps = createProcessOps();
 
 let lastWritten = null;
 // What this process last told niri, per window and per session. See planWindowSignals.
@@ -28,9 +36,8 @@ let sent = new Map();
 let states = new Map();
 let signalsUnsupportedSaid = false;
 
-async function sync() {
-  const { stdout } = await exec('niri', ['msg', '-j', 'windows']);
-  const windows = JSON.parse(stdout);
+// The session → window map and niri's material signals, from one windows query.
+async function syncWindows(windows) {
   const { sessions } = await readSessions(paths.sessionsPath);
   const map = mapSessionsToWindows(sessions, windows);
 
@@ -71,62 +78,42 @@ async function sync() {
   }
 }
 
-if (command === 'sync') {
-  await sync();
-} else if (command === 'watch') {
-  // The map is NOT fixed for the life of a session: the terminal can be moved
-  // to another workspace, closed and reopened, or reparented at any time. A
-  // one-shot sync at SessionStart would leave workspace awareness pointing at
-  // the workspace the window used to be on, indefinitely.
-  //
-  // So: resync on every niri event that could move a window, and on every
-  // change to the bus (a new session needs placing). There is no hook-driven
-  // sync anywhere else — this is the single writer of niri-windows.json.
-  // Resyncs run one at a time. A resync now spends several `niri msg` round trips,
-  // and two overlapping ones would each plan against the other's half-sent state.
-  let pending = null;
-  let running = Promise.resolve();
-  const resync = () => {
-    clearTimeout(pending);
-    pending = setTimeout(() => {
-      running = running.then(sync).catch((e) => process.stderr.write(`${e.message}\n`));
-    }, 100);
-  };
+const clock = {
+  now: () => Date.now(),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (id) => clearTimeout(id),
+  setInterval: (fn, ms) => setInterval(fn, ms),
+  clearInterval: (id) => clearInterval(id),
+};
 
+// Niri's event stream as lines; closing it reaps the child.
+function eventStream() {
+  const child = spawn('niri', ['msg', '-j', 'event-stream'], { stdio: ['ignore', 'pipe', 'inherit'] });
+  child.on('error', (error) => process.stderr.write(`niri event stream: ${error.message}\n`));
+  return {
+    lines: createInterface({ input: child.stdout }),
+    close: () => child.kill('SIGTERM'),
+  };
+}
+
+const deps = {
+  paths, relay: processOps, execFile: exec, clock, stderr: process.stderr,
+  loadContext: () => loadContext({ paths }), liveEpoch: () => currentEpoch({ processOps }),
+};
+
+if (command === 'sync') {
+  const { stdout } = await exec('niri', ['msg', '-j', 'windows']);
+  await syncWindows(JSON.parse(stdout));
+  process.exitCode = await syncOnce(deps);
+} else {
   // WATCH THE DIRECTORY, NOT THE FILE. writeJsonAtomic replaces sessions.json via
   // rename(2), which swaps the INODE — and inotify watches the inode, not the
   // path. A watch on the file itself delivers events for the first atomic write
-  // and then goes permanently deaf, so no session started afterwards is ever
-  // placed on a workspace. It fails silently, and the niri event stream keeps
-  // firing often enough to make it LOOK like it works, which is worse.
-  //
-  // The mkdir also matters: fs.watch on a nonexistent path throws ENOENT, and
-  // this process is spawned at compositor startup, long before any agent exists.
-  mkdirSync(paths.stateDir, { recursive: true });
-  //
-  // intent.json is renamed in right after sessions.json, and it is the file that
-  // carries a state change (a `done`, a decay) to the signals.
-  const watched = new Set([basename(paths.sessionsPath), basename(paths.intentPath)]);
-  watch(paths.stateDir, (_event, file) => {
-    if (watched.has(file)) resync();
+  // and then goes permanently deaf. The coordinator watches the state directory.
+  const handle = processOps.handleOf(process.pid);
+  const code = await runCoordinator({
+    ...deps, watch, signals: process, eventStream, syncWindows,
+    owner: { pid: process.pid, start: handle.start },
   });
-
-  await (running = running.then(sync));
-
-  const stream = spawn('niri', ['msg', '-j', 'event-stream'], { stdio: ['ignore', 'pipe', 'inherit'] });
-  for await (const line of createInterface({ input: stream.stdout })) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;   // niri prints a non-JSON banner line on some versions
-    }
-    if (shouldResync(event)) resync();
-  }
-
-  process.stderr.write('niri event stream closed\n');
-  process.exit(1);   // let the compositor restart us
-} else {
-  process.stderr.write('usage: familiar-niri <sync | watch>\n');
-  process.exit(1);
+  process.exit(code);   // nonzero lets the supervisor restart us
 }
