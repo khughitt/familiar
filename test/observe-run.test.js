@@ -11,11 +11,12 @@ import { paths as familiarPaths } from '../src/bus/paths.js';
 import { readSessions } from '../src/bus/sessions.js';
 import { readJson } from '../src/bus/store.js';
 import { withLock } from '../src/bus/lock.js';
+import { readAttention } from '../src/attention/store.js';
 
 const handle = { platform: 'linux', host: 'test', bootId: '11111111-1111-4111-8111-111111111111', pid: 42, start: '10' };
 const git = { remote: null, repoRoot: null, repositoryRoot: null };
 const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
-const event = (kind = 'session-start', sid = 's') => ({ schema: 1, kind, harness: 'claude-code', nativeEvent: { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', 'session-end': 'SessionEnd' }[kind], sessionId: sid, agentId: `claude-code:${sid}`, cwd: '/repo', tool: null });
+const event = (kind = 'session-start', sid = 's') => ({ schema: 1, kind, harness: 'claude-code', nativeEvent: { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', 'session-end': 'SessionEnd', 'needs-approval': 'Notification:permission_prompt' }[kind], sessionId: sid, agentId: `claude-code:${sid}`, cwd: '/repo', tool: null });
 const text = (ev, snapshot) => JSON.stringify({ schema: 1, type: ev ? 'event' : 'reconcile', subscriber: 'familiar', event: ev, registry: { generation: snapshot?.generation ?? null, revision: snapshot?.revision ?? null }, changed: true, reaped: [] });
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'familiar-observe-'));
@@ -94,7 +95,11 @@ test('locked snapshot ordering: delayed X cannot overwrite Y with its pre-lock s
 
 test('stale enrichment emits nothing and exits zero', async (t) => {
   const f = await fixture(t); await f.publish(event());
+  // The registry moves between enrichment and the projection's lock; the first
+  // acquisition is attention capture, which precedes enrichment.
+  let acquisitions = 0;
   f.deps.lockWith = async (path, fn, opts) => {
+    if (++acquisitions === 1) return withLock(path, fn, opts);
     const snapshot = await readSnapshot({ paths: f.relayPaths });
     snapshot.agents['claude-code:s'].cwd = '/moved';
     await writeFile(f.relayPaths.agentsPath, JSON.stringify(snapshot));
@@ -114,8 +119,10 @@ test('absent relay projects empty; unsafe relay faults before any presentation w
   assert.equal((await f.run()).exitCode, 0); assert.deepEqual((await readSessions(f.paths.sessionsPath)).sessions, {});
   await rm(f.paths.stateDir, { recursive: true }); await mkdir(f.relayDir); await chmod(f.relayDir, 0o755);
   const result = await observe({ text: text(event(), null), deps: f.deps });
-  assert.equal(result.exitCode, 1); assert.equal(result.lines.length, 1); assert.match(result.lines[0], /IO_ERROR/);
+  assert.equal(result.exitCode, 1); assert.equal(result.lines.length, 2);
+  assert.match(result.lines[0], /attention: IO_ERROR/); assert.match(result.lines[1], /IO_ERROR/);
   await assert.rejects(readFile(f.paths.sessionsPath), { code: 'ENOENT' });
+  await assert.rejects(readFile(f.paths.attentionPath), { code: 'ENOENT' });
 });
 
 test('visual faults withdraw incoming visuals and return one error', async (t) => {
@@ -271,4 +278,66 @@ test('enrichment looks again after a checkout move, carries across subdirectorie
   }
   assert.deepEqual(calls, ['/api', '/web']);
   assert.equal(prior.sessions.s.projectColor, '#ff0000');
+});
+
+// --- attention capture ------------------------------------------------------------------
+
+async function savedApproval(f) {
+  const saved = await readAttention(f.paths);
+  const [rootKey] = Object.keys(saved.sources);
+  const [approvalId] = Object.keys(saved.episodes);
+  return { saved, rootKey, approvalId };
+}
+
+for (const [name, breakIt] of [
+  ['a thrown theme load', (f) => { f.deps.loadContext = async () => { throw new Error('theme exploded'); }; }],
+  ['a missing sprite', (f) => {
+    const load = f.deps.loadContext;
+    f.deps.loadContext = async () => ({ ...await load(), pack: { ...pack, members: [] } });
+  }],
+  ['an enrichment failure', (f) => { f.deps.adapterFor = () => { throw new Error('enrichment exploded'); }; }],
+  ['a terminal emission failure', (f) => { f.deps.emitTransition = async () => { throw new Error('emission exploded'); }; }],
+]) test(`a root request is captured despite ${name}`, async (t) => {
+  const f = await fixture(t); await f.publish(event()); await f.run();
+  await f.publish(event('needs-approval'));
+  breakIt(f);
+  const result = await f.run(event('needs-approval'));
+  assert.equal(result.exitCode, 1);
+  const { saved, rootKey, approvalId } = await savedApproval(f);
+  assert.equal(saved.episodes[approvalId].kind, 'needs-approval');
+  assert.equal(saved.sources[rootKey].state, 'needs-approval');
+});
+
+test('capture touches no desktop: the observer leaves attribution and delivery unclassified', async (t) => {
+  const f = await fixture(t); await f.publish(event()); await f.run();
+  await f.publish(event('needs-approval')); await f.run(event('needs-approval'));
+  const { saved, approvalId } = await savedApproval(f);
+  assert.deepEqual(saved.desktop, { instanceId: null, status: 'unknown', dnd: 'unknown', workspaces: [], origins: {}, enrichment: {} });
+  assert.deepEqual(saved.episodes[approvalId].delivery, { popup: { status: 'pending' }, toast: { status: 'pending' } });
+});
+
+test('a capture failure is a named diagnostic that neither clears attention nor blocks projection', async (t) => {
+  const f = await fixture(t); await f.publish(event()); await f.run();
+  await f.publish(event('needs-approval')); await f.run(event('needs-approval'));
+  const bytes = await readFile(f.paths.attentionPath, 'utf8');
+  await writeFile(f.paths.attentionPath, bytes.slice(0, 20));
+  await f.publish(event('prompt'));
+  const result = await f.run(event('prompt'));
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.lines.length, 1);
+  assert.match(result.lines[0], /^familiar: observe: attention: corrupt attention state/);
+  assert.equal(await readFile(f.paths.attentionPath, 'utf8'), bytes.slice(0, 20));
+  assert.equal((await readJson(f.paths.intentPath)).s.current.state, 'working');
+});
+
+test('teardown and reconcile capture attention too, idempotently', async (t) => {
+  const f = await fixture(t); await f.publish(event()); await f.run();
+  await f.publish(event('needs-approval')); await f.run(event('needs-approval'));
+  await reconcile({ deps: f.deps });
+  const once = await readFile(f.paths.attentionPath, 'utf8');
+  await reconcile({ deps: f.deps });
+  assert.equal(await readFile(f.paths.attentionPath, 'utf8'), once);
+  await f.publish(event('session-end')); await f.run(event('session-end'));
+  const saved = await readAttention(f.paths);
+  assert.deepEqual([saved.sources, saved.episodes], [{}, {}]);
 });

@@ -14,6 +14,8 @@ import { pruneLedgers } from '../render/term/ledger-prune.js';
 import { pruneTerminalOwners } from '../render/term/terminal-owner.js';
 import { sweepTemps } from '../bus/temp-sweep.js';
 import { convergeCodexProject } from '../install/codex-converge.js';
+import { reduceAttention } from '../attention/model.js';
+import { mutateAttention } from '../attention/store.js';
 
 const line = (message) => `familiar: observe: ${message}`;
 const faultLine = (error) => line(`${error.code ? `${error.code}: ` : ''}${error.message.replace(/^observe: /, '')}`);
@@ -28,6 +30,25 @@ function dependencies(given) {
     isAlive: deps.renderProcess.lockHolderAlive ?? deps.renderProcess.ownerAlive,
   });
   return deps;
+}
+
+// Attention is captured from relay's raw rows before anything visual can fail: a broken
+// theme, a missing sprite or a terminal that cannot be written must not lose a request.
+export async function captureAttention({ paths, envelope, relay, now = Date.now, lockWith = withLock }) {
+  const { state } = await mutateAttention({ paths, lockWith }, async (saved) => reduceAttention(saved, {
+    type: 'observe', snapshot: await relay.readSnapshot(), envelope, now: now(),
+  }));
+  return state;
+}
+
+// A capture failure is reported by name and leaves the saved attention as it was.
+async function captured(deps, envelope) {
+  try {
+    await captureAttention({ paths: deps.paths, envelope, relay: deps.relay, now: deps.now, lockWith: deps.lockWith });
+    return [];
+  } catch (error) {
+    return [line(`attention: ${error.code ? `${error.code}: ` : ''}${error.message.replace(/^attention: /, '')}`)];
+  }
 }
 
 async function project({ deps, event = null, prepared = null, mode = 'full' }) {
@@ -65,8 +86,10 @@ export async function acknowledgeEnded({ paths, sessionId, seq, lockWith = withL
 }
 
 export async function reconcile({ deps: given }) {
-  const { sessions, awaiting, lines } = await project({ deps: dependencies(given) });
-  return { sessions, awaiting, lines };
+  const deps = dependencies(given);
+  const failed = await captured(deps, null);
+  const { sessions, awaiting, lines } = await project({ deps });
+  return { sessions, awaiting, lines: [...failed, ...lines] };
 }
 
 async function cleanup(deps) {
@@ -85,10 +108,13 @@ export async function observe({ text, deps: given }) {
   try {
     const envelope = parseEnvelope(text);
     const deps = dependencies(given);
+    const failed = await captured(deps, envelope);
+    lines.push(...failed);
     if (envelope.type === 'reconcile') {
-      const result = await reconcile({ deps });
+      const result = await project({ deps });
+      lines.push(...result.lines);
       await cleanup(deps);
-      return { exitCode: result.lines.length ? 1 : 0, lines: result.lines };
+      return { exitCode: lines.length ? 1 : 0, lines };
     }
     let event = { ...envelope.event, sessionId: sessionIdOf(envelope.event.root ?? envelope.event.agentId) };
     const teardown = event.kind === 'session-end';
@@ -103,7 +129,7 @@ export async function observe({ text, deps: given }) {
         gitContext: deps.gitContext, lookupProjectColor: deps.lookupProjectColor,
       });
       absent = enrichment.absent === true;
-      if (!enrichment.ok && !absent) return { exitCode: enrichment.exitCode, lines: [line(enrichment.reason)] };
+      if (!enrichment.ok && !absent) return { exitCode: failed.length ? 1 : enrichment.exitCode, lines: [...lines, line(enrichment.reason)] };
       event = { ...event, sessionId: enrichment.sessionId };
       if (enrichment.ok) {
         prepared = enrichment;
@@ -112,7 +138,7 @@ export async function observe({ text, deps: given }) {
     }
     const result = await project({ deps, event, prepared, mode: teardown ? 'drop-only' : 'full' });
     lines.push(...result.lines);
-    if (result.stale) return { exitCode: 0, lines: [line(`stale basis for session ${event.sessionId}`)] };
+    if (result.stale) return { exitCode: failed.length ? 1 : 0, lines: [...failed, line(`stale basis for session ${event.sessionId}`)] };
     if (!absent && result.capture) {
       const { prev, next } = result.capture;
       if ((prev || next) && !(teardown && next)) {
@@ -138,7 +164,7 @@ export async function observe({ text, deps: given }) {
       }
     }
     await cleanup(deps);
-    return { exitCode: result.faults.size || result.diagnostics.length ? 1 : 0, lines };
+    return { exitCode: result.faults.size || result.diagnostics.length || failed.length ? 1 : 0, lines };
   } catch (error) {
     lines.push(faultLine(error));
     return { exitCode: 1, lines };

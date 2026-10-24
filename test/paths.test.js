@@ -35,3 +35,10 @@ test('presentation sessions and lock live under the state dir', () => {
   assert.equal(Object.hasOwn(p, 'agentsPath'), false);
   assert.equal(Object.hasOwn(p, 'lockPath'), false);
 });
+
+test('attention state, its heartbeat and the coordinator lock live under the state dir', () => {
+  const p = paths({ HOME: '/h', FAMILIAR_STATE_DIR: '/s' });
+  assert.equal(p.attentionPath, '/s/attention.json');
+  assert.equal(p.attentionHealthPath, '/s/attention-health.json');
+  assert.equal(p.attentionCoordinatorLockPath, '/s/attention-coordinator.lock');
+});
