@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T14:50:08Z
+updated: 2026-10-24T14:50:56Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -68,3 +68,5 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T14:50:05Z (feat/desktop-attention): attached: spec-round-7-report.md (2789 bytes): Full round-7 review and Keith acceptance of spec 2b58b29; one nonblocking deferred worker-completion minor
 - 2026-10-24T14:50:07Z (feat/desktop-attention): attached: plan-self-review-report.md (3890 bytes): Author self-review of frozen plan e7fd381 by codex/gpt-6.1-sol; coverage and limits; user plan gate remains
 - 2026-10-24T14:50:08Z (feat/desktop-attention): attached: plan-review-ledger.md (16187 bytes): Ledger through spec round 7 and author plan review; deferred minor ruling with Why/Cost, native evidence limits and owner tasks
+- 2026-10-24T14:50:56Z (feat/desktop-attention): parked (waiting on user, review): User reviews familiar plan e7fd381ec655fd3d9c434836c9e5ac5225cb61b1:docs/plans/2026-10-24-desktop-attention.md, available at .worktrees/desktop-attention/docs/plans/2026-10-24-desktop-attention.md. After acceptance agent resumes this tree, unblocks the seven implementation children and ops-f800b0, runs the required full-suite execution baseline, then implements inline with final independent review. Spec round 7 acceptance and author plan self-review recorded; full reports and plan-review-ledger attached. Minor deferred: normal Codex workers may withhold completion with no replay; remaining native concurrency evidence owner hq-4c954d before rollout. Canonical evidence /mnt/ssd3/work/familiar/fam-9c8dd1/planning-evidence; manifest SHA256 4df4fa8ba85fbe40b3da3b2712b86e09d18b80c592810c2af963ec05c5d04706, all 11 entries verified. No product code or host settings/pointers changed; no checks or children running; locked worktree retained.
+  provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
