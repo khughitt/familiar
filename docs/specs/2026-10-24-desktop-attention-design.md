@@ -3,6 +3,9 @@
 Status: draft for user review; approach accepted in conversation, this written
 specification and the implementation plan still require review before building.
 Revision: replaces the lifecycle assumptions in `eccdaa3` following spec round 2.
+Round-5 revision: qualifies source identity and unconfirmed workers, and separates
+completion history from marker visibility. The replacement commit is recorded on
+the task after freezing it; earlier reviewed commits remain unchanged.
 
 Task: fam-9c8dd1. Coordination: ops-e40874. Related: ops-0dc04d (focus mode),
 hq-b339a9 (earlier attention-source investigation).
@@ -76,6 +79,19 @@ level: the last reply can become busy/working or idle/done. Claude and Codex hav
 no mapped approval-result event. No harness-independent request ID or exact
 approval-resolution feed can be assumed from these observer records.
 
+Only Codex implements `workerIdOf` in the pinned adapters. Claude events carrying
+the same native session ID normalize into the same relay source: a sub-agent's
+`PreToolUse` cannot be distinguished from the root's tool start. The separate-source
+guarantees below therefore apply to identified Codex workers, not separate Claude
+sub-agents within one normalized session. Planning must check whether parallel
+Claude sub-agents keep emitting tool events while another awaits permission;
+that runtime scheduling behavior is not established by the adapter code alone.
+
+Codex worker rows use the root process handle, and no elapsed-time expiry can
+prove a worker ended. The registry explicitly removes associated workers at root
+teardown; a missing `SubagentStop` can leave a worker working while its root stays
+alive. Whether an interrupt reliably emits that hook has not been verified.
+
 Claude's idle notification is delayed relative to turn end; its threshold is
 harness behavior and was not verified in this repository. Do not build in an
 assumed one-minute timer. Codex and OpenCode must not be presented as having
@@ -109,7 +125,8 @@ a pill/toast.
 
 Read roots and workers separately from relay's raw snapshot. A source entering
 `needs-input`, `needs-approval`, or `error` starts its own episode. Activity from
-that same source supersedes its episode; another source's activity cannot. A root
+that same source supersedes its episode; another identified relay source's
+activity cannot. A root
 request and a worker request may coexist. An identified worker's approval/input/
 error uses the root's terminal, workspace and familiar hue, with a worker label in
 the tooltip, and its own episode ID. Do not invent worker event kinds a harness
@@ -119,6 +136,21 @@ actionable episode is considered; this includes a worker's transition into `done
 Completion episodes have explicit exceptions: the same-turn completion-to-input
 upgrade below, and passive idle observations, which retain the completion.
 
+**Accepted Claude attribution limitation:** distinct Claude sub-agents sharing
+one normalized session are one aggregate source in v1. If another sub-agent's
+tool-start changes that source from approval to working, the generic closure
+rule can hide the approval while its native dialog remains open. Do not claim
+per-sub-agent request retention for Claude or label that transition proof of an
+answer. The widget's Claude session tooltip must disclose aggregate attribution
+and this possible early closure. Choose this bounded limitation over guessed
+worker IDs or unverified root-only event heuristics. Planning must record the
+parallel-permission check's result and add the aliasing regression case; if the
+scenario reproduces, its early closure is an explicitly accepted v1 limitation,
+not a passing claim that the marker survives. A failed reproduction does not
+establish separate source identity. The same ambiguity affects which Claude tool
+activity is classified as new session work; the lifecycle is an observed-session
+view, not an inventory of every native sub-agent request.
+
 A worker ending closes only its own attention and never creates a user-facing
 completion. Ending/reaping the root closes its attention and associated workers.
 An ordinary root state change closes only root-owned attention. A root `done` is
@@ -127,6 +159,29 @@ remains working or requesting attention; preserve Claude's own background-count
 reduction too. A completion suppressed for workers is not announced later merely
 because a worker finishes: it needs a subsequent genuine root completion. Retire
 the popup's folded-intent transition detector when the shared path is enabled.
+
+**Unconfirmed worker rule:** do not expire or reap worker rows using age or the
+shared root process handle, and do not silently ignore a worker to unlock a
+completion. Whenever worker state blocks a genuine root completion, publish a
+static diagnostic on the root's pill: "Completion withheld — worker status
+unconfirmed", listing the blocking worker IDs, states and last-observation ages
+in the tooltip. Show it even on the focused workspace, even when there is no
+request episode. It is neither a completion marker nor a claim the worker is
+dead, and emits no popup/toast. If the root cannot be mapped, show a global widget
+diagnostic without inventing a source workspace.
+
+The diagnostic is dismissible separately from request episodes. Its identity is
+the root incarnation plus the set of blocking worker incarnations; dismissal
+survives further withheld completions for that unchanged set. Keep suppression
+status available in the tooltip after dismissal. Dismissing this diagnostic does
+not modify relay, assert worker completion, or override the completion gate. An
+authoritative worker transition/teardown can remove its blocking condition; root
+teardown clears it. Once all blockers clear, close the diagnostic, but do not
+replay a previously withheld completion. A later eligible root completion gets
+normal presentation. A stranded worker approval remains an aged, explicitly
+unconfirmed request observation until source progress, dismissal or root teardown;
+the same no-timeout rule applies to it. Restore diagnostics and their dismissal
+state across coordinator restart without replaying notices.
 
 Duplicate delivery, reconciliation, repeated observations of the same waiting
 state, theme changes, and window moves retain episode IDs. A subsequent exit and
@@ -141,7 +196,8 @@ Design ruling: a genuine root completion on an unfocused source workspace leaves
 a **static "Turn finished" marker**, plus one low-priority popup/toast opportunity.
 It makes the common handoff discoverable without mislabeling it as `needs-input`.
 A completion on the focused workspace retains the finite familiar moment, with
-no new completion marker or toast. Working and ordinary idle do not interrupt.
+no new completion marker or toast. It still records the completed turn and its
+seen/delivery decisions. Working and ordinary idle do not interrupt.
 For OpenCode, recognize the reduced root transition into `done` even though the
 native event kind is `idle`; init/idle-to-idle and error-to-idle are not completion.
 Evaluate focus when the desktop coordinator first classifies the episode, using
@@ -161,6 +217,16 @@ is unknown, retain the completion without guessing a pill or sending a completio
 toast. On first reliable mapping, an otherwise still-current completion may become
 a static marker on an unfocused workspace, without replaying transient effects.
 
+**Marker visibility is not turn history.** A focused, seen, dismissed or otherwise
+hidden completion remains the root incarnation's recorded completed turn until
+its next genuine activity or teardown/incarnation change. Focus, art expiry,
+passive idle, marker removal and reconciliation must not delete that metadata.
+Persist the turn/episode ID, seen/dismissed dispositions and per-surface delivery
+or suppression decisions independently of its visible marker, including across
+restart. A later actionable request may replace the visible completion treatment
+without erasing this deduplication history. Never erase the recorded turn merely
+because there was no marker to show when it finished.
+
 A late Claude idle-input notification for the same completed root turn upgrades
 that turn's episode to input attention, preserving its ID, seen/dismissed state
 and delivery decisions (including any suppression). The upgrade starts no new
@@ -168,6 +234,11 @@ popup/toast opportunity. Later root
 activity ends that turn association. A late input notice without a recorded
 completion starts an ordinary input episode. Do not infer association across an
 intervening root activity or session incarnation.
+Thus watching a Claude turn finish, then receiving its delayed idle-input notice
+with no intervening genuine activity, uses the recorded seen completion and cannot
+start another popup/toast. The ordinary input static-marker policy may apply after
+the upgrade; a dismissed episode must stay dismissed. The Claude aggregate-source
+ambiguity above still limits how genuine session activity can be identified.
 
 ### Approval uncertainty
 
@@ -178,8 +249,11 @@ observation for ten minutes; in silence there is **no finite bound** on the lag.
 OpenCode's last `permission.replied` normally causes a queued aggregate update
 without waiting for the tool to finish, but observer delivery is still asynchronous.
 
-Label these episodes "Approval requested — response unconfirmed", with observation
-age in the tooltip; never assert "approval pending" or a current dialog count.
+Apply the label **"Approval requested — response unconfirmed" to approval episodes
+from all three harnesses**, including OpenCode and identified worker requests,
+with observation age in the tooltip. OpenCode reply evidence normally closes the
+observation sooner; it does not change the wording of a still-displayed episode.
+Never assert "approval pending" or a current dialog count.
 Focus stops motion and leaves this explicitly historical static marker until a
 same-source state change or dismissal. It does not mark a request answered, send
 another notice or expire it on a guessed timeout. This accepts a stale observation
@@ -251,6 +325,12 @@ undismissed source episodes so one request cannot erase another. The count is of
 episodes, not native dialogs or unanswered questions. Recompute after seeing,
 dismissing, resolving or moving any source. Native application urgency remains a
 separate, theme-colored indicator and is never assigned familiar identity.
+Unconfirmed-worker suppression uses a separate small status glyph so it remains
+visible alongside a higher-priority request; it is not included in request counts.
+If the preferred dismiss gesture is direct, it dismisses the explicit episode and
+diagnostic IDs represented at that click; neither can accidentally dismiss a new
+diagnostic for a changed blocker set. The tooltip distinguishes dismissing a
+diagnostic from changing the underlying completion gate.
 
 ## Widget and motion
 
@@ -297,7 +377,7 @@ popup, pill or toast decisions may consult that folded state as lifecycle truth.
 Persist enough session incarnation, current episode and disposition information to avoid restoring a
 dismissed request or resurrecting one after process/session ID reuse.
 
-All writers use one locking/atomic-write discipline, including desktop attribution,
+All episode/control snapshot writers use one locking/atomic-write discipline, including desktop attribution,
 delivery receipts and user actions; reuse the existing lock/atomic-file helpers.
 Readers receive a versioned, revisioned complete snapshot. They must converge after
 a missed wake-up or reconnect. The builder chooses the smallest storage schema and
@@ -349,8 +429,13 @@ result is validated. Its present `scheme-sync` reads `settings.json` for a schem
 key only; that does not establish a live DND contract. Noctalia v5 has TOML
 configuration/overrides, so do not infer current DND from that older JSON input.
 An unavailable/invalid DND response is unknown, never silently "off": retain
-static indicators and diagnose the integration, without starting new interruptions
-until live state is known. Test DND changes through this adapter.
+static indicators and diagnose the integration. On DND unknown or on, drop queued
+and not-yet-started popup/toast opportunities and persist their suppressed delivery
+decisions for the affected episode IDs; do not hold them for later delivery. Stop
+ongoing familiar attention motion; an external send already in flight may finish
+and a delivered toast may expire normally. When DND becomes known/off, announce
+only new eligible events, never the dropped queue. The same no-replay rule applies
+to queued health notices. Test unknown→off as well as on→off through this adapter.
 
 Honor Noctalia Do Not Disturb for toast and familiar popup interruptions, using
 static pill markers instead of attention animation while DND is on. Do not bypass
@@ -372,6 +457,13 @@ acceptance. Run the existing Niri coordinator under a transient user service wit
 restart-on-failure, replacing its old unsupervised startup rather than launching
 a second copy. Starting that host service still requires the rollout approval;
 this spec starts nothing. The runbook must provide status, logs and stop commands.
+
+Publish the heartbeat in its **own `attention-health.json` file**, using the
+existing state-directory configuration, separate from the episode/control
+snapshot. The singleton coordinator is its only writer; replace the file atomically
+without taking the presentation/episode lock or incrementing the attention
+revision. Heartbeat refreshes must not trigger lifecycle projection or event
+delivery. It is an explicit exception to the episode/control writer discipline.
 
 Publish a coordinator-instance heartbeat every two seconds, including the
 instance identity and boot/session identity so a leftover snapshot cannot look
@@ -406,21 +498,38 @@ plan must provide tests for:
 
 - the pinned harness coverage table, including OpenCode's idle-event reduction and
   last permission-reply aggregate update, and absent Codex input/error events;
-- root approval followed by worker working/done (root marker survives), worker
+- Codex root approval followed by worker working/done (root marker survives), worker
   approval attributed to root without overwriting it, root and worker requests
   coexisting/closing independently, root completion suppressed for live workers,
   duplicate delivery, repeated waiting state, exit/re-entry and session reuse;
+- Claude same-session approval followed by another sub-agent's before-tool event:
+  verify the adapter aliases them, exercise and label the accepted early-closure
+  behavior and tooltip, and require planning's parallel-permission runtime check
+  to determine whether the scenario occurs with the installed harness;
+- Codex missing SubagentStop while the root remains alive: repeat genuine root
+  completions, retain conservative suppression but show the diagnostic each time
+  unless its unchanged blocker set was dismissed; show stranded approval age,
+  survive restart, remove confirmed blockers and handle the next real completion
+  without replaying a withheld one. Verify diagnostic dismissal never answers a
+  request, removes a worker, or overrides suppression;
 - genuine root completion on focused versus unfocused workspaces, ordinary idle
   exclusions, late Claude idle-input upgrade without another announcement, and
   unknown-origin completion mapped later without replay;
 - OpenCode `working → done → idle → idle`: preserve the same completion ID,
   seen/dismissed state and delivery decisions through passive idle, reconciliation
   and restart, announce at most once, then clear it on genuine new root activity;
+- Claude completion while focused, or an unfocused completion later seen/dismissed:
+  retain completed-turn metadata after clearing/hiding the marker, restart, then
+  process delayed idle-input with the same episode/dispositions and no new popup/
+  toast opportunity; require the dismissed case to stay hidden. Include a control
+  where genuine new activity ends the old turn association;
 - Claude/Codex approval granted before a ten-minute tool with no further event:
   retain the explicitly unconfirmed observation, stop motion on seen/dismiss,
   never claim it is currently pending, then close only on same-source evidence;
 - seen versus dismissed versus resolved, restart persistence, stale dismissal
   races, DND, motion policies and art/identity failure;
+- all-harness approval wording (including OpenCode's reply-driven closure), plus
+  unknown-DND queue suppression followed by known/off with no backlog replay;
 - multiple sessions sharing windows/workspaces, priority/counts, window moves,
   workspace renumbering, multiple outputs (visible is not focused), missing
   mappings and disconnect/recovery;
@@ -431,7 +540,9 @@ plan must provide tests for:
   with no secret-bearing inherited fixture environment;
 - native toasts disabled, then kill/freeze the coordinator with healthy Noctalia:
   restart supervision, ten-second disconnected detection, independent health
-  notice, DND, flap limiting, stale heartbeat after reboot, and successful recovery.
+  notice, DND, flap limiting, stale heartbeat after reboot, and successful recovery;
+- a held presentation lock does not block atomic heartbeat refresh, and refreshing
+  `attention-health.json` does not change the attention revision or run projection.
 
 Use a nested/headless desktop for UI checks and a one-event-per-kind pilot before
 longer acceptance. Live installation, opening desktop windows, or emitting real
