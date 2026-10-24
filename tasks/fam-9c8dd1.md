@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T14:50:07Z
+updated: 2026-10-24T14:50:08Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -67,3 +67,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T14:50:03Z (feat/desktop-attention): Persistent canonical planning evidence: /mnt/ssd3/work/familiar/fam-9c8dd1/planning-evidence; sha256-manifest.json SHA256 4df4fa8ba85fbe40b3da3b2712b86e09d18b80c592810c2af963ec05c5d04706. Verify its 11 entries before resumed experiments. Sanitized summary is attached as planning-checks.json. Codex survey: 122 files, 51 parent/worker pairs, no root completion overlapping a worker turn found; not proof overlap cannot occur. Claude scheduling remains inconclusive (30 sessions, bypassPermissions, no explicit wait boundaries). Two extracted Noctalia callback checks passed; full native runtime/gesture/DND checks remain unperformed. Round-7 minor remains deferred and must be revisited before rollout if ordinary overlap is observed; remaining evidence owner hq-4c954d.
 - 2026-10-24T14:50:05Z (feat/desktop-attention): attached: spec-round-7-report.md (2789 bytes): Full round-7 review and Keith acceptance of spec 2b58b29; one nonblocking deferred worker-completion minor
 - 2026-10-24T14:50:07Z (feat/desktop-attention): attached: plan-self-review-report.md (3890 bytes): Author self-review of frozen plan e7fd381 by codex/gpt-6.1-sol; coverage and limits; user plan gate remains
+- 2026-10-24T14:50:08Z (feat/desktop-attention): attached: plan-review-ledger.md (16187 bytes): Ledger through spec round 7 and author plan review; deferred minor ruling with Why/Cost, native evidence limits and owner tasks
