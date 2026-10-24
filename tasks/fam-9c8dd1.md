@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:18:58Z
+updated: 2026-10-24T13:19:00Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -42,3 +42,5 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:18:54Z (feat/desktop-attention): review: spec round 4 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T13:18:56Z (feat/desktop-attention): attached: spec-round-4-report.md (2990 bytes): Full scoped re-review of 4fdcb54 by codex/gpt-6.1-sol: accept, no findings; passive idle retention and lifecycle interactions checked
 - 2026-10-24T13:18:58Z (feat/desktop-attention): attached: spec-revision-ledger.md (7892 bytes): Round-2 and round-3 rulings with reasons/costs and revision references; round-4 acceptance of 4fdcb54; no deferred minors
+- 2026-10-24T13:19:00Z (feat/desktop-attention): parked (waiting on user, review): User reviews replacement familiar spec 4fdcb54ae7335e594b95b9578360cdcdbaac02e1 at .worktrees/desktop-attention/docs/specs/2026-10-24-desktop-attention-design.md. Then agent writes the implementation plan after approval. Full round-2/3/4 reports and spec-revision-ledger attached; round-4 scoped review accepts with no findings, no deferred minors. No plan/product code, host pointers or settings changed; no checks/children running. Full-suite baseline remains deferred to execution Setup.
+  provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
