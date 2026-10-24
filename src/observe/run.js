@@ -108,7 +108,11 @@ export async function observe({ text, deps: given }) {
   try {
     const envelope = parseEnvelope(text);
     const deps = dependencies(given);
-    const failed = await captured(deps, envelope);
+    // A teardown has no request to lose and the tightest observer budget: its visual
+    // drop goes first and its attention is captured right after (or by the next
+    // reconcile). Every other envelope is captured before anything visual can fail.
+    const teardownEnvelope = envelope.type === 'event' && envelope.event.kind === 'session-end';
+    const failed = teardownEnvelope ? [] : await captured(deps, envelope);
     lines.push(...failed);
     if (envelope.type === 'reconcile') {
       const result = await project({ deps });
@@ -137,6 +141,11 @@ export async function observe({ text, deps: given }) {
       }
     }
     const result = await project({ deps, event, prepared, mode: teardown ? 'drop-only' : 'full' });
+    if (teardown) {
+      const late = await captured(deps, envelope);
+      failed.push(...late);
+      lines.push(...late);
+    }
     lines.push(...result.lines);
     if (result.stale) return { exitCode: failed.length ? 1 : 0, lines: [...failed, line(`stale basis for session ${event.sessionId}`)] };
     if (!absent && result.capture) {

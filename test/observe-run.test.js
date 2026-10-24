@@ -341,3 +341,19 @@ test('teardown and reconcile capture attention too, idempotently', async (t) => 
   const saved = await readAttention(f.paths);
   assert.deepEqual([saved.sources, saved.episodes], [{}, {}]);
 });
+
+// Teardown runs under a 200 ms observer budget: dropping the visual comes first, so a
+// teardown cut short after one step has still withdrawn the session. Its attention is
+// captured next (or by the next reconcile).
+test('a teardown drops its session before capturing attention', async (t) => {
+  const f = await fixture(t); await f.publish(event()); await f.run();
+  await f.publish(event('session-end'));
+  let acquisitions = 0;
+  f.deps.lockWith = async (path, fn, opts) => {
+    if (++acquisitions === 2) throw new Error('observer killed');
+    return withLock(path, fn, opts);
+  };
+  await f.run(event('session-end'));
+  assert.equal(Object.hasOwn((await readSessions(f.paths.sessionsPath)).sessions, 's'), false);
+  assert.equal(Object.hasOwn((await readJson(f.paths.intentPath)) ?? {}, 's'), false);
+});
