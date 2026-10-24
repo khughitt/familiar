@@ -7,7 +7,7 @@ size: l
 complexity: high
 process: direct
 created: 2026-10-24T14:35:12Z
-updated: 2026-10-24T14:37:26Z
+updated: 2026-10-24T15:20:54Z
 depends: [fam-e810ef]
 parent: fam-9c8dd1
 tags: []
@@ -24,3 +24,4 @@ Implement this exact plan step only after the new implementation plan has passed
 
 - 2026-10-24T14:35:13Z (feat/desktop-attention): Implementation plan awaits its separate user review; after acceptance the controller unblocks this step and runs execution Setup before code.
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T15:20:54Z (feat/desktop-attention): Plan review requires direct Niri polling fallback for navigation during coordinator/feed failure, real pinned Luau 0.743 contract execution for every production entry/callback, 16 ms finite arrivals followed by 200 ms sustained pulse and 2000 ms static cadence, and an independent live Noctalia DND query before health notices. Child remains blocked pending revised plan review.
