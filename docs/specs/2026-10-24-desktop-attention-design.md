@@ -476,6 +476,17 @@ missing/stale (>10 seconds), malformed or mismatched heartbeat causes a persiste
 workspace attention attribution. Do not rely on agent state updates as a heartbeat:
 an idle but healthy coordinator must stay distinguishable from a dead one.
 
+On the healthy-to-disconnected transition the still-running Noctalia plugin sends
+one independently generated health notification via Noctalia's runtime notification
+API, subject to live DND; do not route it through the failed coordinator. This is
+a service-health notice, not a duplicate agent-event transport. On startup, an
+absent heartbeat gets the same ten-second grace before one notice. On recovery,
+clear the disconnected state; no notification backlog is replayed. Bound repeated
+failure notices to one per minute across flaps. Even under DND, or if the health
+toast cannot be delivered, the persistent bar indication remains. No widget can
+report through Noctalia while Noctalia itself is down; the service status/logs and
+restart supervision are the remaining diagnostics, not a promised toast fallback.
+
 #### Repeated crashes
 
 A live heartbeat proves the current instance is alive, not that the coordinator
@@ -488,27 +499,30 @@ say) then loses that event's toast on every cycle with nothing on the bar.
 The heartbeat therefore carries a bounded crash history, and only the singleton
 coordinator maintains it; consumers never infer restarts from instance changes:
 
-- The record (schema 2) adds `starts`: ascending start times, in milliseconds, of
-  this instance and of the predecessors in the same boot and desktop session that
-  ended without a clean stop, at most eight, none older than ten minutes. The last
-  entry is this instance's own start. A predecessor ended cleanly when it exited on
+- The record (schema 2) adds `stopped` and `crashedAt`. `stopped` is false while the
+  instance runs. `crashedAt` lists, ascending and in milliseconds, when predecessors
+  in the same boot and desktop session ended without a clean stop, approximated by
+  each one's last heartbeat (`writtenAt`, within two seconds of its end): at most
+  eight entries, none older than ten minutes. A clean stop is an exit on
   SIGTERM/SIGINT with code 0.
 - On start, under the singleton lock and before its first heartbeat, the coordinator
-  reads the existing record. It carries `starts` forward only from a valid schema-2
-  record of the live boot and desktop session; anything else (missing, invalid,
-  schema 1, another epoch) starts a fresh history, logged when the record was
-  present but unusable. It then appends its own start and prunes.
-- Every heartbeat prunes entries older than ten minutes, keeping its own start.
+  reads the existing record. Only a valid schema-2 record of the live boot and
+  desktop session carries anything forward: its `crashedAt`, plus its `writtenAt`
+  when it is not `stopped`. Anything else (missing, invalid, schema 1, another
+  epoch) starts an empty history, logged when the record was present but unusable.
+- Every heartbeat prunes entries older than ten minutes.
 - On a clean stop, after its last periodic heartbeat has settled, the coordinator
-  writes one final record without its own entry, so a deliberate restart
+  writes one final record with `stopped: true`, so a deliberate restart
   (`systemctl --user restart`) never counts as a crash. A crash, SIGKILL or a failed
-  final write leaves the entry, which is what a crash should look like.
-- The shared health rule derives `crashes`: the entries before the last one that are
-  at most ten minutes old at the reader's clock. The coordinator is **unstable** when
-  the heartbeat is healthy and `crashes` is two or more. Every restatement of the
-  health rule (store, plugin, popup logic) accepts schema 2 exactly and rejects
-  schema 1, so mixed versions read invalid until both are restarted, which the
-  rollout does together.
+  final write leaves `stopped` false, which is what a crash should look like.
+  `stopped` does not change the health status: a stopped coordinator's record goes
+  stale like any other.
+- The shared health rule derives `crashes`, the number of `crashedAt` entries at most
+  ten minutes old at the reader's clock. The coordinator is **unstable** when the
+  heartbeat is healthy and `crashes` is two or more. Every restatement of the health
+  rule (store, plugin, popup logic) accepts schema 2 exactly and rejects schema 1,
+  so mixed versions read invalid until both are restarted, which the rollout does
+  together.
 
 Unstable is a warning beside health, not a health status. It changes no gate: the
 popup, toast claims and workspace attribution keep requiring `healthy` as before and
@@ -529,16 +543,9 @@ A coordinator that crashes less than twice in ten minutes is not reported, and o
 that hangs without crashing is out of scope here: its heartbeat timer is independent
 of attention passes by design, and detecting a wedged pass is separate work.
 
-On the healthy-to-disconnected transition the still-running Noctalia plugin sends
-one independently generated health notification via Noctalia's runtime notification
-API, subject to live DND; do not route it through the failed coordinator. This is
-a service-health notice, not a duplicate agent-event transport. On startup, an
-absent heartbeat gets the same ten-second grace before one notice. On recovery,
-clear the disconnected state; no notification backlog is replayed. Bound repeated
-failure notices to one per minute across flaps. Even under DND, or if the health
-toast cannot be delivered, the persistent bar indication remains. No widget can
-report through Noctalia while Noctalia itself is down; the service status/logs and
-restart supervision are the remaining diagnostics, not a promised toast fallback.
+The rollout runbook says what the start limit does and does not end, and its kill
+check uses SIGKILL: under `Restart=on-failure` a SIGTERM kill is a clean stop that
+is neither restarted nor counted as a crash.
 
 ## Ownership, rollout and validation
 
@@ -597,8 +604,9 @@ plan must provide tests for:
 - native toasts disabled, then kill/freeze the coordinator with healthy Noctalia:
   restart supervision, ten-second disconnected detection, independent health
   notice, DND, flap limiting, stale heartbeat after reboot, and successful recovery;
-- crash history: carried across an unclean restart, dropped on a clean stop, reset by
-  a schema-1, invalid or other-epoch record, bounded and pruned at ten minutes;
+- crash history: extended across an unclean restart, not extended across a clean
+  stop, reset by a schema-1, invalid or other-epoch record, bounded and pruned at
+  ten minutes;
   unstable at two crashes, cleared as they age out, ranked below disconnected, one
   DND-checked notice sharing the flap bound, and no change to popup or claim gates;
 - a held presentation lock does not block atomic heartbeat refresh, and refreshing
