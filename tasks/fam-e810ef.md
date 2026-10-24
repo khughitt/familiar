@@ -7,7 +7,7 @@ size: l
 complexity: high
 process: direct
 created: 2026-10-24T14:35:05Z
-updated: 2026-10-24T14:37:22Z
+updated: 2026-10-24T15:20:52Z
 depends: [fam-c58260]
 parent: fam-9c8dd1
 tags: []
@@ -24,3 +24,4 @@ Implement this exact plan step only after the new implementation plan has passed
 
 - 2026-10-24T14:35:07Z (feat/desktop-attention): Implementation plan awaits its separate user review; after acceptance the controller unblocks this step and runs execution Setup before code.
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T15:20:52Z (feat/desktop-attention): Plan review requires a separate lock-free immediate topology feed, 100 ms deterministic event-to-widget budget with explicit I/O assumptions, no focus-only presentation lock when no seen state changes, and a bounded Niri socket action by stable workspace ID. New tests cover unfocused-monitor clicks, an older in-flight topology write, and topology/heartbeat continuing through a held presentation lock. Child remains blocked pending revised plan review.
