@@ -699,19 +699,30 @@ test('a workspace event reaches widget state within 100 ms through the real writ
     const pending = [];
     const sleep = (ms) => new Promise((resolve) => pending.push({ at: clock + ms, resolve }));
     const completed = [];
+    // Real writes finish before fake time moves on, so the measurement is the fake delays.
+    const io = new Set();
     const writer = createLatestWriter({ path: join(dir, 'feed.json'), writeAtomic: async (path, value) => {
       await sleep(10);
-      await writeJsonAtomic(path, value);
+      const write = writeJsonAtomic(path, value);
+      io.add(write);
+      try { await write; } finally { io.delete(write); }
       completed.push({ value, at: clock });
     } });
+    const settle = async () => {
+      for (let k = 0; k < 10; k++) {
+        while (io.size) await Promise.all([...io]);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
     const advance = async (ms) => {
       for (let i = 0; i < ms; i++) {
+        await settle();
         clock += 1;
         for (const item of pending.filter((p) => p.at <= clock)) {
           pending.splice(pending.indexOf(item), 1);
           item.resolve();
         }
-        for (let k = 0; k < 20; k++) await new Promise((resolve) => setImmediate(resolve));
+        await settle();
       }
     };
     writer.publish({ freshness: true });
