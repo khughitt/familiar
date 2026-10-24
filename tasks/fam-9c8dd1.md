@@ -8,11 +8,12 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T12:22:41Z
+updated: 2026-10-24T12:25:35Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
 agent: codex
+spec: docs/specs/2026-10-24-desktop-attention-design.md
 ---
 
 User approved one shared attention model feeding familiar popups, a custom Noctalia workspace widget and desktop toasts, retaining familiar hue as identity and event-specific shape/motion. Visiting the source stops animation but leaves unanswered input/approval requests statically marked; widget dismissal silences the current alerts without answering or cancelling requests, and later requests can alert again. Produce and review a design spec and implementation plan before building. Reuse relay lifecycle events and existing session/window attribution; avoid a Noctalia fork or a new daemon/repository initially. Include restart/deduplication, multiple sessions, moving windows, native-notification duplication and reduced motion. Coordinate rollout through ops, with live host changes separately approved.
