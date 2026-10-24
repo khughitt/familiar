@@ -231,8 +231,14 @@ function VM:schedule()
     Host.at(self.interval, tick)
 end
 
+Host.compareRenders = true   -- a long cadence run may skip tree comparison
+
 function VM:render(tree: any)
     if type(tree) ~= "table" or type(tree.type) ~= "string" then return end
+    if not Host.compareRenders then
+        self.tree = tree
+        return
+    end
     local encoded = encode(tree)
     self.tree = tree
     if encoded ~= self.encodedTree then

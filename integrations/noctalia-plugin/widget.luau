@@ -91,6 +91,27 @@ local function statusNode(key: string, text: string, color: string, tooltip: str
     return ui.row({ key = key, tooltip = tooltip }, { ui.label({ text = text, color = color }) })
 end
 
+-- Pills change only with shared state or output; their ages are refreshed on the
+-- static cadence. Animation ticks reuse them and only recompute motion.
+local cache: any = { at = -math.huge }
+
+local function derived(now: number, view: any, trusted: boolean, mode: string): (any, any)
+    if cache.navigation ~= navigation or cache.attention ~= attention or cache.output ~= output
+        or now - cache.at >= P.STATIC_INTERVAL_MS then
+        cache.pills = P.pillsFor(if trusted then view else nil, { workspaces = if navigation then navigation.rows else {} }, output, {
+            now = now, attribution = trusted, navigable = mode ~= "unavailable", stale = mode == "unavailable",
+        })
+        cache.unseen = {}
+        if view ~= nil then
+            for id, episode in view.episodes do
+                if not episode.seen then cache.unseen[id] = true end
+            end
+        end
+        cache.navigation, cache.attention, cache.output, cache.at = navigation, attention, output, now
+    end
+    return cache.pills, cache.unseen
+end
+
 local function draw()
     local now = noctalia.nowMs()
     local view = attention and attention.view
@@ -98,15 +119,7 @@ local function draw()
     local healthy = attention ~= nil and attention.health ~= nil and attention.health.status == "healthy"
     local trusted = healthy and view ~= nil and mode == "feed"
     noteArrivals(view, now)
-    local pills = P.pillsFor(if trusted then view else nil, { workspaces = if navigation then navigation.rows else {} }, output, {
-        now = now, attribution = trusted, navigable = mode ~= "unavailable", stale = mode == "unavailable",
-    })
-    local unseen = {}
-    if view ~= nil then
-        for id, episode in view.episodes do
-            if not episode.seen then unseen[id] = true end
-        end
-    end
+    local pills, unseen = derived(now, view, trusted, mode)
     local policy: any = { dnd = if view then view.desktop.dnd else "unknown", trusted = trusted, arrivals = arrivals, unseen = unseen }
     local next = P.STATIC_INTERVAL_MS
     local children = {}

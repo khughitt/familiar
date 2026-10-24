@@ -44,6 +44,7 @@ test('an unseen request overnight costs at most five widget updates a second', (
     local b = Host.widget("HDMI-A-1")
     Host.advance(1000)
     service.alive = false
+    Host.compareRenders = false
     local start = b.updates
     Host.advance(8 * 3600000)
     emit({ updates = b.updates - start, interval = b.interval })
