@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T15:35:18Z
+updated: 2026-10-24T15:35:20Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -77,3 +77,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T15:11:46Z (feat/desktop-attention): Created mutable, not-yet-checkpointed scratch/evidence directory on titan at $WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence for pinned Niri protocol, Luau runtime and review-correction evidence. Current owner task:fam-9c8dd1. Existing planning-evidence manifest and all 11 entries verified before reuse. The containing task scratch directory and worktree will be checkpointed at park under the retained-item rule.
 - 2026-10-24T15:35:14Z (feat/desktop-attention): Replacement plan frozen as d1776d018ebd018bdeea467bf7ce62185c96dd81, docs/plans/2026-10-24-desktop-attention.md, SHA256 43596da61ad4c32898d4cd7f69c51a23278b3fa9b5c79ebc13b8bec85edfcdcd. All four Important and the Minor have Why/Cost dispositions in the retained ledger. The author checklist is not external acceptance; next external plan review is round 2. Spec 2b58b29 and its deferred round-7 minor are unchanged. No product implementation or live activation.
 - 2026-10-24T15:35:18Z (feat/desktop-attention): Revision verification: just check, tasks check and git diff --check passed with zero task errors/warnings. Private Luau 0.743 interpreter passed three capability checks; Linux and macOS release archive digests verified. An initial universal-macOS-archive assertion failed; header inspection corrected it to arm64, matching the current macos-14 runner. No plugin, native focus/DND/notification or latency acceptance ran. Full-suite baseline remains deferred until execution Setup. Read-only inspection false-positive filed as ops-336b9e; single-command inspection succeeded.
+- 2026-10-24T15:35:20Z (feat/desktop-attention): attached: plan-round-1-external-report.md (5632 bytes): Full external plan round-1 review of e7fd381 by claude-code/claude-opus-5-5: revise, Important 4 and Minor 1
