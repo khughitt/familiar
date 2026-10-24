@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T15:07:24Z
+updated: 2026-10-24T15:07:25Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -73,3 +73,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T15:07:06Z (feat/desktop-attention): resumed
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T15:07:24Z (feat/desktop-attention): review: plan round 1 — verdict: revise; findings: Important 4, Minor 1; reviewer: claude-code/claude-opus-5-5
+- 2026-10-24T15:07:25Z (feat/desktop-attention): Recorded the external review with the round number explicitly supplied by the user. This worktree already contained a plan round 1 accept note for the author checklist; that earlier note is author self-review only, not independent or user acceptance. The external revise verdict controls. Preserve both audit entries; next frozen plan requires a new external review. No implementation is authorized.
