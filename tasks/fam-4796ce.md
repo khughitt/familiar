@@ -7,8 +7,8 @@ size: l
 complexity: high
 process: direct
 created: 2026-10-24T14:35:12Z
-updated: 2026-10-24T14:35:13Z
-depends: []
+updated: 2026-10-24T14:37:26Z
+depends: [fam-e810ef]
 parent: fam-9c8dd1
 tags: []
 source: "fam-9c8dd1:desktop-attention-plan"
