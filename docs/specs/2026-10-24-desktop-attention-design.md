@@ -116,7 +116,8 @@ the tooltip, and its own episode ID. Do not invent worker event kinds a harness
 does not report. A missing/invalid root association leaves it unmapped and diagnosed.
 Any different state of the same source closes its previous episode before a new
 actionable episode is considered; this includes a worker's transition into `done`.
-The same-turn completion-to-input upgrade below is an explicit exception.
+Completion episodes have explicit exceptions: the same-turn completion-to-input
+upgrade below, and passive idle observations, which retain the completion.
 
 A worker ending closes only its own attention and never creates a user-facing
 completion. Ending/reaping the root closes its attention and associated workers.
@@ -148,7 +149,14 @@ its latest validated compositor snapshot. Relay does not publish event-time focu
 do not claim this reconstructs what the user was looking at when a hook fired.
 
 The completion marker clears on source focus, dismissal, new activity from its
-root, or root end. Art expiry does not clear an unseen completion. If origin/focus
+root, or root end. Genuine new activity is that root's mapped prompt/before-tool/
+activity or a transition back to working, not an idle observation, a worker update
+or reconcile. OpenCode can publish `working → done → idle → idle` because repeated
+`session.idle` reduces done to idle. Such passive idle keeps the completion episode
+ID, disposition and delivery decisions across reconciliation and restart; it
+neither closes it nor creates another arrival/reservation. A new actionable root
+request supersedes the completion, except for the same-turn input upgrade below.
+Art expiry does not clear an unseen completion. If origin/focus
 is unknown, retain the completion without guessing a pill or sending a completion
 toast. On first reliable mapping, an otherwise still-current completion may become
 a static marker on an unfocused workspace, without replaying transient effects.
@@ -405,6 +413,9 @@ plan must provide tests for:
 - genuine root completion on focused versus unfocused workspaces, ordinary idle
   exclusions, late Claude idle-input upgrade without another announcement, and
   unknown-origin completion mapped later without replay;
+- OpenCode `working → done → idle → idle`: preserve the same completion ID,
+  seen/dismissed state and delivery decisions through passive idle, reconciliation
+  and restart, announce at most once, then clear it on genuine new root activity;
 - Claude/Codex approval granted before a ten-minute tool with no further event:
   retain the explicitly unconfirmed observation, stop motion on seen/dismiss,
   never claim it is currently pending, then close only on same-source evidence;
