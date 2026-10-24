@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:04:16Z
+updated: 2026-10-24T22:04:56Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -130,3 +130,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-24T22:04:16Z (feat/desktop-attention): Identify the current integration owner
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T22:04:56Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"scratch","path":"$WORK_ROOT/familiar/fam-9c8dd1","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
