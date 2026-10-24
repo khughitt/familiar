@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T15:35:25Z
+updated: 2026-10-24T15:36:31Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -81,3 +81,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T15:35:21Z (feat/desktop-attention): attached: plan-revision-check-report.md (4089 bytes): Author checklist for replacement d1776d0: five dispositions, interface/dependency checks, runtime evidence and native limits; not user acceptance
 - 2026-10-24T15:35:23Z (feat/desktop-attention): attached: plan-revision-ledger.md (21829 bytes): Full ledger through external plan round 1; five Why/Cost rulings for d1776d0 and unchanged spec round-7 deferred minor
 - 2026-10-24T15:35:25Z (feat/desktop-attention): attached: plan-revision-checks.json (974 bytes): Pinned protocol/runtime preparation: Luau capability probe 3 pass and archive digests verified; native latency, focus, plugin and DND not run
+- 2026-10-24T15:36:31Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Review frozen replacement plan d1776d0, then implement the accepted plan in this retained locked tree.","cleanup_trigger":"After reviewed implementation is integrated under approved activation, inspect host pointers, ignored files and evidence dispositions before considering removal."}
