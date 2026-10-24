@@ -1,15 +1,17 @@
 ---
 id: fam-9c8dd1
 title: "Synchronize agent attention across familiar popups, workspace pills and desktop toasts"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:05:05Z
+updated: 2026-10-24T22:05:27Z
 started: 2026-10-24T12:20:23Z
+completed: 2026-10-24T22:05:27Z
+closed: 2026-10-24T22:05:27Z
 depends: []
 tags: []
 agent: codex
@@ -137,3 +139,7 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T22:05:02Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"session:claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Disposed of by this session in the approved integration: contents attached to fam-9c8dd1 (ledger as portable derivative, reports) or regenerable; rulings and deferred minors already reported.","cleanup_trigger":"After the user-approved merge into main lands with a green suite: tt-report, ignored-file and host-pointer checks, then remove."}
 - 2026-10-24T22:05:03Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"session:claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/2026-10-24-desktop-attention","purpose":"Disposed of by this session in the approved integration: contents attached to fam-9c8dd1 (ledger as portable derivative, reports) or regenerable; rulings and deferred minors already reported.","cleanup_trigger":"After the user-approved merge into main lands with a green suite: tt-report, ignored-file and host-pointer checks, then remove."}
 - 2026-10-24T22:05:05Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"session:claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention","purpose":"Disposed of by this session in the approved integration: contents attached to fam-9c8dd1 (ledger as portable derivative, reports) or regenerable; rulings and deferred minors already reported.","cleanup_trigger":"After the user-approved merge into main lands with a green suite: tt-report, ignored-file and host-pointer checks, then remove."}
+- 2026-10-24T22:05:27Z (feat/desktop-attention): done
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T22:05:27Z (feat/desktop-attention): Desktop attention implemented per plan d1776d0 (reducer, store/capture, CLI, Niri coordinator, popup, Noctalia plugin, e2e, docs, runbook); final review accepted at round 3; merged into main with user approval; live activation continues under ops-e40874.
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
