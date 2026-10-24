@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:10:29Z
+updated: 2026-10-24T13:13:21Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -34,3 +34,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:02:54Z (feat/desktop-attention): review: spec round 2 — verdict: revise; findings: Important 3, Minor 5; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T13:10:29Z (feat/desktop-attention): Round 2 disposition: accept raw root/worker separation and source-scoped episodes. Choose static Turn finished marker and low-priority notice only for a genuine root completion classified on an unfocused workspace; no synthetic needs-input event. Verify OpenCode qualification: its adapter reduces session.idle after active states to done, and its plugin handles permission.replied then republishes aggregate level. Choose truthful Approval requested — response unconfirmed with age and accepted unbounded observation lag for Claude/Codex, rather than claiming approval pending or treating focus as an answer. Define seen by globally focused workspace; require planning gesture verification/fallback, explicit Noctalia IPC transport/live DND adapter, supervised coordinator and independent widget health detection.
+- 2026-10-24T13:13:21Z (feat/desktop-attention): attached: spec-round-2-report.md (5129 bytes): Full round-2 review of eccdaa3 by claude-code/claude-opus-5-5, relayed by user: 3 Important and 5 Minor findings
