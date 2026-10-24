@@ -1,13 +1,13 @@
 ---
 id: fam-2b65f5
 title: Implement the portable attention state machine
-status: blocked
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 created: 2026-10-24T14:34:55Z
-updated: 2026-10-24T14:34:56Z
+updated: 2026-10-24T16:21:21Z
 depends: []
 parent: fam-9c8dd1
 tags: []
