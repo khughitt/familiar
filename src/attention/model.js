@@ -490,8 +490,12 @@ function recover(state, input) {
   exactKeys(input, ['type', 'instanceId', 'ids', 'now'], [], 'recover input');
   check(bounded(input.instanceId), 'recover.instanceId is invalid');
   // The saved state names its new coordinator before that coordinator's first
-  // heartbeat, so no consumer ever sees a heartbeat the state does not vouch for.
+  // heartbeat, so no consumer ever sees a heartbeat the state does not vouch for; and
+  // it vouches for nothing that coordinator has not observed itself yet: until its
+  // first pass the desktop is unknown, so nothing is claimed or classified on the
+  // previous instance's attribution or Do Not Disturb reading.
   state.desktop.instanceId = input.instanceId;
+  state.desktop.status = 'unknown';
   const result = { uncertainIds: [], suppressedIds: [] };
   for (const episode of Object.values(state.episodes)) {
     const toast = episode.delivery.toast;

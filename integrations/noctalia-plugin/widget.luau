@@ -145,10 +145,14 @@ local function draw()
         table.insert(children, statusNode("status-dnd", "◐", "outline", P.DND_UNKNOWN_LABEL))
     end
     if trusted then
+        -- Attention whose agent has no known workspace: explained here, never placed on a
+        -- guessed pill. A dismissed diagnostic keeps its line, marked, without a glyph.
         local unmapped = P.attentionByWorkspace(view).unmapped
-        if unmapped.count > 0 or #unmapped.diagnosticIds > 0 then
-            table.insert(children, statusNode("status-unmapped", "◌", "outline",
-                tostring(unmapped.count) .. " alert(s) with no known workspace; open Alerts to review"))
+        local tooltip = P.groupTooltip(view, unmapped, now)
+        if tooltip ~= nil then
+            local active = unmapped.count > 0 or #unmapped.diagnosticIds > 0
+            table.insert(children, statusNode("status-unmapped", if active then "◌" else "·", "outline",
+                "No known workspace — open Alerts to review\n" .. tooltip))
         end
     end
     table.insert(children, ui.button({

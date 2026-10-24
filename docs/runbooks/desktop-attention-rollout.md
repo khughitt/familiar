@@ -72,6 +72,9 @@ In a nested Niri session (or another nested compositor) with a throwaway
 Noctalia plugin directory, place `khughitt/familiar:workspaces`, start
 `familiar-niri watch` and the popup, then drive one fake event per kind with
 `familiar observe` envelopes. Record: left click focuses the clicked output's workspace;
+the popup, started once with `familiar` missing from its `PATH`, makes at most one
+`familiar attention popup` attempt every 2 s and recovers once `familiar` is back (its
+backoff and never-started-request release are only checked statically in the suite);
 right click dismisses (or, if it is intercepted, the Alerts panel does); middle click
 opens settings; the popup takes no keyboard focus and is click-through; pills render in
 both bar orientations. This proves layout and gestures only in the nested session.
@@ -84,6 +87,7 @@ Stop the unsupervised watcher started by Niri, then start one transient user ser
 pkill -f '[f]amiliar-niri watch'
 systemd-run --user --unit=familiar-attention --service-type=exec \
   --property=Restart=on-failure --property=RestartSec=2 \
+  --property=StartLimitIntervalSec=60 --property=StartLimitBurst=5 \
   --working-directory="$HOME" -E HOME="$HOME" -E NIRI_SOCKET="$NIRI_SOCKET" -E PATH="$PATH" \
   "$(command -v familiar-niri)" watch
 ```
@@ -93,8 +97,13 @@ shell would not prove the unit's environment can reach Noctalia):
 
 ```sh
 familiar attention status | jq -r '.health.status, .desktop.status, .desktop.dnd'
-# healthy / known / on|off   ("unknown" DND holds back every popup and toast)
+# healthy / known / on|off   (status stays "unknown" until the coordinator's first pass;
+#                            "unknown" DND drops every popup and toast, never replayed)
 ```
+
+The start limit matters: each start writes a fresh heartbeat, so a coordinator that
+crashes right after starting would otherwise look healthy forever. With the limit, a
+crash loop ends in a failed unit, its heartbeat goes stale, and the bar reports it.
 
 Status, logs and stop:
 

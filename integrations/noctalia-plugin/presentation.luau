@@ -15,8 +15,8 @@ P.NAVIGATION_UNAVAILABLE_LABEL = "Workspace navigation unavailable"
 P.DISMISS_HINT = "Right-click to dismiss current alerts (requests in the agent are unaffected)"
 P.CLAUDE_HINT = "Claude sub-agents share one session here: another sub-agent's activity can close this alert while its prompt is still open"
 P.WITHHELD_LABEL = "Completion withheld — worker status unconfirmed"
-P.DIAGNOSTIC_HINT = "Dismissing the withheld-completion notice only hides it: completions stay withheld until the worker reports or the session ends"
-P.DND_UNKNOWN_LABEL = "Do Not Disturb status unknown — toasts and popups held back"
+P.DIAGNOSTIC_HINT = "Dismissing only hides this notice: the completion gate stays closed until the worker reports or the session ends, and a completion withheld meanwhile is not shown later"
+P.DND_UNKNOWN_LABEL = "Do Not Disturb status unknown — toasts and popups are not shown, and are not replayed later"
 
 P.HEALTH_STALE_MS = 10000
 P.HEALTH_GRACE_MS = 10000
@@ -280,6 +280,19 @@ local function diagnosticLine(view: any, id: string, now: number, dismissed: boo
     return P.WITHHELD_LABEL .. (if dismissed then " (dismissed)" else "") .. ": " .. table.concat(parts, "; ")
 end
 
+-- Every line a group of attention explains itself with: its episodes, its active and
+-- dismissed diagnostics (a dismissed one stays, marked, since its gate is still closed),
+-- and what dismissal does. Nil when the group has nothing to say.
+function P.groupTooltip(view: any, group: any, now: number): string?
+    local lines = {}
+    for _, id in group.episodeIds do table.insert(lines, episodeLine(view, id, now)) end
+    for _, id in group.diagnosticIds do table.insert(lines, diagnosticLine(view, id, now, false)) end
+    for _, id in group.dismissedDiagnosticIds do table.insert(lines, diagnosticLine(view, id, now, true)) end
+    if #group.diagnosticIds > 0 or #group.dismissedDiagnosticIds > 0 then table.insert(lines, P.DIAGNOSTIC_HINT) end
+    if #group.episodeIds > 0 or #group.diagnosticIds > 0 then table.insert(lines, P.DISMISS_HINT) end
+    return if #lines > 0 then table.concat(lines, "\n") else nil
+end
+
 -- Pills for one output, from fresh compositor rows. `attribution` is false whenever the
 -- attention view or its coordinator is not trusted: then the rows still navigate, but
 -- no familiar marker claims to know where an agent is.
@@ -309,13 +322,7 @@ function P.pillsFor(view: any, topology: any, outputName: string?, options: any?
                     local presentation = view.desktop.enrichment[attention.winnerId]
                     pill.accent = presentation and presentation.color or nil
                 end
-                local lines = {}
-                for _, id in attention.episodeIds do table.insert(lines, episodeLine(view, id, now)) end
-                for _, id in attention.diagnosticIds do table.insert(lines, diagnosticLine(view, id, now, false)) end
-                for _, id in attention.dismissedDiagnosticIds do table.insert(lines, diagnosticLine(view, id, now, true)) end
-                if #attention.diagnosticIds > 0 or #attention.dismissedDiagnosticIds > 0 then table.insert(lines, P.DIAGNOSTIC_HINT) end
-                if #attention.episodeIds > 0 or #attention.diagnosticIds > 0 then table.insert(lines, P.DISMISS_HINT) end
-                pill.tooltip = table.concat(lines, "\n")
+                pill.tooltip = P.groupTooltip(view, attention, now)
                 pill.withheld = #attention.diagnosticIds > 0
             end
             table.insert(pills, pill)

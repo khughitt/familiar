@@ -92,6 +92,8 @@ refuses to start). It keeps three paths apart so none can stall another:
   workspace IDs and published immediately, refreshed every second, with no lock. A delta
   before Niri's full snapshot fails the stream for restart rather than guessing.
 - **Heartbeat** (`attention-health.json`): every 2 s, with the boot ID and `NIRI_SOCKET`.
+  A starting coordinator first records itself in the saved state with the desktop
+  `unknown`, so nothing is claimed or classified on its predecessor's readings.
   It is healthy only while under 10 s old, from this boot and this desktop session, and
   from the coordinator that classified the saved state.
 - **Attention**: debounced passes that take the presentation lock only when attribution
@@ -123,10 +125,11 @@ own output:
   3 s before it counts. Otherwise an unhealthy coordinator shows "Agent alerts
   disconnected — toasts unavailable" and sends one notice through Noctalia (only on an
   exact DND `off`, at most one a minute, never as a backlog).
-- An unknown Do Not Disturb status is shown ("toasts and popups held back"), since it
-  suppresses everything not yet shown.
-- A dismissed withheld-completion diagnostic loses its glyph but stays in the tooltip,
-  marked dismissed: the completion gate it describes is still closed.
+- An unknown Do Not Disturb status is shown ("toasts and popups are not shown, and are
+  not replayed later"), since it drops everything not yet shown.
+- A dismissed withheld-completion diagnostic loses its glyph but stays in the tooltip
+  (or, for an agent with no known workspace, in the unmapped status and the Alerts
+  panel), marked dismissed: the completion gate it describes is still closed.
 - Motion: a finite arrival (about 300 ms at 16 ms updates), then a slow pulse (200 ms
   updates) for an unseen request; otherwise static at 2 s updates. Reduced or off
   policy, DND, or an untrusted coordinator mean static distinctions only.

@@ -709,5 +709,8 @@ test('recovery records the new coordinator before it can publish a heartbeat', (
   assert.equal(t.state.desktop.instanceId, 'coordinator-1');
   t.restart('coordinator-2');
   assert.equal(t.state.desktop.instanceId, 'coordinator-2');
-  assert.equal(t.state.desktop.status, 'known');
+  // It vouches for nothing it has not observed itself: no claim until its first pass.
+  assert.equal(t.state.desktop.status, 'unknown');
+  send('codex', 'PermissionRequest', { session: 'b' });
+  assert.deepEqual(t.claim('popup', 'popup-1', 'p'), { token: null, ids: [] });
 });

@@ -251,7 +251,8 @@ test('the shell consumes shared attention through one serialized, EOF-closed con
   const qml = readFileSync(fileURLToPath(new URL('./shell.qml', import.meta.url)), 'utf8');
   assert.equal(qml.includes('intent.json'), false);
   for (const fragment of [
-    'path: root.stateDir + "/attention.json"', 'path: root.stateDir + "/attention-health.json"',
+    'path: root.stateDir === "" ? "" : root.stateDir + "/attention.json"',
+    'path: root.stateDir === "" ? "" : root.stateDir + "/attention-health.json"',
     'path: "/proc/sys/kernel/random/boot_id"', 'command: ["familiar", "attention", "popup"]',
     'WlrLayershell.namespace: "familiar:desktop-moments"', 'WlrLayershell.keyboardFocus: WlrKeyboardFocus.None',
     'mask: Region { item: null }', 'onStarted: root.controlStarted()',
@@ -280,7 +281,10 @@ test('a failed or empty claim backs off instead of spinning, and a request that 
   assert.match(timedOut, /did not start/);
 });
 
-test('the shell reads the same state directory as the CLI it drives', () => {
+test('the shell reads the same state directory as the CLI it drives, refusing a relative one', () => {
   const qml = readFileSync(fileURLToPath(new URL('./shell.qml', import.meta.url)), 'utf8');
   assert.match(qml, /Quickshell\.env\("FAMILIAR_STATE_DIR"\)/);
+  assert.match(qml, /FAMILIAR_STATE_DIR must be an absolute path/);
+  const evaluate = qml.slice(qml.indexOf('function evaluate()'), qml.indexOf('function attach('));
+  assert.match(evaluate, /if \(stateDirError !== ""\) return;/);
 });

@@ -15,11 +15,14 @@ local function dismiss(ids: { string })
 end
 
 local function section(key: string, title: string, lines: string, ids: { string }): any
-    return ui.column({ key = "section-" .. key, gap = 4 }, {
+    local children = {
         ui.label({ text = title, fontWeight = "bold" }),
         ui.label({ text = lines, maxLines = 12 }),
-        ui.button({ key = "dismiss-" .. key, text = "Dismiss", variant = "outline", onClick = function() dismiss(ids) end }),
-    })
+    }
+    if #ids > 0 then
+        table.insert(children, ui.button({ key = "dismiss-" .. key, text = "Dismiss", variant = "outline", onClick = function() dismiss(ids) end }))
+    end
+    return ui.column({ key = "section-" .. key, gap = 4 }, children)
 end
 
 local function render()
@@ -35,16 +38,16 @@ local function render()
         local rows = (navigation and navigation.rows) or {}
         local pills = P.pillsFor(view, { workspaces = rows }, nil, { now = now })
         for _, pill in pills do
-            local ids = P.dismissIds(pill)
-            if #ids > 0 then
-                table.insert(children, section(pill.workspaceId, "Workspace " .. pill.label .. (if pill.output then " (" .. pill.output .. ")" else ""), pill.tooltip or "", ids))
+            if pill.tooltip ~= nil then
+                table.insert(children, section(pill.workspaceId, "Workspace " .. pill.label .. (if pill.output then " (" .. pill.output .. ")" else ""), pill.tooltip, P.dismissIds(pill)))
             end
         end
         local unmapped = P.attentionByWorkspace(view).unmapped
-        local ids = table.clone(unmapped.episodeIds)
-        for _, id in unmapped.diagnosticIds do table.insert(ids, id) end
-        if #ids > 0 then
-            table.insert(children, section("unmapped", "No known workspace", tostring(#ids) .. " alert(s)", ids))
+        local lines = P.groupTooltip(view, unmapped, now)
+        if lines ~= nil then
+            local ids = table.clone(unmapped.episodeIds)
+            for _, id in unmapped.diagnosticIds do table.insert(ids, id) end
+            table.insert(children, section("unmapped", "No known workspace", lines, ids))
         end
         if #children == 1 then table.insert(children, ui.label({ key = "empty", text = "No current alerts" })) end
     end

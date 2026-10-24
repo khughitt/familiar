@@ -7,12 +7,16 @@ import "logic.js" as Logic
 ShellRoot {
     id: root
 
-    // The same directory the `familiar` CLI it drives uses: FAMILIAR_STATE_DIR when it is
-    // an absolute path, otherwise the default.
-    readonly property string stateDir: {
-        const override = Quickshell.env("FAMILIAR_STATE_DIR") || "";
-        return override.startsWith("/") ? override : Quickshell.env("HOME") + "/.local/state/familiar";
-    }
+    // The same directory the `familiar` CLI it drives uses: FAMILIAR_STATE_DIR when set,
+    // otherwise the default. A set but non-absolute value is refused, never replaced by
+    // the default: this popup then stays idle and says why.
+    // An empty value counts as unset (Quickshell may report an unset variable either way).
+    readonly property var stateOverride: Quickshell.env("FAMILIAR_STATE_DIR")
+    readonly property string stateDirError: !stateOverride || String(stateOverride).startsWith("/")
+        ? "" : "FAMILIAR_STATE_DIR must be an absolute path"
+    readonly property string stateDir: stateDirError !== "" ? ""
+        : stateOverride ? String(stateOverride) : Quickshell.env("HOME") + "/.local/state/familiar"
+    Component.onCompleted: if (stateDirError !== "") console.warn("[familiar-desktop] " + stateDirError)
     // One consumer identity per shell start; its reservations are its own.
     readonly property string consumerId: "popup-" + Date.now() + "-" + Math.floor(Math.random() * 1e9)
     property string attentionText: ""
@@ -42,6 +46,7 @@ ShellRoot {
     // Every change of attention, health or time is one decision from the shared
     // logic: attach, claim, cancel, preempt or nothing. No lifecycle is inferred here.
     function evaluate() {
+        if (stateDirError !== "") return;
         const parsed = Logic.parseAttention(attentionText);
         if (parsed.error !== null) {
             if (attentionText !== "") console.warn("[familiar-desktop] " + parsed.error);
@@ -417,7 +422,7 @@ ShellRoot {
 
     FileView {
         id: attentionView
-        path: root.stateDir + "/attention.json"
+        path: root.stateDir === "" ? "" : root.stateDir + "/attention.json"
         blockLoading: true
         watchChanges: true
         printErrors: false
@@ -431,7 +436,7 @@ ShellRoot {
 
     FileView {
         id: healthView
-        path: root.stateDir + "/attention-health.json"
+        path: root.stateDir === "" ? "" : root.stateDir + "/attention-health.json"
         blockLoading: true
         watchChanges: true
         printErrors: false

@@ -633,9 +633,38 @@ test('a dismissed withheld-completion diagnostic stays in the tooltip and says w
     emit({ tooltip = pill.tooltip, withheld = pill.withheld, dismiss = P.dismissIds(pill) })
   `, { state: t.state, topology: topologyAt(T0) }));
   assert.match(result.tooltip, /Completion withheld — worker status unconfirmed \(dismissed\): codex:w1/);
-  assert.match(result.tooltip, /completions stay withheld until the worker reports or the session ends/);
+  assert.match(result.tooltip, /Dismissing only hides this notice: the completion gate stays closed until the worker reports or the session ends, and a completion withheld meanwhile is not shown later/);
   assert.equal(result.withheld, false);
   assert.equal(result.dismiss.includes(diagnosticId), false);
+});
+
+// An agent whose terminal cannot be found (inside tmux, say) has no workspace: its
+// dismissed diagnostic must still explain itself in the bar and the panel.
+test('a dismissed diagnostic for a root with no known workspace stays explained', () => {
+  const { t } = attentionScene();
+  t.desktop({ focused: '10', origins: { 'codex:a': '21', 'claude-code:b': '11' } });
+  const [diagnosticId] = Object.keys(t.state.diagnostics);
+  t.dismiss([diagnosticId]);
+  const [result] = out(luau(`
+    Host.processHandler = function(argv) return { exitCode = 0, stdout = "" } end
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(2000)
+    local panel = Host.openPanel()
+    Host.advance(1000)
+    local node = b:find("status-unmapped")
+    local section = panel:find("section-unmapped")
+    local lines = section and section.children[2] and section.children[2].props.text
+    panel:click("dismiss-unmapped")
+    emit({ tip = node and node.props.tooltip, panel = lines, dismissed = Host.processes[#Host.processes].argv })
+  `, steady(t.state)));
+  assert.match(result.tip, /Completion withheld — worker status unconfirmed \(dismissed\)/);
+  assert.match(result.tip, /Dismissing only hides this notice/);
+  assert.match(result.panel, /Completion withheld — worker status unconfirmed \(dismissed\)/);
+  // The root's unmapped worker approval can still be dismissed; the diagnostic is not
+  // dismissed twice.
+  assert.equal(result.dismissed.includes(diagnosticId), false);
+  assert.ok(result.dismissed.length > 3);
 });
 
 test('an unknown Do Not Disturb status is shown, not mistaken for a quiet desktop', () => {
@@ -649,7 +678,7 @@ test('an unknown Do Not Disturb status is shown, not mistaken for a quiet deskto
     local node = b:find("status-dnd")
     emit({ tip = node and node.props.tooltip })
   `, steady(state)));
-  assert.equal(result.tip, 'Do Not Disturb status unknown — toasts and popups held back');
+  assert.equal(result.tip, 'Do Not Disturb status unknown — toasts and popups are not shown, and are not replayed later');
 });
 
 test('an invalid attention file is shown as a fault, not as no attention', () => {
