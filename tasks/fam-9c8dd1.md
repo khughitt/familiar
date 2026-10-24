@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:45:17Z
+updated: 2026-10-24T13:48:07Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -48,3 +48,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T13:40:09Z (feat/desktop-attention): review: spec round 5 — verdict: revise; findings: Important 3, Minor 3; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T13:45:17Z (feat/desktop-attention): Round 5 rulings: document accepted Claude aggregate-source early-closure limitation and require planning confirmation of parallel tool activity during another permission wait; do not promise Codex-style worker isolation for Claude. Keep conservative Codex worker gating without guessed expiry, but expose a static dismissible suppression diagnostic keyed by root/blocker incarnations and test missing SubagentStop. Retain completed-turn metadata independently of marker visibility through focus/dismiss/restart until genuine activity or teardown. Put heartbeat in its own atomically replaced lock-free health file. Persist suppressed delivery and drop queued effects on DND unknown/on, without recovery replay. Use response-unconfirmed approval wording for all harnesses, with reply-driven OpenCode closure.
+- 2026-10-24T13:48:07Z (feat/desktop-attention): attached: spec-round-5-report.md (4652 bytes): Full review of 4fdcb54 by claude-code/claude-opus-5-5 relayed by user: 3 Important and 3 Minor findings
