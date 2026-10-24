@@ -1,15 +1,17 @@
 ---
 id: fam-e810ef
 title: "Coordinate Niri attribution, delivery and health"
-status: doing
+status: done
 priority: 2
 size: l
 complexity: high
 process: direct
 owner: feat/desktop-attention
 created: 2026-10-24T14:35:05Z
-updated: 2026-10-24T17:12:22Z
+updated: 2026-10-24T18:01:22Z
 started: 2026-10-24T17:12:22Z
+completed: 2026-10-24T18:01:22Z
+closed: 2026-10-24T18:01:22Z
 depends: [fam-c58260]
 parent: fam-9c8dd1
 tags: []
@@ -30,4 +32,8 @@ Implement this exact plan step only after the new implementation plan has passed
 - 2026-10-24T15:35:16Z (feat/desktop-attention): Final frozen replacement plan d1776d0 uses familiar niri focus ID through the existing typed CLI, superseding the earlier familiar-niri helper-route suggestion. Shared vocabulary ownership is explicit in ops-f800b0; Task 4 declares/adopts the niri group/leaf and tests the socket exchange. Task 4 owns the 20 ms publication component; Task 6 owns the full 100 ms pipeline budget after its plugin/Luau toolchain exists.
 - 2026-10-24T16:21:02Z (feat/desktop-attention): Accepted plan d1776d0, round-3 minor (deferred) M2: keep familiar niri focus imports minimal. Reviewer measured cold familiar --help startup at 0.10–0.13 s before the socket exchange; that is reviewer evidence, not a new measurement here. Task 7 must measure click-to-focus separately from the 100 ms event-to-widget budget during the approved native pilot.
 - 2026-10-24T17:12:22Z (feat/desktop-attention): started
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T18:01:22Z (feat/desktop-attention): done
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T18:01:22Z (feat/desktop-attention): Coordinator, topology feed, socket focus, Noctalia adapter, niri focus CLI (adopted ops bad0b57); just test-fast 1242 pass/0 fail.
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
