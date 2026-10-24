@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T15:11:46Z
+updated: 2026-10-24T15:35:14Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -75,3 +75,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T15:07:24Z (feat/desktop-attention): review: plan round 1 — verdict: revise; findings: Important 4, Minor 1; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T15:07:25Z (feat/desktop-attention): Recorded the external review with the round number explicitly supplied by the user. This worktree already contained a plan round 1 accept note for the author checklist; that earlier note is author self-review only, not independent or user acceptance. The external revise verdict controls. Preserve both audit entries; next frozen plan requires a new external review. No implementation is authorized.
 - 2026-10-24T15:11:46Z (feat/desktop-attention): Created mutable, not-yet-checkpointed scratch/evidence directory on titan at $WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence for pinned Niri protocol, Luau runtime and review-correction evidence. Current owner task:fam-9c8dd1. Existing planning-evidence manifest and all 11 entries verified before reuse. The containing task scratch directory and worktree will be checkpointed at park under the retained-item rule.
+- 2026-10-24T15:35:14Z (feat/desktop-attention): Replacement plan frozen as d1776d018ebd018bdeea467bf7ce62185c96dd81, docs/plans/2026-10-24-desktop-attention.md, SHA256 43596da61ad4c32898d4cd7f69c51a23278b3fa9b5c79ebc13b8bec85edfcdcd. All four Important and the Minor have Why/Cost dispositions in the retained ledger. The author checklist is not external acceptance; next external plan review is round 2. Spec 2b58b29 and its deferred round-7 minor are unchanged. No product implementation or live activation.
