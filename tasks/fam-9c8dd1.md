@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T12:27:44Z
+updated: 2026-10-24T12:27:45Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -28,3 +28,5 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T12:27:29Z (feat/desktop-attention): review: spec round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T12:27:42Z (feat/desktop-attention): attached: builder-check-report.md (218 bytes): Read-only builder check of spec eccdaa3 by codex/gpt-6.1-sol; no important unanswered questions; implementation and desktop behavior untested
 - 2026-10-24T12:27:44Z (feat/desktop-attention): attached: ledger.md (866 bytes): Spec review round 1 acceptance ruling, reason and cost; no deferred minors; user review remains pending
+- 2026-10-24T12:27:45Z (feat/desktop-attention): parked (waiting on user, review): User reviews familiar spec eccdaa36275085a2b70a5d2cb61b42101550bcec at .worktrees/desktop-attention/docs/specs/2026-10-24-desktop-attention-design.md; after approval agent writes and reviews the implementation plan in this worktree. No implementation or checks are running, no host pointers changed. Review report and ledger attached; full-suite baseline deferred until execution Setup.
+  provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
