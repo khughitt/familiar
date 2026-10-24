@@ -1,13 +1,13 @@
 ---
 id: fam-e810ef
 title: "Coordinate Niri attribution, delivery and health"
-status: blocked
+status: todo
 priority: 2
 size: l
 complexity: high
 process: direct
 created: 2026-10-24T14:35:05Z
-updated: 2026-10-24T16:21:02Z
+updated: 2026-10-24T16:21:30Z
 depends: [fam-c58260]
 parent: fam-9c8dd1
 tags: []
