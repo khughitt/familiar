@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:25:32Z
+updated: 2026-10-24T20:25:34Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -117,3 +117,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:24:05Z (feat/desktop-attention): attached: execution-ledger-portable.md (32712 bytes): Derivative of the execution ledger (plan d1776d0, through final review round 3) with host values replaced by placeholders; raw item: $WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md (retained evidence note)
 - 2026-10-24T20:24:17Z (feat/desktop-attention): detached: execution-ledger.md: the commit hook's machine-layout check refused a host name in the raw ledger; raw bytes preserved as $WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md and a portable derivative is attached as execution-ledger-portable.md
 - 2026-10-24T20:25:32Z (feat/desktop-attention): Attachment layout fallback: execution-ledger-portable.md is a derivative of the raw execution ledger. Placeholder mapping: <host-1> = titan. Raw item: $WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md on titan, sha256 181361cbf64ee50dc0bcc0260c040b23aad10bae0b9912dfd887a6388b58c38e (identical to the execution workspace's progress.md at attachment time).
+- 2026-10-24T20:25:34Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md","purpose":"Exact raw bytes of the execution ledger (rulings and deferred minors through final review round 3), kept because the layout check refuses the host name in it; the attachment is a portable derivative.","cleanup_trigger":"When the project's ops-check admits a ledger-backed attachment carrying host values, attach these raw bytes and reassess; until then keep.","sha256":"181361cbf64ee50dc0bcc0260c040b23aad10bae0b9912dfd887a6388b58c38e"}
