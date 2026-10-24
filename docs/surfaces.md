@@ -21,7 +21,8 @@ have since been fixed but not yet re-tested on hardware.
 | Claude Code | Claude Code hooks and `statusLine` | The status line owns the cells; hooks replace the image beneath them on state changes. |
 | Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
 | OpenCode | Familiar server and TUI plugins | The plugins render the full-colour graphic and publish intent for desktop moments. |
-| Niri desktop moments | `intent.json` | `integrations/niri-desktop` plays click-through `done` and `error` moments on the focused output. |
+| Niri desktop moments | `attention.json` | `integrations/niri-desktop` plays one click-through moment per reserved input, approval, error or finished-turn episode on the focused output. |
+| Noctalia workspace pills | `attention.json`, `niri-workspaces.json` | `integrations/noctalia-plugin` marks each workspace with its agents' attention and dismisses it on request (`docs/attention.md`). |
 | Niri window signals | `intent.json` | `familiar-niri watch` lights each terminal's niri-material glass in its session's identity hue. |
 
 The sprite contract is six full-colour state images plus `rows`. The same contract is
@@ -140,9 +141,15 @@ and a transition into either sends a matching pulse. Windows that no longer host
 session are cleared, by niri's own record, so a restarted watcher leaves no stale hue.
 On a niri without window signals the watcher says so once and writes only the map.
 
-`integrations/niri-desktop` watches `intent.json` directly. On `done` or `error`, it
-uses Niri to find the focused output and presents a short click-through moment. The
-moment is skipped for the initial state and follows `motion: full | reduced | off`.
+`familiar-niri watch` is also the desktop attention coordinator: it attributes each
+agent's requests to the workspace hosting it, publishes the workspace feed and a
+heartbeat, and sends desktop toasts (`docs/attention.md`).
+
+`integrations/niri-desktop` consumes the shared attention episodes rather than watching
+state transitions: it claims one eligible episode at a time through
+`familiar attention popup`, finds the focused output through Niri and presents a short
+click-through moment with that episode's state art. What it already shows when it
+starts is history and is not played; moments follow `motion: full | reduced | off`.
 
 ## Tone
 

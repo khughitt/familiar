@@ -432,29 +432,43 @@ not addressed.
 
 The following integrations are Linux-only and do not apply to macOS.
 
-### Niri workspace awareness and desktop moments
+### Niri workspace awareness, desktop attention and moments
 
-Start the workspace watcher from `~/.config/niri/config.kdl`:
+Start the desktop coordinator once per Niri session:
 
 ```kdl
 spawn-sh-at-startup "familiar-niri watch"
 ```
 
-It is the sole writer of `niri-windows.json`. It resynchronizes after both agent
-and Niri events, so moving a terminal between workspaces keeps the feed current.
-On niri-material it also sets each terminal's `familiar` window signal, which a
-glass ring whose color source is `familiar` draws in that session's hue.
+It holds `attention-coordinator.lock`, so a second copy refuses to start. It writes the
+session map (`niri-windows.json`), the workspace feed (`niri-workspaces.json`) and the
+heartbeat (`attention-health.json`), attributes agent attention to the workspace that
+hosts each agent, and sends one generic desktop toast per new request through
+`noctalia msg notification-show`. On niri-material it also sets each terminal's
+`familiar` window signal, which a glass ring whose color source is `familiar` draws in
+that session's hue. Run it as a supervised user service with restart-on-failure when
+native agent toasts are turned off, so a dead coordinator is noticed:
+`docs/runbooks/desktop-attention-rollout.md`.
 
-Optionally start focused-output completion and error moments:
+Optionally start the focused-output moments:
 
 ```kdl
 spawn-sh-at-startup "qs -d -p /path/to/familiar/integrations/niri-desktop"
 ```
 
-The desktop process reads `intent.json` directly and plays a short, click-through
-full-colour animation on the focused output when the state arrives. It needs `qs`
-on `PATH`. Set `motion: full`, `reduced`, or `off` in
-`~/.config/familiar/config.yaml` to control moments.
+The popup plays one short, click-through moment per agent request, error or finished
+turn that the coordinator made eligible, on the focused output. It reserves each moment
+through `familiar attention popup`, so `familiar` must be on its `PATH`, as must `qs`.
+Set `motion: full`, `reduced`, or `off` in `~/.config/familiar/config.yaml`.
+
+### Noctalia workspace pills
+
+`integrations/noctalia-plugin` is a Noctalia 5.3 plugin (`khughitt/familiar`): link it
+into `~/.local/share/noctalia/plugins/`, enable it, and use
+`khughitt/familiar:workspaces` in a bar section in place of the built-in `workspaces`.
+Left click focuses a workspace, right click dismisses its alerts, middle click opens the
+widget's settings, and the ⚑ button opens the Alerts panel. `familiar` must be on
+Noctalia's `PATH`. Behaviour: `docs/attention.md`.
 
 ### Keep the scheme aligned with Noctalia
 
