@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:50:28Z
+updated: 2026-10-24T13:59:06Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -55,4 +55,6 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:50:25Z (feat/desktop-attention): attached: spec-round-6-report.md (5391 bytes): Full scoped evidence review of 2b58b29 by codex/gpt-6.1-sol: all six round-5 corrections accepted, no findings; runtime limits explicit
 - 2026-10-24T13:50:27Z (feat/desktop-attention): attached: spec-round-6-ledger.md (13623 bytes): Rulings with Why/Cost and frozen revision references through round-6 acceptance; six round-5 dispositions; no deferred minors
 - 2026-10-24T13:50:28Z (feat/desktop-attention): parked (waiting on user, review): User reviews frozen familiar spec 2b58b29009267ac0978945515cdadc3309736a74 at .worktrees/desktop-attention/docs/specs/2026-10-24-desktop-attention-design.md; after approval agent writes the implementation plan. Round-5/6 full reports and spec-round-6-ledger attached; round 6 accepts with no findings, no deferred minors. Claude parallel-permission scheduling remains a required planning check; actual Codex interrupt guarantee is unverified, with mandatory missing-hook regression instead. No plan/product code/host settings changed and no checks/children running. Worktree retained/locked; full-suite baseline remains deferred to execution Setup.
+  provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T13:59:06Z (feat/desktop-attention): resumed
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
