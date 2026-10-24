@@ -466,14 +466,18 @@ function claim(state, input) {
   return { token: input.token, ids: chosen.map((episode) => episode.id) };
 }
 
+// A reservation finishes whole, or (a toast pass sending one summary per workspace)
+// only for the explicit IDs one send covered.
 function finish(state, input) {
-  exactKeys(input, ['type', 'surface', 'token', 'outcome', 'now'], [], 'finish input');
+  exactKeys(input, ['type', 'surface', 'token', 'outcome', 'now'], ['ids'], 'finish input');
   check(SURFACES.includes(input.surface) && bounded(input.token), 'finish surface or token is invalid');
   check(OUTCOMES.includes(input.outcome), 'finish.outcome is invalid');
+  const only = input.ids === undefined ? null : new Set(ids(input.ids, 'finish.ids'));
   const finishedIds = [];
   for (const episode of Object.values(state.episodes)) {
     const delivery = episode.delivery[input.surface];
     if (delivery.status !== 'reserved' || delivery.token !== input.token) continue;
+    if (only !== null && !only.has(episode.id)) continue;
     episode.delivery[input.surface] = { status: input.outcome };
     finishedIds.push(episode.id);
   }

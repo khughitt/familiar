@@ -463,7 +463,7 @@ test('root help names the attention controls and each has its own help', (t) => 
   const env = { PATH: process.env.PATH, HOME: root, FAMILIAR_CONFIG_DIR: join(root, 'config'), FAMILIAR_STATE_DIR: join(root, 'state') };
   const help = run(['--help'], env);
   assert.equal(help.status, 0, help.stderr);
-  for (const line of [/attention status +Print the desktop attention view/, /attention dismiss ID\.\.\. +Dismiss attention/, /attention popup +Serve one familiar popup control request/]) {
+  for (const line of [/niri focus ID +Focus a Niri workspace by its stable ID/, /attention status +Print the desktop attention view/, /attention dismiss ID\.\.\. +Dismiss attention/, /attention popup +Serve one familiar popup control request/]) {
     assert.match(help.stdout, line);
   }
   for (const leaf of ['status', 'dismiss', 'popup']) {

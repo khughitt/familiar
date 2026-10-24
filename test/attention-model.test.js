@@ -689,3 +689,15 @@ test('validateAttention accepts the initial state and rejects unknown or malform
 test('reduceAttention rejects an unknown input', () => {
   assert.throws(() => reduceAttention(initialAttention(), { type: 'patch', now: 1 }), { name: 'AttentionSchemaError' });
 });
+
+test('finish can settle part of a reservation by explicit IDs', () => {
+  const { t, send } = scenario();
+  send('codex', 'PermissionRequest', { session: 'a' });
+  send('codex', 'PermissionRequest', { session: 'b' });
+  t.desktop({ focused: '1', origins: { 'codex:a': '2', 'codex:b': '3' } });
+  const { ids } = t.claim('toast', 'coordinator-1', 'tok');
+  const out = reduceAttention(t.state, { type: 'finish', surface: 'toast', token: 'tok', outcome: 'delivered', ids: [ids[0], 'e999'], now: t.now + 1 });
+  assert.deepEqual(out.result.finishedIds, [ids[0]]);
+  assert.equal(out.state.episodes[ids[0]].delivery.toast.status, 'delivered');
+  assert.equal(out.state.episodes[ids[1]].delivery.toast.status, 'reserved');
+});

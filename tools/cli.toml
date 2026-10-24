@@ -2736,6 +2736,16 @@ path = ["attention", "popup"]
 protocol = "popup control: reads one JSON request on stdin and writes one JSON reply on stdout"
 summary = "Serve one familiar popup control request"
 
+[[cli.familiar.commands]]
+path = ["niri"]
+summary = "Niri desktop actions"
+
+[[cli.familiar.commands]]
+path = ["niri", "focus"]
+output = "none"
+summary = "Focus a Niri workspace by its stable ID"
+args = [{ name = "id", value = "string", required = true }]
+
 # ---- forge
 
 [[cli.forge.commands]]

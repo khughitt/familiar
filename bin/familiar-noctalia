@@ -2,11 +2,14 @@
 // The integration that supplies SchemeTone. The core never asks a bar what the
 // colorscheme is — it reads the file this writes. Swap this for a wallust,
 // pywal, or static-config equivalent and nothing else changes.
+import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { writeJsonAtomic } from '../src/bus/store.js';
+import { readDnd } from '../integrations/noctalia/adapter.js';
 
 const paths = resolvePaths();
 const [command] = process.argv.slice(2);
@@ -31,7 +34,15 @@ if (command === 'scheme-sync') {
   const tone = { mode: darkMode ? 'dark' : 'light', satScale: 1.0 };
   await writeJsonAtomic(paths.schemePath, tone);
   process.stdout.write(`${tone.mode}\n`);
+} else if (command === 'dnd') {
+  // The same validated query the attention coordinator makes: `on`, `off`, or unknown.
+  try {
+    process.stdout.write(`${await readDnd({ execFile: promisify(execFile) })}\n`);
+  } catch (error) {
+    process.stderr.write(`familiar-noctalia: ${error.message}\n`);
+    process.exit(1);
+  }
 } else {
-  process.stderr.write('usage: familiar-noctalia scheme-sync\n');
+  process.stderr.write('usage: familiar-noctalia <scheme-sync | dnd>\n');
   process.exit(1);
 }
