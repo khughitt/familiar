@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:07:08Z
+updated: 2026-10-24T22:07:10Z
 started: 2026-10-24T12:20:23Z
 completed: 2026-10-24T22:05:27Z
 closed: 2026-10-24T22:05:27Z
@@ -145,3 +145,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-24T22:07:07Z (main): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"worktree","path":".worktrees/desktop-attention","purpose":"Removed after the approved merge 6847632 (merged suite green); tt-report run; ignored files were node_modules (regenerable) and .superpowers (plan workspaces, attached); no host pointer resolved into it; branch deleted.","cleanup_trigger":"none"}
 - 2026-10-24T22:07:08Z (main): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/2026-10-24-desktop-attention","purpose":"Removed with the worktree; ledger attached as execution-ledger-portable.md (raw copy held by ops-e40874), review and API reports attached.","cleanup_trigger":"none"}
+- 2026-10-24T22:07:10Z (main): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"scratch","path":".worktrees/desktop-attention/.superpowers/sdd/desktop-attention","purpose":"Removed with the worktree; its ledgers and reports were attached during planning.","cleanup_trigger":"none"}
