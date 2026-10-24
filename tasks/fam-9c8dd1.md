@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:48:09Z
+updated: 2026-10-24T13:49:28Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -50,3 +50,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:45:17Z (feat/desktop-attention): Round 5 rulings: document accepted Claude aggregate-source early-closure limitation and require planning confirmation of parallel tool activity during another permission wait; do not promise Codex-style worker isolation for Claude. Keep conservative Codex worker gating without guessed expiry, but expose a static dismissible suppression diagnostic keyed by root/blocker incarnations and test missing SubagentStop. Retain completed-turn metadata independently of marker visibility through focus/dismiss/restart until genuine activity or teardown. Put heartbeat in its own atomically replaced lock-free health file. Persist suppressed delivery and drop queued effects on DND unknown/on, without recovery replay. Use response-unconfirmed approval wording for all harnesses, with reply-driven OpenCode closure.
 - 2026-10-24T13:48:07Z (feat/desktop-attention): attached: spec-round-5-report.md (4652 bytes): Full review of 4fdcb54 by claude-code/claude-opus-5-5 relayed by user: 3 Important and 3 Minor findings
 - 2026-10-24T13:48:09Z (feat/desktop-attention): Replacement spec frozen in new commit 2b58b29009267ac0978945515cdadc3309736a74 for round 6. Full round-5 review saved/attached; six rulings and their reasons/costs recorded in the retained ledger. Fresh read-only scoped review dispatched against the frozen commit. Read-only installed Niri workspace query additionally confirmed boolean is_focused on every returned workspace and exactly one focused; no names/titles captured, no focus changed. Parallel Claude permission scheduling, Codex interrupt hook behavior and Noctalia runtime gesture/DND checks remain unperformed planning obligations.
+- 2026-10-24T13:49:28Z (feat/desktop-attention): Scope clarification for round 6: planning must confirm Claude parallel-permission scheduling; implementation must test a missing Codex SubagentStop. Establishing whether every native Codex interrupt emits that hook is not a prerequisite for the conservative suppression/diagnostic policy and remains explicitly unverified. This corrects the prior note that grouped Codex interrupt behavior with mandatory runtime planning checks; the frozen spec already makes the distinction.
