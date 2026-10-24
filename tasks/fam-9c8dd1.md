@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T16:30:14Z
+updated: 2026-10-24T16:31:16Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -103,3 +103,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-24T16:30:14Z (feat/desktop-attention): resumed
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T16:31:16Z (feat/desktop-attention): Execution Setup baseline: just test in .worktrees/desktop-attention at 3d6b7bd → fast 1099 tests (1094 pass, 0 fail, 5 skipped), slow 4/4 pass; 42.8 s wall. Five retained-item checkpoints re-verified (all hashes match). Spec 2b58b29 sha256 matches. Inline execution starting with fam-2b65f5; trial-arm: not enrolled.
