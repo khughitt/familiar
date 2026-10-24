@@ -6,9 +6,9 @@ priority: 2
 size: l
 complexity: high
 process: planned
-owner: main
+owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T12:20:23Z
+updated: 2026-10-24T12:20:56Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -20,4 +20,6 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 ## Notes
 
 - 2026-10-24T12:20:23Z (main): started
+  provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-24T12:20:56Z (feat/desktop-attention): resumed
   provenance: {"harness_session":"codex:01a16dc2-3206-71a0-a1aa-70a9859642a9","harness_session_source":"CODEX_THREAD_ID"}
