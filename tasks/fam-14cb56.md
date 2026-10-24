@@ -1,13 +1,13 @@
 ---
 id: fam-14cb56
 title: Persist attention independently of visual projection
-status: blocked
+status: todo
 priority: 2
 size: m
 complexity: high
 process: direct
 created: 2026-10-24T14:34:58Z
-updated: 2026-10-24T14:37:19Z
+updated: 2026-10-24T16:21:24Z
 depends: [fam-2b65f5]
 parent: fam-9c8dd1
 tags: []
