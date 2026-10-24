@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:04:59Z
+updated: 2026-10-24T22:05:00Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -133,3 +133,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T22:04:56Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"scratch","path":"$WORK_ROOT/familiar/fam-9c8dd1","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
 - 2026-10-24T22:04:58Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/planning-evidence","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
 - 2026-10-24T22:04:59Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/plan-round-2-evidence","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
+- 2026-10-24T22:05:00Z (feat/desktop-attention): retained: {"host":"titan","state":"released","verification":"verified","next_owner":"none","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md","purpose":"Transferred to ops-e40874, which now holds the kept record.","cleanup_trigger":"none"}
