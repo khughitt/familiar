@@ -1,0 +1,23 @@
+# The familiar plugin for Noctalia 5.3 (plugin API 34): workspace pills that show which
+# agents need you, an Alerts panel to dismiss them, and a service that reads familiar's
+# attention files. It never changes an agent's request, approval or native urgency.
+id = "khughitt/familiar"
+name = "Familiar"
+version = "0.1.0"
+plugin_api = 34
+author = "Keith Hughitt"
+license = "MIT"
+description = "Workspace pills marked by familiar's agent attention, with dismissal and coordinator health"
+dependencies = ["familiar"]
+
+[[widget]]
+id = "workspaces"
+entry = "widget.luau"
+
+[[panel]]
+id = "alerts"
+entry = "panel.luau"
+
+[[service]]
+id = "attention"
+entry = "service.luau"

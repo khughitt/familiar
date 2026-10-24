@@ -4,6 +4,11 @@
   recipe records its wall time through `tools/tt`. `just check` is the pre-commit gate
   and `just gate` the pre-push one; install the hooks in a fresh clone with
   `git config core.hooksPath .githooks`.
+- The Noctalia plugin's contract tests (`integrations/noctalia-plugin/`) run its Luau under
+  the pinned Luau 0.743 development runtime. Provision it once per checkout with
+  `node tools/fetch-luau.mjs` (it verifies the release archive's SHA-256 and writes
+  `node_modules/.cache/familiar-luau/0.743/luau`; `--archive <zip>` uses a local copy). CI
+  does the same; a missing runtime fails those tests with this hint rather than skipping.
 - `bin/familiar` and `bin/familiar-opencode` are launchers: they call
   `requireDependencies()` from `src/deps.js` and then dynamically import the
   implementation beside them (`bin/familiar.js`, `bin/familiar-opencode.js`). A missing
