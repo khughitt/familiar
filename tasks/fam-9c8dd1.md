@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:50:25Z
+updated: 2026-10-24T13:50:27Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -53,3 +53,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:49:28Z (feat/desktop-attention): Scope clarification for round 6: planning must confirm Claude parallel-permission scheduling; implementation must test a missing Codex SubagentStop. Establishing whether every native Codex interrupt emits that hook is not a prerequisite for the conservative suppression/diagnostic policy and remains explicitly unverified. This corrects the prior note that grouped Codex interrupt behavior with mandatory runtime planning checks; the frozen spec already makes the distinction.
 - 2026-10-24T13:50:23Z (feat/desktop-attention): review: spec round 6 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-24T13:50:25Z (feat/desktop-attention): attached: spec-round-6-report.md (5391 bytes): Full scoped evidence review of 2b58b29 by codex/gpt-6.1-sol: all six round-5 corrections accepted, no findings; runtime limits explicit
+- 2026-10-24T13:50:27Z (feat/desktop-attention): attached: spec-round-6-ledger.md (13623 bytes): Rulings with Why/Cost and frozen revision references through round-6 acceptance; six round-5 dispositions; no deferred minors
