@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T22:04:14Z
+updated: 2026-10-24T22:04:16Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -127,4 +127,6 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:26:10Z (feat/desktop-attention): parked (waiting on user, approval): User decides integration of reviewed feat/desktop-attention (head after d0e5c13, in .worktrees/desktop-attention): merging into main is activation (Niri starts familiar-niri watch and the popup from main; familiar on PATH and relay observers run main), so first the owner prerequisites hq-4c954d, hq-d6e13a, dots-dfecf1 land, ops main (314675f, unpushed) is pushed, then the user approves the merge per docs/runbooks/desktop-attention-rollout.md; the agent then runs the runbook steps one approval at a time.
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-24T22:04:14Z (feat/desktop-attention): resumed
+  provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-24T22:04:16Z (feat/desktop-attention): Identify the current integration owner
   provenance: {"harness_session":"claude-code:bb2801be-ba4f-4fd5-b4f1-81c6742ca304","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
