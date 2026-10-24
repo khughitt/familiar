@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T13:13:23Z
+updated: 2026-10-24T13:16:31Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -36,3 +36,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T13:10:29Z (feat/desktop-attention): Round 2 disposition: accept raw root/worker separation and source-scoped episodes. Choose static Turn finished marker and low-priority notice only for a genuine root completion classified on an unfocused workspace; no synthetic needs-input event. Verify OpenCode qualification: its adapter reduces session.idle after active states to done, and its plugin handles permission.replied then republishes aggregate level. Choose truthful Approval requested — response unconfirmed with age and accepted unbounded observation lag for Claude/Codex, rather than claiming approval pending or treating focus as an answer. Define seen by globally focused workspace; require planning gesture verification/fallback, explicit Noctalia IPC transport/live DND adapter, supervised coordinator and independent widget health detection.
 - 2026-10-24T13:13:21Z (feat/desktop-attention): attached: spec-round-2-report.md (5129 bytes): Full round-2 review of eccdaa3 by claude-code/claude-opus-5-5, relayed by user: 3 Important and 5 Minor findings
 - 2026-10-24T13:13:23Z (feat/desktop-attention): Revised spec frozen as new commit 929d0a15dcb2a612247d2f628084bf03b16976d0, docs/specs/2026-10-24-desktop-attention-design.md. All eight round-2 findings have recorded dispositions in the retained ledger. Fresh read-only evidence review dispatched against that exact commit, explicitly checking installed relay adapters, reducer/worker attribution, OpenCode permission replies and the Noctalia integration boundaries. No plan, product code or host changes.
+- 2026-10-24T13:16:31Z (feat/desktop-attention): review: spec round 3 — verdict: revise; findings: Important 1; reviewer: codex/gpt-6.1-sol
