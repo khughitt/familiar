@@ -2,6 +2,7 @@
 
 Status: draft for user review; approach accepted in conversation, this written
 specification and the implementation plan still require review before building.
+Revision: replaces the lifecycle assumptions in `eccdaa3` following spec round 2.
 
 Task: fam-9c8dd1. Coordination: ops-e40874. Related: ops-0dc04d (focus mode),
 hq-b339a9 (earlier attention-source investigation).
@@ -20,7 +21,8 @@ marker, and requested a widget gesture to withdraw alerts. The interpretation of
 that gesture as **dismiss attention**, rather than cancel the underlying request,
 is the designer's call for review.
 
-This version covers local root agent sessions on Niri and Noctalia 5.3. It adds no
+This version covers local agent sessions, including reported worker requests
+attributed to their root terminal, on Niri and Noctalia 5.3. It adds no
 generic notification daemon, Noctalia fork, new repository, remote identity feed,
 phone routing, focus schedule, or new art-generation work. Relay remains the
 lifecycle and question authority; familiar supplies presentation and identity.
@@ -29,7 +31,9 @@ later move to a broader notification project without moving pet rendering.
 
 ## Current behavior and evidence
 
-Verified against the code and installed desktop during the investigation:
+Verified against familiar code and the installed desktop. Relay evidence below is
+from the worktree's pinned v0.1.1 dependency, commit
+`4ceec5d2ad22b136b37ee360e7a4ed00949f28d9`, not an assumed current upstream API:
 
 - `integrations/niri-desktop/logic.js` announces only transitions into `done` and
   `error`; its QML shell reads `intent.json` and displays on the focused output.
@@ -45,10 +49,38 @@ Verified against the code and installed desktop during the investigation:
   publishes sessions and intent. `src/bus/projection.js` has event sequence and
   registry generation/basis information; its sequence can change without a new
   user request, so sequence alone cannot identify an attention episode.
+- That projection currently overwrites a root's state with a newer worker state.
+  It is unsuitable as attention truth: worker activity can erase root approval,
+  and worker completion can look like root completion. The new attention path
+  must consume raw registry rows before that fold. The fold is familiar behavior,
+  not something relay's Claude-specific background filter prevents.
 - `integrations/niri/window.js` and `bin/familiar-niri` already join sessions to
   windows/workspaces and refresh when windows move. Unmapped sessions are omitted.
 - The installed shell is Noctalia 5.3.0; the configured bar uses its built-in
   `workspaces` widget. Old QML plugin files are not the configured widget.
+
+The available lifecycle coverage is narrower than the visual state vocabulary:
+
+| Harness | Input request | Approval request | Error | Completion evidence |
+| --- | --- | --- | --- | --- |
+| Claude Code | `Notification:idle_prompt` only | `Notification:permission_prompt` | `StopFailure` | Root `Stop` normally reduces to `done`; in-flight background agents reduce it to `working` |
+| Codex | No mapped event | `PermissionRequest`, including identified workers | No mapped event | Root `Stop` reduces to `done`; `SubagentStop` is a separate worker's `done` |
+| OpenCode | No mapped event | Aggregate `permission.pending` | `session.error` | `session.idle` has kind `idle`, but `reduceState` converts prior working/input/approval to `done`; prior error stays error |
+
+Sources: `node_modules/relay/src/adapters/{claude-code,codex,opencode}.js`,
+`src/bus/transaction.js` inside that dependency, and
+`integrations/opencode/{binding,window}.js` inside it. OpenCode represents an
+aggregate process/window here, not independently identified worker rows.
+Its plugin consumes `permission.replied` and publishes the recomputed aggregate
+level: the last reply can become busy/working or idle/done. Claude and Codex have
+no mapped approval-result event. No harness-independent request ID or exact
+approval-resolution feed can be assumed from these observer records.
+
+Claude's idle notification is delayed relative to turn end; its threshold is
+harness behavior and was not verified in this repository. Do not build in an
+assumed one-minute timer. Codex and OpenCode must not be presented as having
+native `needs-input` events. Use completion notices below to cover an unfocused
+turn ending, without claiming that completion proves a question is pending.
 
 Noctalia's existing `workspace-alert-add-window` IPC can mark the source workspace,
 but alerts are generic, lack per-source identity/type, and clear on activation.
@@ -63,55 +95,110 @@ Upstream references:
 - [Noctalia 5.3 alert lifecycle](https://github.com/noctalia-dev/noctalia/blob/v5.3.0/src/compositors/workspace_alert_service.cpp)
 - [Plugin bar UI and limitations](https://docs.noctalia.dev/noctalia/plugins/development/declarative-ui/#barwidgetrender---declarative-bar-widget-ui)
 - [Runtime notifications, processes and state](https://docs.noctalia.dev/noctalia/plugins/development/runtime-api/)
+- [Noctalia v5 configuration layers](https://docs.noctalia.dev/noctalia/configuration/)
 
 ## Attention lifecycle
 
-Maintain attention episodes separately from visual intent. Each episode has a
-stable identity scoped to a relay registry/session incarnation, a session identity,
-an event kind, creation/order information, pending/resolved status, and independent
-seen/dismissed status. Identity color is optional presentation enrichment; missing
-art must not prevent attention from being recorded or a pill/toast from appearing.
+Maintain attention episodes separately from visual intent. Key their source by
+raw relay agent ID and incarnation; keep its root ID separately for attribution.
+Each episode has stable identity, event kind, source observation/order information,
+open/closed attention status, and independent seen/dismissed status. "Open" means
+the attention has not been disposed of; it is not proof that a native permission
+dialog is still open. Missing art must not prevent recording an episode or showing
+a pill/toast.
 
-An episode starts when an authoritative root session enters `needs-input`,
-`needs-approval`, or `error`. Duplicate observer delivery, reconciliation, progress
-updates in the same waiting state, theme changes, and window moves retain its ID.
-Leaving the actionable state for working/idle/done or ending the session resolves
-the current episode.
-A subsequent entry, or a different actionable kind, creates a new ID. A repeated
-identical waiting state is the same episode until the source supplies a distinct
-request identity or a state exit/re-entry. Do not invent distinct questions from
-polling timestamps. Preserve relay's background-agent filtering: a worker ending
-or the root waiting for its workers must not become a new user-facing completion.
+Read roots and workers separately from relay's raw snapshot. A source entering
+`needs-input`, `needs-approval`, or `error` starts its own episode. Activity from
+that same source supersedes its episode; another source's activity cannot. A root
+request and a worker request may coexist. An identified worker's approval/input/
+error uses the root's terminal, workspace and familiar hue, with a worker label in
+the tooltip, and its own episode ID. Do not invent worker event kinds a harness
+does not report. A missing/invalid root association leaves it unmapped and diagnosed.
+Any different state of the same source closes its previous episode before a new
+actionable episode is considered; this includes a worker's transition into `done`.
+The same-turn completion-to-input upgrade below is an explicit exception.
 
-For this version, no generic independent worker alerts are introduced. Attribute
-root requests to the root session's terminal. If existing relay data cannot prove
-the required root lifecycle for a harness, report that harness limitation and
-resolve it in the plan before promising coverage; do not infer requests from prose.
+A worker ending closes only its own attention and never creates a user-facing
+completion. Ending/reaping the root closes its attention and associated workers.
+An ordinary root state change closes only root-owned attention. A root `done` is
+eligible for completion presentation only when no raw worker row for that root
+remains working or requesting attention; preserve Claude's own background-count
+reduction too. A completion suppressed for workers is not announced later merely
+because a worker finishes: it needs a subsequent genuine root completion. Retire
+the popup's folded-intent transition detector when the shared path is enabled.
 
-`done` remains a low-priority finite familiar moment without a persistent demand
-pill or a new desktop toast. Record it as a finite completion event on the same
-delivery path, with a popup reservation and no pending request; retire the old
-popup's independent transition detector when this path is enabled. Working/idle
-do not interrupt. Error attention clears
-when seen, dismissed, or superseded by later root state; input/approval attention
-persists statically after being seen, until resolved or dismissed. Art expiry alone
-does not resolve any attention episode.
+Duplicate delivery, reconciliation, repeated observations of the same waiting
+state, theme changes, and window moves retain episode IDs. A subsequent exit and
+re-entry creates a new episode. These state-level records do not distinguish
+several native questions arriving while the same source remains `needs-approval`;
+show one aggregate source marker, not a fabricated count of permission dialogs.
+Any future request-ID support is a contract change, not a requirement of this plan.
+
+### Unfocused turn completion
+
+Design ruling: a genuine root completion on an unfocused source workspace leaves
+a **static "Turn finished" marker**, plus one low-priority popup/toast opportunity.
+It makes the common handoff discoverable without mislabeling it as `needs-input`.
+A completion on the focused workspace retains the finite familiar moment, with
+no new completion marker or toast. Working and ordinary idle do not interrupt.
+For OpenCode, recognize the reduced root transition into `done` even though the
+native event kind is `idle`; init/idle-to-idle and error-to-idle are not completion.
+Evaluate focus when the desktop coordinator first classifies the episode, using
+its latest validated compositor snapshot. Relay does not publish event-time focus;
+do not claim this reconstructs what the user was looking at when a hook fired.
+
+The completion marker clears on source focus, dismissal, new activity from its
+root, or root end. Art expiry does not clear an unseen completion. If origin/focus
+is unknown, retain the completion without guessing a pill or sending a completion
+toast. On first reliable mapping, an otherwise still-current completion may become
+a static marker on an unfocused workspace, without replaying transient effects.
+
+A late Claude idle-input notification for the same completed root turn upgrades
+that turn's episode to input attention, preserving its ID, seen/dismissed state
+and delivery decisions (including any suppression). The upgrade starts no new
+popup/toast opportunity. Later root
+activity ends that turn association. A late input notice without a recorded
+completion starts an ordinary input episode. Do not infer association across an
+intervening root activity or session incarnation.
+
+### Approval uncertainty
+
+Choose truthful last-observed status over provisionally resolving an approval on
+focus. Claude/Codex may retain `needs-approval` until their next mapped tool-start,
+prompt, turn-end or session-end event. A ten-minute tool can therefore leave that
+observation for ten minutes; in silence there is **no finite bound** on the lag.
+OpenCode's last `permission.replied` normally causes a queued aggregate update
+without waiting for the tool to finish, but observer delivery is still asynchronous.
+
+Label these episodes "Approval requested — response unconfirmed", with observation
+age in the tooltip; never assert "approval pending" or a current dialog count.
+Focus stops motion and leaves this explicitly historical static marker until a
+same-source state change or dismissal. It does not mark a request answered, send
+another notice or expire it on a guessed timeout. This accepts a stale observation
+while exposing its uncertainty; user dismissal is the immediate way to remove it.
+
+Input attention also remains statically after being seen until superseded or
+dismissed. Error attention clears when seen/dismissed or after a same-source state
+change. Art expiry never proves that a native request was answered.
 
 Distinguish three operations:
 
-1. **Seen:** activating the workspace containing the originating window marks
-   its current episodes seen and ends their ongoing attention motion. Input and
-   approval markers remain static. This is not request resolution. An event
-   arriving on an already active workspace is immediately seen: it may show its
-   finite arrival cue and popup/toast once, but does not start sustained pulsing.
-2. **Dismissed:** right-clicking a pill dismisses the current episodes represented
+1. **Seen:** the source workspace becomes Niri's globally **focused** workspace
+   (`is_focused`), not merely `is_active`/visible on another monitor. Mark its
+   episodes seen and stop motion; input/approval markers remain static with the
+   qualifications above, and completion/error markers clear. An event on the
+   already focused workspace is immediately seen: input/approval/error may show
+   their finite arrival cue and popup/toast once, but never sustained pulsing.
+2. **Dismissed:** the pill's dismiss action (right-click preferred, subject to the
+   planning check below) dismisses the current episodes represented
    by that pill. Hide their attention markers and remove their queued transient
    announcements. A currently playing familiar attention moment for those IDs ends.
    An already delivered toast may finish its normal timeout; no global notification
-   clearing is permitted. Keep the underlying requests pending and the status-line
-   pet accurate. Persist dismissal across restarts for that episode only.
-3. **Resolved:** relay/session lifecycle says the request ended or work resumed.
-   Remove its pending marker and cancel queued attention for that episode.
+   clearing is permitted. Leave native request state unchanged; do not rewrite
+   the status-line pet. Persist dismissal across restarts for that episode only.
+3. **Closed by source:** a same-source state change or session teardown supersedes
+   the observed request. Remove its marker and cancel queued attention. This is
+   observable lifecycle progress, not proof of an approval outcome.
 
 Dismissal acts on the explicit IDs visible to the widget at the click, never
 "everything currently on workspace N" at a later execution time. If another event
@@ -119,9 +206,16 @@ arrives concurrently it survives. Repeated dismissal is harmless; a stale click
 must not dismiss a successor request. Reconcile always checks live episode IDs.
 
 The dismiss action does not mute the session, workspace, event kind, or future
-requests. Its tooltip must say "Right-click to dismiss current alerts" and explain
-that requests remain pending. Middle-click retains Noctalia's settings shortcut.
-The pill retains its usual workspace-switching left click. Dismissal never changes
+requests. Its tooltip names the selected gesture and explains that native requests
+are unaffected (for right-click: "Right-click to dismiss current alerts").
+Planning must first verify Noctalia 5.3's
+widget and inline-pill right-click bindings/dispatch with pinned source and a
+headless event check. Do not assume a compiled widget's gesture is free. Prefer an
+unmodified right click only if it preserves existing behavior; otherwise use a
+modifier plus right click if supported, or an explicit dismiss action in the
+plugin's own panel. Any new shortcut follows the shared key vocabulary. Record the
+selected route and tooltip in the plan. Middle-click
+retains settings and left-click retains workspace switching. Dismissal never changes
 relay question state, agent process state, permissions, or the source's native
 compositor urgency.
 
@@ -132,18 +226,21 @@ join; track stable window/workspace IDs and the output connector, using workspac
 names/indices only as labels. Refresh after moves, renumbering, focus changes,
 session changes, and compositor reconnects. Moving a source transfers its pending
 marker, seen/dismissed state and identity; it does not create another arrival.
-Moving an unseen source onto an active workspace marks it seen.
+Moving an unseen source onto the globally focused workspace marks it seen. A
+workspace visible on another monitor remains unseen until it receives focus.
 
-Without a reliable window mapping, show a generic project/session toast and retain
-the pending episode for later mapping, but mark no guessed workspace. No automatic
+Without a reliable window mapping, an input/approval/error may show a generic
+project/session toast while retaining its episode for later mapping; completion
+instead follows the unknown-origin rule above. Mark no guessed workspace. No automatic
 focus change is allowed when an event arrives. On mapping failure or compositor
 disconnect, remove stale workspace attribution and show that status in the widget
 tooltip; do not present a last-known workspace as current.
 
 Aggregate independently tracked episodes per workspace. Priority is error, then
-approval, then input; equal kinds choose the newest episode, then stable ID. The
-winner supplies the accent and event glyph; a count and tooltip expose all pending
-undismissed episodes so one request cannot erase another. Recompute after seeing,
+approval, then input, then completion; equal kinds choose the newest episode,
+then stable ID. The winner supplies the accent and event glyph; a count and tooltip expose all pending
+undismissed source episodes so one request cannot erase another. The count is of
+episodes, not native dialogs or unanswered questions. Recompute after seeing,
 dismissing, resolving or moving any source. Native application urgency remains a
 separate, theme-colored indicator and is never assigned familiar identity.
 
@@ -162,9 +259,10 @@ These treatments are proposed defaults, not user-approved pixel designs:
 | Event | Arrival | Pending appearance |
 | --- | --- | --- |
 | Needs input | Small eased highlight expansion | Identity outline and input glyph; slow pulse until seen, then static |
-| Needs approval | Brief stronger outline expansion | Identity double-outline treatment and approval glyph; slow pulse until seen, then static |
-| Error | Short, firmer highlight pulse | Identity outline and error glyph; clears on seen/dismissed/later root state |
-| Done | Existing finite familiar completion moment | No persistent demand marker |
+| Approval requested, response unconfirmed | Brief stronger outline expansion | Identity double-outline and approval glyph; slow pulse until seen, then historical static marker with observation age |
+| Error | Short, firmer highlight pulse | Identity outline and error glyph; clears on seen/dismissed/later same-source state |
+| Turn finished on unfocused workspace | Finite familiar completion moment and low-priority toast | Static identity completion glyph until focused/dismissed/new root activity |
+| Turn finished on focused workspace | Existing finite familiar completion moment | No marker or toast |
 
 Preserve hue across event kinds. Arrival motion should take roughly 200–350 ms,
 with a low-amplitude sustained pulse around four seconds. No layout movement or
@@ -184,8 +282,11 @@ the user's focused output; the pill identifies the actual source workspace.
 There is one portable attention reducer and durable snapshot, owned initially by
 familiar. It consumes normalized lifecycle data and explicit seen/dismiss actions,
 independently of sprite loading. Integrate it into observer reconciliation rather
-than reconstructing episodes from a coalesced file watch. Persist enough session
-incarnation, current episode and disposition information to avoid restoring a
+than reconstructing episodes from a coalesced file watch or folded `intent.json`.
+Preserve separate source/root IDs and source states through reconciliation, even
+where the existing pet presentation still uses a worker fold. None of the new
+popup, pill or toast decisions may consult that folded state as lifecycle truth.
+Persist enough session incarnation, current episode and disposition information to avoid restoring a
 dismissed request or resurrecting one after process/session ID reuse.
 
 All writers use one locking/atomic-write discipline, including desktop attribution,
@@ -203,9 +304,12 @@ consume the same episode/disposition data; neither maintains an independent requ
 lifecycle. Consumers restore static pending state after restart and must not replay
 historic arrival effects. Consumers retain stable IDs through coalesced updates.
 
-Deliver one popup opportunity and one toast per actionable episode, independent
-of workspace marker persistence. Queue transient effects per surface; combine a
-burst into one summary if needed, retaining every contributing episode ID and all
+Deliver one popup opportunity and one toast per input/approval/error episode, and
+the completion opportunities defined above, independent of marker persistence.
+Seen stops ongoing motion but does not itself cancel a new finite arrival cue;
+dismissal and same-source closure cancel any not-yet-started delivery.
+Queue transient effects per surface; combine a burst into one summary if needed,
+retaining every contributing episode ID and all
 pending widget markers. A higher-priority error may interrupt a lower-priority
 popup, but the queued request must not disappear from pending state. An episode
 resolved or dismissed before delivery is not announced later.
@@ -218,18 +322,31 @@ exactly-once visual display. Restart favors avoiding repeated interruptions over
 replaying uncertain sends. Serialize launch and dismissal decisions; an external
 send already in flight at dismissal may complete, but no later one may start.
 
-Use the existing desktop notification service with explicit familiar app identity
-and generic event text, project/session label and workspace label when known.
+Familiar has no existing toast sender. Add a Noctalia integration transport using
+the native Noctalia 5.3 IPC command `noctalia msg notification-show <json-payload>`
+as an argument vector, with `app_name`, `summary`, `body` and normal/low `urgency`.
+That command and its JSON fields were verified in the pinned 5.3 source. No new
+notification daemon or parallel `notify-send` path is needed. Use explicit familiar
+app identity and generic event text, project/session label and workspace label
+when known.
 Do not copy prompts, commands, transcripts or approval contents into notification
-history. No toast action that answers/approves is added. Choose one notification
-transport supported by the installed shell; do not send both internal and D-Bus
-notifications for the same episode. Native harness toasts for covered agent events
-must be disabled or filtered as part of the separately approved rollout, while
+history. No toast action that answers/approves is added. Native harness toasts for
+covered agent events must be disabled or filtered as part of the separately approved rollout, while
 unrelated application notifications remain intact. Document the policy changes
 before activating them; duplicate native toasts mean rollout acceptance fails.
 
-Honor Noctalia Do Not Disturb for toast and familiar popup interruptions, retaining
-pending static markers. Do not bypass DND by making ordinary agent errors critical.
+Extend the existing `bin/familiar-noctalia` integration for native Noctalia IPC,
+including the live `noctalia msg notification-dnd-status` query, whose `on`/`off`
+result is validated. Its present `scheme-sync` reads `settings.json` for a scheme
+key only; that does not establish a live DND contract. Noctalia v5 has TOML
+configuration/overrides, so do not infer current DND from that older JSON input.
+An unavailable/invalid DND response is unknown, never silently "off": retain
+static indicators and diagnose the integration, without starting new interruptions
+until live state is known. Test DND changes through this adapter.
+
+Honor Noctalia Do Not Disturb for toast and familiar popup interruptions, using
+static pill markers instead of attention animation while DND is on. Do not bypass
+DND by making ordinary agent errors critical.
 No interruption backlog is replayed when DND ends; current pending markers remain.
 Host-wide focus mode remains separate ops work; reserve no speculative settings
 or scheduling mechanisms here.
@@ -239,6 +356,33 @@ surface cannot block lifecycle capture or delivery to healthy surfaces. On loss 
 the snapshot/coordinator, the widget shows a disconnected indication and stops
 claiming stale workspace attribution; recovery reconstructs current markers without
 replaying historic transients. A theme failure cannot destroy pending attention.
+
+### Detecting coordinator failure
+
+Turning native harness toasts off makes coordinator health part of rollout
+acceptance. Run the existing Niri coordinator under a transient user service with
+restart-on-failure, replacing its old unsupervised startup rather than launching
+a second copy. Starting that host service still requires the rollout approval;
+this spec starts nothing. The runbook must provide status, logs and stop commands.
+
+Publish a coordinator-instance heartbeat every two seconds, including the
+instance identity and boot/session identity so a leftover snapshot cannot look
+healthy after reboot. The widget independently checks it every two seconds; a
+missing/stale (>10 seconds), malformed or mismatched heartbeat causes a persistent
+"Agent alerts disconnected — toasts unavailable" indication, replacing trusted
+workspace attention attribution. Do not rely on agent state updates as a heartbeat:
+an idle but healthy coordinator must stay distinguishable from a dead one.
+
+On the healthy-to-disconnected transition the still-running Noctalia plugin sends
+one independently generated health notification via Noctalia's runtime notification
+API, subject to live DND; do not route it through the failed coordinator. This is
+a service-health notice, not a duplicate agent-event transport. On startup, an
+absent heartbeat gets the same ten-second grace before one notice. On recovery,
+clear the disconnected state; no notification backlog is replayed. Bound repeated
+failure notices to one per minute across flaps. Even under DND, or if the health
+toast cannot be delivered, the persistent bar indication remains. No widget can
+report through Noctalia while Noctalia itself is down; the service status/logs and
+restart supervision are the remaining diagnostics, not a promised toast fallback.
 
 ## Ownership, rollout and validation
 
@@ -252,16 +396,31 @@ Prepare everything in task worktrees. Before implementation run the documented
 full-suite baseline, then the focused and fast checks the project defines. The
 plan must provide tests for:
 
-- all actionable kinds, done/idle/working exclusions, duplicate delivery, repeated
-  waiting state, exit/re-entry, worker completion suppression and session reuse;
+- the pinned harness coverage table, including OpenCode's idle-event reduction and
+  last permission-reply aggregate update, and absent Codex input/error events;
+- root approval followed by worker working/done (root marker survives), worker
+  approval attributed to root without overwriting it, root and worker requests
+  coexisting/closing independently, root completion suppressed for live workers,
+  duplicate delivery, repeated waiting state, exit/re-entry and session reuse;
+- genuine root completion on focused versus unfocused workspaces, ordinary idle
+  exclusions, late Claude idle-input upgrade without another announcement, and
+  unknown-origin completion mapped later without replay;
+- Claude/Codex approval granted before a ten-minute tool with no further event:
+  retain the explicitly unconfirmed observation, stop motion on seen/dismiss,
+  never claim it is currently pending, then close only on same-source evidence;
 - seen versus dismissed versus resolved, restart persistence, stale dismissal
   races, DND, motion policies and art/identity failure;
 - multiple sessions sharing windows/workspaces, priority/counts, window moves,
-  workspace renumbering, multiple outputs, missing mappings and disconnect/recovery;
+  workspace renumbering, multiple outputs (visible is not focused), missing
+  mappings and disconnect/recovery;
 - burst coalescing, per-surface reservations, send failures and process restarts,
   validating the documented crash limitation without losing pending requests;
 - plugin navigation/gesture behavior, static distinctions and bounded animation
-  updates against Noctalia 5.3, with no secret-bearing inherited fixture environment.
+  updates against Noctalia 5.3, including right-click conflict/fallback verification,
+  with no secret-bearing inherited fixture environment;
+- native toasts disabled, then kill/freeze the coordinator with healthy Noctalia:
+  restart supervision, ten-second disconnected detection, independent health
+  notice, DND, flap limiting, stale heartbeat after reboot, and successful recovery.
 
 Use a nested/headless desktop for UI checks and a one-event-per-kind pilot before
 longer acceptance. Live installation, opening desktop windows, or emitting real
