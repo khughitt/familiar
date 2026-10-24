@@ -8,7 +8,7 @@ complexity: high
 process: planned
 owner: feat/desktop-attention
 created: 2026-10-24T12:20:07Z
-updated: 2026-10-24T20:25:34Z
+updated: 2026-10-24T20:25:35Z
 started: 2026-10-24T12:20:23Z
 depends: []
 tags: []
@@ -118,3 +118,4 @@ User approved one shared attention model feeding familiar popups, a custom Nocta
 - 2026-10-24T20:24:17Z (feat/desktop-attention): detached: execution-ledger.md: the commit hook's machine-layout check refused a host name in the raw ledger; raw bytes preserved as $WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md and a portable derivative is attached as execution-ledger-portable.md
 - 2026-10-24T20:25:32Z (feat/desktop-attention): Attachment layout fallback: execution-ledger-portable.md is a derivative of the raw execution ledger. Placeholder mapping: <host-1> = titan. Raw item: $WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md on titan, sha256 181361cbf64ee50dc0bcc0260c040b23aad10bae0b9912dfd887a6388b58c38e (identical to the execution workspace's progress.md at attachment time).
 - 2026-10-24T20:25:34Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"evidence","path":"$WORK_ROOT/familiar/fam-9c8dd1/execution-ledger-raw.md","purpose":"Exact raw bytes of the execution ledger (rulings and deferred minors through final review round 3), kept because the layout check refuses the host name in it; the attachment is a portable derivative.","cleanup_trigger":"When the project's ops-check admits a ledger-backed attachment carrying host values, attach these raw bytes and reassess; until then keep.","sha256":"181361cbf64ee50dc0bcc0260c040b23aad10bae0b9912dfd887a6388b58c38e"}
+- 2026-10-24T20:25:35Z (feat/desktop-attention): retained: {"host":"titan","state":"kept","verification":"verified","next_owner":"task:fam-9c8dd1","kind":"scratch","path":"$WORK_ROOT/familiar/fam-9c8dd1","purpose":"Canonical persistent container for planning/probe evidence, the pinned Luau archives, and the raw execution ledger; rollout preimages will be captured here (runbook step 1).","cleanup_trigger":"After native activation and acceptance are recorded on ops-e40874 and the raw ledger's attachment fallback ends, verify evidence dispositions and reassess container retention.","manifest":"$WORK_ROOT/familiar/fam-9c8dd1/retained-manifest.json","sha256":"203e3ee6be2ff166da1fa066121955c25b2b5113a65d77669cdc0f4a665e5c3e"}
