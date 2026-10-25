@@ -517,11 +517,13 @@ coordinator handles its own signal. The event stream therefore exposes one `ende
 promise, resolved from the child's `close` event with its exit code and signal (a
 spawn error resolves it as a failure); readline closes before the child's `exit`,
 so the signal is not read when the lines end. After the lines end the coordinator
-awaits `ended`. When the child died by SIGTERM or SIGINT that the coordinator did
+awaits `ended` for at most one second; a child still alive then is killed and the
+end is a stream failure (exit 1). When the child died by SIGTERM or SIGINT that the coordinator did
 not send (`niri msg` installs no handler for them), it waits up to one second for
 its own SIGTERM or SIGINT: on a real stop, systemd and a terminal signal the main
 process at the same moment, so that stop is clean (exit 0). If no signal arrives
-(someone signalled only the child, e.g. `pkill niri`), or the stream ended any
+(someone signalled only the child, e.g. `kill <child pid>`; never `pkill niri`, which
+matches the compositor), or the stream ended any
 other way, it exits 1 as today, and supervision restarts it.
 
 The SIGTERM/SIGINT handlers are registered before `recover`. A stop that arrives
@@ -599,7 +601,9 @@ work.
 Upgrade. Old readers reject a schema-2 record and new readers reject schema 1, so
 merging this change is an activation step, like the original merge. The CLI
 switches as soon as main changes; the running coordinator, the plugin and the popup
-keep their loaded code until restarted. That leaves two windows:
+keep their loaded code until restarted (a consumer that hot-reloads its files at the
+merge only switches to the new rule earlier, which the restarts below cover). That
+leaves two windows:
 
 - From the merge until the coordinator restarts, the old coordinator writes schema
   1. The old plugin still reads healthy, but the new CLI's popup gate is closed:
@@ -607,7 +611,8 @@ keep their loaded code until restarted. That leaves two windows:
   meanwhile are suppressed at the next recovery, not replayed.
 - From the coordinator restart until the plugin and popup restart, each old consumer
   reads schema 2 as invalid: the plugin shows disconnected and sends its one notice,
-  and the old popup logic shows nothing.
+  and the old popup logic shows nothing; popup-eligible episodes from this window are
+  suppressed when the restarted popup initialises, not replayed.
 
 The runbook's upgrade step therefore restarts the coordinator, the plugin and the
 popup immediately after the merge, under the same approval, so both windows last
