@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:01:07Z
-updated: 2026-10-25T02:05:27Z
+updated: 2026-10-25T02:07:17Z
 started: 2026-10-25T02:05:00Z
 depends: []
 tags: [docs]
@@ -25,3 +25,4 @@ docs/install.md explains installing relay Codex hooks and Familiar pets but omit
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T02:05:27Z (docs/relay-cutover): resumed
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:07:17Z (docs/relay-cutover): Verified src/render/harness.js, src/observe/enrich.js and run.js against fam-ac775c: daemon-hosted hooks cannot prove terminal ownership; --no-daemon worked in the 0.160.1 pilot, disabling daemon auto-start did not. Document conditional launch prerequisite and link automatic selection guidance, preserving independent Codex-native rendering. Shared worktree .worktrees/docs-relay-cutover; baseline just test: 1341 passed, 5 skipped, zero failures.
