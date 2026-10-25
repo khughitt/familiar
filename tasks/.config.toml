@@ -1,5 +1,0 @@
-prefix = "fam"
-color = "#bc8369"
-
-[git]
-commit = true
