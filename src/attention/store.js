@@ -10,6 +10,10 @@ import { withLock } from '../bus/lock.js';
 
 // Older than this, a heartbeat no longer vouches for its coordinator.
 export const HEALTH_STALE_MS = 10_000;
+export const HEALTH_SCHEMA = 2;
+// Crashes older than this no longer count; the record keeps at most this many.
+export const CRASH_WINDOW_MS = 600_000;
+export const CRASH_HISTORY_MAX = 8;
 
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const text = (value) => typeof value === 'string' && value.length > 0;
@@ -51,14 +55,18 @@ export async function mutateAttention({ paths, lockWith = withLock }, fn) {
 }
 
 export function validHealth(value) {
-  return sameKeys(value, ['schema', 'instanceId', 'epoch', 'owner', 'writtenAt']) && value.schema === 1
+  return sameKeys(value, ['schema', 'instanceId', 'epoch', 'owner', 'writtenAt', 'stopped', 'crashedAt'])
+    && value.schema === HEALTH_SCHEMA
     && text(value.instanceId) && value.instanceId.length <= 128
     && sameKeys(value.epoch, ['bootId', 'desktopSession'])
     && (value.epoch.bootId === null || text(value.epoch.bootId))
     && (value.epoch.desktopSession === null || text(value.epoch.desktopSession))
     && sameKeys(value.owner, ['pid', 'start']) && Number.isSafeInteger(value.owner.pid) && value.owner.pid > 0
     && typeof value.owner.start === 'string' && /^(0|[1-9][0-9]*)$/.test(value.owner.start)
-    && integer(value.writtenAt);
+    && integer(value.writtenAt) && typeof value.stopped === 'boolean'
+    && Array.isArray(value.crashedAt) && value.crashedAt.length <= CRASH_HISTORY_MAX
+    && value.crashedAt.every((at, i) => integer(at) && at <= value.writtenAt && at >= value.writtenAt - CRASH_WINDOW_MS
+      && (i === 0 || at >= value.crashedAt[i - 1]));
 }
 
 // The one health rule every consumer applies. A live identity that cannot be read is

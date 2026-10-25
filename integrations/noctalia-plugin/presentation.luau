@@ -19,6 +19,8 @@ P.DIAGNOSTIC_HINT = "Dismissing only hides this notice: the completion gate stay
 P.DND_UNKNOWN_LABEL = "Do Not Disturb status unknown — toasts and popups are not shown, and are not replayed later"
 
 P.HEALTH_STALE_MS = 10000
+P.CRASH_WINDOW_MS = 600000
+P.CRASH_HISTORY_MAX = 8
 P.HEALTH_GRACE_MS = 10000
 P.TOPOLOGY_STALE_MS = 2000
 P.ARRIVAL_MS = 300
@@ -68,18 +70,35 @@ local function onlyKeys(value: { [string]: any }, keys: { string }): boolean
     return true
 end
 
+-- A crash history is a list of at most CRASH_HISTORY_MAX non-decreasing counts inside the
+-- window ending at `writtenAt`. The JSON decoder hands back an empty list as an empty
+-- table, so that is accepted; any other table must be a proper array.
+local function validCrashes(crashed: any, writtenAt: number): boolean
+    if not isTable(crashed) then return false end
+    local length = 0
+    for _ in crashed do length += 1 end
+    if length > P.CRASH_HISTORY_MAX or length ~= #crashed then return false end
+    for i = 1, length do
+        local at = crashed[i]
+        if not isCount(at) or at > writtenAt or at < writtenAt - P.CRASH_WINDOW_MS then return false end
+        if i > 1 and at < crashed[i - 1] then return false end
+    end
+    return true
+end
+
 -- The health rule every consumer applies. A live identity that cannot be read is
 -- unknown and never matches a saved one.
 function P.healthStatus(health: any, live: { [string]: any }): string
     if health == nil then return "missing" end
-    if not isTable(health) or not onlyKeys(health, { "schema", "instanceId", "epoch", "owner", "writtenAt" })
-        or health.schema ~= 1 or not isText(health.instanceId) or #health.instanceId > 128
+    if not isTable(health) or not onlyKeys(health, { "schema", "instanceId", "epoch", "owner", "writtenAt", "stopped", "crashedAt" })
+        or health.schema ~= 2 or not isText(health.instanceId) or #health.instanceId > 128
         or not isTable(health.epoch) or not onlyKeys(health.epoch, { "bootId", "desktopSession" })
         or (health.epoch.bootId ~= nil and not isText(health.epoch.bootId))
         or (health.epoch.desktopSession ~= nil and not isText(health.epoch.desktopSession))
         or not isTable(health.owner) or not onlyKeys(health.owner, { "pid", "start" })
         or not isCount(health.owner.pid) or health.owner.pid <= 0 or not isDecimal(health.owner.start)
-        or not isCount(health.writtenAt) then
+        or not isCount(health.writtenAt) or type(health.stopped) ~= "boolean"
+        or not validCrashes(health.crashedAt, health.writtenAt) then
         return "invalid"
     end
     if health.writtenAt > live.now then return "invalid" end

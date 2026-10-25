@@ -59,11 +59,17 @@ test('parseAttention accepts the reducer state and rejects malformed or unknown 
 
 test('healthStatus is the same rule as the Node store', () => {
   const live = { now: 55_000, instanceId: 'c1', bootId: 'b1', desktopSession: '/s' };
-  const health = { schema: 1, instanceId: 'c1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 50_000 };
+  const health = { schema: 2, instanceId: 'c1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 50_000, stopped: false, crashedAt: [] };
   const cases = [
     [health, live], [null, live], [health, { ...live, now: 60_001 }], [{ ...health, writtenAt: 55_001 }, live],
-    [{ ...health, schema: 2 }, live], [health, { ...live, instanceId: 'c2' }], [health, { ...live, bootId: null }],
+    [health, { ...live, instanceId: 'c2' }], [health, { ...live, bootId: null }],
     [health, { ...live, desktopSession: '' }], [{ ...health, extra: 1 }, live],
+    [{ ...health, schema: 1 }, live], [{ ...health, schema: 3 }, live], [{ ...health, stopped: 'no' }, live],
+    [{ ...health, stopped: true }, live], [{ ...health, crashedAt: [10, 50_000] }, live], [{ ...health, crashedAt: [5, 4] }, live],
+    [{ ...health, crashedAt: [50_001] }, live], [{ ...health, crashedAt: [1.5] }, live], [{ ...health, crashedAt: [-1] }, live],
+    [{ ...health, crashedAt: Array.from({ length: 9 }, () => 1) }, live], [{ ...health, crashedAt: Array.from({ length: 8 }, () => 1) }, live],
+    [{ ...health, writtenAt: 700_000, crashedAt: [99_999] }, { ...live, now: 700_000 }],
+    [{ ...health, writtenAt: 700_000, crashedAt: [100_000, 700_000] }, { ...live, now: 700_000 }],
   ];
   for (const [record, options] of cases) assert.equal(L.healthStatus(record, options), nodeHealthStatus(record, options), JSON.stringify([record, options]));
 });
@@ -71,7 +77,7 @@ test('healthStatus is the same rule as the Node store', () => {
 test('viewOf reads health against the live boot and session, never the saved ones alone', () => {
   const { t } = scene();
   t.desktop({ focused: '1' });
-  const health = { schema: 1, instanceId: 'coordinator-1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 100 };
+  const health = { schema: 2, instanceId: 'coordinator-1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 100, stopped: false, crashedAt: [] };
   assert.equal(L.viewOf(t.state, JSON.stringify(health), { now: 200, bootId: 'b1', desktopSession: '/s' }).health.status, 'healthy');
   assert.equal(L.viewOf(t.state, JSON.stringify(health), { now: 200, bootId: 'b2', desktopSession: '/s' }).health.status, 'mismatched');
   assert.equal(L.viewOf(t.state, '', { now: 200, bootId: 'b1', desktopSession: '/s' }).health.status, 'missing');

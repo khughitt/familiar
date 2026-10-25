@@ -57,8 +57,8 @@ async function seed(paths, { health = true } = {}) {
   });
   if (health) {
     await writeHealth({ paths, health: {
-      schema: 1, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET },
-      owner: { pid: 77, start: '1' }, writtenAt: Date.now(),
+      schema: 2, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET },
+      owner: { pid: 77, start: '1' }, writtenAt: Date.now(), stopped: false, crashedAt: [],
     } });
   }
   const saved = await readAttention(paths);

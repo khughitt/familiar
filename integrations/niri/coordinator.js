@@ -212,7 +212,7 @@ async function lifetime({
     if (await pass.dndChanged() && exitCode === null) schedule();
   };
 
-  const beat = () => writeHealth({ paths, writeAtomic, health: { schema: 1, instanceId, epoch, owner, writtenAt: clock.now() } })
+  const beat = () => writeHealth({ paths, writeAtomic, health: { schema: 2, instanceId, epoch, owner, writtenAt: clock.now(), stopped: false, crashedAt: [] } })
     .catch((error) => log(`heartbeat: ${error.message}`));
 
   let chain = Promise.resolve();

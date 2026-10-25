@@ -43,7 +43,7 @@ const topologyAt = (writtenAt, rows = OUTPUTS, extra = {}) => ({
   ...reduceTopology(null, { WorkspacesChanged: { workspaces: rows } }, { now: writtenAt, instanceId: 'coordinator-1', epoch: EPOCH }),
   ...extra,
 });
-const healthAt = (writtenAt, extra = {}) => ({ schema: 1, instanceId: 'coordinator-1', epoch: EPOCH, owner: { pid: 77, start: '1' }, writtenAt, ...extra });
+const healthAt = (writtenAt, extra = {}) => ({ schema: 2, instanceId: 'coordinator-1', epoch: EPOCH, owner: { pid: 77, start: '1' }, writtenAt, stopped: false, crashedAt: [], ...extra });
 
 // A live desktop: an approval from codex root `a` on output B's workspace 21, a Claude
 // input on output A's 11, a Codex worker approval and a withheld completion on 11.
@@ -162,11 +162,18 @@ test('validateView accepts the real CLI status JSON with its nulls dropped, and 
 
 test('healthStatus in Luau is the Node rule', () => {
   const live = { now: 55_000, instanceId: 'c1', bootId: 'b1', desktopSession: '/s' };
-  const health = { schema: 1, instanceId: 'c1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 50_000 };
+  const health = { schema: 2, instanceId: 'c1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' }, writtenAt: 50_000, stopped: false, crashedAt: [] };
   const cases = [
     [health, live], [null, live], [health, { ...live, now: 60_001 }], [{ ...health, writtenAt: 55_001 }, live],
-    [{ ...health, schema: 2 }, live], [health, { ...live, instanceId: 'c2' }], [health, { ...live, bootId: null }],
+    [health, { ...live, instanceId: 'c2' }], [health, { ...live, bootId: null }],
     [{ ...health, extra: 1 }, live], [{ ...health, owner: { pid: 7, start: '01' } }, live],
+    [{ ...health, schema: 1 }, live], [{ ...health, schema: 3 }, live], [{ ...health, stopped: 'no' }, live],
+    [{ ...health, stopped: true }, live], [{ ...health, crashedAt: [10, 50_000] }, live], [{ ...health, crashedAt: [5, 4] }, live],
+    [{ ...health, crashedAt: [50_001] }, live], [{ ...health, crashedAt: [1.5] }, live], [{ ...health, crashedAt: [-1] }, live],
+    [{ ...health, crashedAt: Array.from({ length: 9 }, () => 1) }, live], [{ ...health, crashedAt: Array.from({ length: 8 }, () => 1) }, live],
+    [{ ...health, writtenAt: 700_000, crashedAt: [99_999] }, { ...live, now: 700_000 }],
+    [{ ...health, writtenAt: 700_000, crashedAt: [100_000, 700_000] }, { ...live, now: 700_000 }],
+    [{ ...health, crashedAt: { a: 1 } }, live],
   ];
   const expected = cases.map(([record, options]) => nodeHealthStatus(record, options));
   const [actual] = out(runLuau(`

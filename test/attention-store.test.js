@@ -15,7 +15,8 @@ const BOOT = '11111111-1111-4111-8111-111111111111';
 const SOCKET = '/run/user/1000/niri.wayland-1.sock';
 const epoch = { bootId: BOOT, desktopSession: SOCKET };
 const health = (extra = {}) => ({
-  schema: 1, instanceId: 'coordinator-1', epoch, owner: { pid: 77, start: '123' }, writtenAt: 50_000, ...extra,
+  schema: 2, instanceId: 'coordinator-1', epoch, owner: { pid: 77, start: '123' }, writtenAt: 50_000,
+  stopped: false, crashedAt: [], ...extra,
 });
 
 async function fixture(t) {
@@ -142,7 +143,7 @@ test('healthStatus distinguishes healthy, missing, stale, invalid and mismatched
   assert.equal(healthStatus(health(), { ...live, now: 60_000 }), 'healthy');
   assert.equal(healthStatus(health(), { ...live, now: 60_001 }), 'stale');
   assert.equal(healthStatus(health({ writtenAt: 55_001 }), live), 'invalid');
-  assert.equal(healthStatus({ ...health(), schema: 2 }, live), 'invalid');
+  assert.equal(healthStatus({ ...health(), schema: 3 }, live), 'invalid');
   assert.equal(healthStatus({ ...health(), extra: 1 }, live), 'invalid');
   assert.equal(healthStatus(health(), { ...live, instanceId: 'coordinator-2' }), 'mismatched');
   assert.equal(healthStatus(health(), { ...live, bootId: '22222222-2222-4222-8222-222222222222' }), 'mismatched');
@@ -151,6 +152,24 @@ test('healthStatus distinguishes healthy, missing, stale, invalid and mismatched
   assert.equal(healthStatus(health(), { ...live, bootId: null }), 'mismatched');
   assert.equal(healthStatus(health({ epoch: { bootId: BOOT, desktopSession: null } }), { ...live, desktopSession: null }), 'mismatched');
   assert.equal(healthStatus(health(), { now: 55_000, ...epoch }), 'healthy');
+});
+
+test('schema-2 health validity: keys, stopped, crashedAt bounds and order', () => {
+  const live = { now: 55_000, instanceId: 'coordinator-1', ...epoch };
+  const W = 700_000;
+  const at = (extra) => healthStatus(health({ writtenAt: W, ...extra }), { ...live, now: W });
+  assert.equal(healthStatus(health({ schema: 1 }), live), 'invalid');
+  const { stopped, ...noStopped } = health();
+  assert.equal(healthStatus(noStopped, live), 'invalid');
+  assert.equal(at({ stopped: 'no' }), 'invalid');
+  assert.equal(at({ crashedAt: Array.from({ length: 9 }, () => W) }), 'invalid');
+  assert.equal(at({ crashedAt: [W - 4, W - 5] }), 'invalid');
+  assert.equal(at({ crashedAt: [W + 1] }), 'invalid');
+  assert.equal(at({ crashedAt: [W - 600_001] }), 'invalid');
+  assert.equal(at({ crashedAt: [W - 1.5] }), 'invalid');
+  assert.equal(healthStatus(health({ writtenAt: 5, crashedAt: [-1] }), { ...live, now: 5 }), 'invalid');
+  assert.equal(at({ crashedAt: [W - 600_000, W] }), 'healthy');
+  assert.equal(at({ stopped: true }), 'healthy');
 });
 
 test('a heartbeat write takes no presentation lock and changes no attention revision', async (t) => {
