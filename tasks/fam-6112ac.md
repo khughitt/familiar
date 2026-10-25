@@ -6,9 +6,9 @@ priority: 3
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/relay-cutover
 created: 2026-10-25T01:01:07Z
-updated: 2026-10-25T02:05:00Z
+updated: 2026-10-25T02:05:27Z
 started: 2026-10-25T02:05:00Z
 depends: []
 tags: [docs]
@@ -22,4 +22,6 @@ docs/install.md explains installing relay Codex hooks and Familiar pets but omit
 
 - 2026-10-25T01:01:16Z (main): concerns: fam-ac775c extension — document the existing shared-daemon limitation and --no-daemon remedy in the operator setup guide.
 - 2026-10-25T02:05:00Z (main): started
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:05:27Z (docs/relay-cutover): resumed
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}

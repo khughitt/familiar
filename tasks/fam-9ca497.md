@@ -6,9 +6,9 @@ priority: 3
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/relay-cutover
 created: 2026-10-25T01:01:24Z
-updated: 2026-10-25T02:04:50Z
+updated: 2026-10-25T02:05:25Z
 started: 2026-10-25T02:04:50Z
 depends: []
 tags: [docs]
@@ -21,4 +21,6 @@ Only the self-date was judged; the document body was outside this pass's 800-lin
 ## Notes
 
 - 2026-10-25T02:04:50Z (main): started
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:05:25Z (docs/relay-cutover): resumed
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
