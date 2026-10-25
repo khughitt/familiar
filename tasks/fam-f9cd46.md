@@ -1,17 +1,15 @@
 ---
 id: fam-f9cd46
 title: Reference docs and runbook
-status: done
+status: todo
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: feat/attention-health
 created: 2026-10-25T00:19:58Z
-updated: 2026-10-25T01:37:32Z
+updated: 2026-10-25T01:46:20Z
 started: 2026-10-25T01:29:32Z
-completed: 2026-10-25T01:37:32Z
-closed: 2026-10-25T01:37:32Z
 depends: []
 parent: fam-8c5e1c
 tags: [attention]
