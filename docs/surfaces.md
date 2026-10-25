@@ -17,10 +17,10 @@ have since been fixed but not yet re-tested on hardware.
 
 | surface | state source | current contract |
 | --- | --- | --- |
-| terminal | Familiar hooks | Kitty-graphics-capable terminals receive the current full-colour image. |
-| Claude Code | Claude Code hooks and `statusLine` | The status line owns the cells; hooks replace the image beneath them on state changes. |
+| terminal | Relay lifecycle events through `familiar observe` | Kitty-graphics-capable terminals receive the current full-colour image. |
+| Claude Code | Relay lifecycle hooks and `familiar statusline` | The status line owns the cells; Familiar's observer replaces the image beneath them on state changes. |
 | Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
-| OpenCode | Familiar server and TUI plugins | The plugins render the full-colour graphic and publish intent for desktop moments. |
+| OpenCode | Relay server plugin and Familiar TUI plugin | Relay supplies lifecycle events; Familiar's observer publishes presentation state and its TUI plugin draws the full-colour graphic. |
 | Niri desktop moments | `attention.json` | `integrations/niri-desktop` plays one click-through moment per reserved input, approval, error or finished-turn episode on the focused output. |
 | Noctalia workspace pills | `attention.json`, `niri-workspaces.json` | `integrations/noctalia-plugin` marks each workspace with its agents' attention and dismisses it on request (`docs/attention.md`). |
 | Niri window signals | `intent.json` | `familiar-niri watch` lights each terminal's niri-material glass in its session's identity hue. |
@@ -31,9 +31,10 @@ used by terminal, status-line, Codex, OpenCode, and desktop surfaces.
 ## Terminal and status-line ownership
 
 Graphics must be placed in cells the frontend owns. Claude Code's status line is the
-supported surface because it lays out and repaints those cells itself. Familiar's hook
-transmits a changed pose without printing cells; `familiar statusline` prints the
-stable cell box. This keeps graphics out of transcript content and lets a state change
+supported surface because it lays out and repaints those cells itself. Relay invokes
+`familiar observe`, which transmits a changed pose without printing cells;
+`familiar statusline` prints the stable cell box. This keeps graphics out of
+transcript content and lets a state change
 replace the image in place.
 
 Kitty and Ghostty support the same graphics protocol. Inside tmux, familiar asks the
@@ -52,8 +53,8 @@ addressed.
 
 Codex provides its own pet renderer. Familiar installs one pet per current theme
 member and supplies the full-colour spritesheet; Codex drives the visible pet from
-its own state. Familiar's Codex hooks still publish lifecycle state for the shared
-intent, but they do not draw the pet.
+its own state. Relay owns Codex's lifecycle hooks and invokes `familiar observe`
+to update Familiar's shared intent. Codex alone draws the pet.
 
 ### Project-specific selection
 
@@ -69,9 +70,12 @@ Familiar writes one stable `custom:familiar-<member>` pet id per theme member.
 sheet it compiled so a later session can tell whether the art belongs to the
 active theme.
 
-The project's selection is then **maintained automatically**. The Codex
-`SessionStart` hook compares the member it resolved against the repository's
-managed `.codex/config.toml` and rewrites that one file when they disagree.
+The project's selection is then **maintained automatically**, with
+[relay hooks and terminal ownership](install.md#codex-lifecycle-hooks) set up;
+daemon-hosted hooks require launching `codex --no-daemon`. On relay's Codex
+`session-start` event, `familiar observe` compares the member it resolved against
+the repository's managed `.codex/config.toml` and rewrites that one file when
+they disagree.
 
 In a Git worktree that file is the worktree's own, never the main checkout's,
 and the member is the one its repository's pins choose: a worktree inherits the
@@ -81,7 +85,7 @@ The `.codex/config.toml` exclusion lives in the repository's shared
 `info/exclude`, written once for all worktrees.
 
 **A change takes effect on the next launch, not the current one.** Codex reads
-`[tui] pet` when its TUI starts, and no Familiar hook runs before the first turn
+`[tui] pet` when its TUI starts, and its `SessionStart` hook arrives only at the first turn
 — measured on Codex 0.153.4, see
 `docs/specs/2026-09-05-codex-identity-parity-design.md` §6.1. So the first Codex
 session in a new repository still shows the previous selection, and a session
@@ -120,9 +124,14 @@ updates since 2026-08-03.
 
 ## OpenCode
 
-OpenCode uses two plugins. Its server plugin turns OpenCode events into Familiar
-lifecycle updates, while its TUI plugin draws the full-colour graphic. The install
-command writes both registrations and leaves unrelated plugin entries intact.
+OpenCode uses relay's server plugin for lifecycle events and Familiar's TUI plugin
+for the full-colour graphic. Relay invokes `familiar observe` to derive Familiar's
+presentation state from its registry; the TUI renderer reads `intent.json`.
+`relay install --harness opencode` installs the server plugin, while
+`familiar install opencode` registers only the TUI renderer and removes Familiar's
+retired server entry when ownership is verifiable. Unrelated entries are preserved;
+JSONC configurations and unverifiable entries need manual edits as described in
+the [OpenCode setup](install.md#opencode).
 
 ## Niri integrations
 
