@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:01:07Z
-updated: 2026-10-25T02:11:52Z
+updated: 2026-10-25T02:12:57Z
 started: 2026-10-25T02:05:00Z
 completed: 2026-10-25T02:11:52Z
 closed: 2026-10-25T02:11:52Z
@@ -37,3 +37,4 @@ docs/install.md explains installing relay Codex hooks and Familiar pets but omit
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T02:11:52Z (docs/relay-cutover): Documented the conditional codex --no-daemon prerequisite and linked selection guidance while preserving native rendering independence.
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:12:57Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/docs-relay-cutover","state":"released","verification":"verified","purpose":"Merged locally into main at 7a8088e; post-merge just check passed and all non-task files match the tested branch. tt-report ran; Git clean, no submodules or host pointers. Discarded regenerable node_modules; full review and ledger preserved in verified task attachments. Worktree and merged branch removed.","next_owner":"none","cleanup_trigger":"none"}
