@@ -187,12 +187,26 @@ one toast:
 Record each result on fam-9c8dd1 and ops-e40874. A duplicate native and familiar toast,
 a missed request marker, or an undetected dead coordinator fails acceptance.
 
-## Upgrade: the crash history (approval: "restart the attention coordinator, plugin and popup")
+## Upgrade: the crash history (approval: "restart the attention coordinator, the Noctalia shell and the popup")
 
 Merging the crash history changes the heartbeat to schema 2. Old readers reject it and
 new readers reject schema 1, so the merge is an activation step: run the following
 right after it, under that one approval. The CLI switches as soon as main changes; the
 running coordinator, plugin and popup keep their loaded code until restarted.
+
+Niri starts the watcher, Noctalia and the popup itself (`spawn-at-startup` and
+`spawn-sh-at-startup` in its config). Relaunch each through Niri, so it lands in the
+same scope with the same environment as at startup rather than in this terminal's
+scope, and wait for the old process to exit first. The shell helper below stops a pid
+and waits up to 10 s for it to be gone; define it once in the shell you run these in:
+
+```sh
+stop_and_wait() {  # stop_and_wait <pid>
+  kill "$1"
+  for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
+  echo "pid $1 still running after 10 s" >&2; return 1
+}
+```
 
 1. Restart the coordinator. Where the `familiar-attention` unit exists:
 
@@ -200,32 +214,31 @@ running coordinator, plugin and popup keep their loaded code until restarted.
    systemctl --user restart familiar-attention
    ```
 
-   Where only the Niri-started watcher runs, take its pid, kill that pid, and relaunch
-   it with the restore line from the Rollback section (a SIGTERM is now a clean stop
-   that nothing restarts):
+   Where only the Niri-started watcher runs (a SIGTERM is now a clean stop that nothing
+   restarts), stop it and relaunch it through Niri:
 
    ```sh
-   pgrep -f '[f]amiliar-niri watch'
-   kill <pid>
-   ~/d/familiar/bin/familiar-niri watch </dev/null >/dev/null 2>&1 &
+   stop_and_wait "$(pgrep -f '[f]amiliar-niri watch')"
+   niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
    ```
 
 2. Reload the plugin. Noctalia 5.3 has no plugin reload command: `noctalia msg` offers
    `plugin` (dispatches an event to an entry) and `plugins` (list, enable, disable,
-   update, source), and no reload. Restart Noctalia instead, which redraws the whole
-   bar. Stop it and start it again; the new process inherits this shell's environment,
-   so check that its `PATH` resolves `familiar` as in the preflight check above:
+   update, source), and no reload. Restart Noctalia instead. This restarts the whole
+   shell, not only the plugin: the bar, the notification daemon and the panels are
+   absent for a moment, and notifications pending at that moment may be lost. Stop it
+   and relaunch it through Niri:
 
    ```sh
-   kill "$(pgrep -xo noctalia)"
-   noctalia -d </dev/null >/dev/null 2>&1
+   stop_and_wait "$(pgrep -xo noctalia)"
+   niri msg action spawn -- noctalia
    ```
 
-3. Restart the popup, as in step 6:
+3. Restart the popup, as in step 6, the same way:
 
    ```sh
-   pkill -f '[q]s -d -p .*/integrations/niri-desktop'
-   qs -d -p ~/d/familiar/integrations/niri-desktop
+   stop_and_wait "$(pgrep -f '[q]s -d -p .*/integrations/niri-desktop')"
+   niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
    ```
 
 Two windows are transient. From the merge until the coordinator restarts, the old
