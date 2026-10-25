@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/attention-health
 created: 2026-10-24T21:32:07Z
-updated: 2026-10-25T01:50:57Z
+updated: 2026-10-25T02:01:51Z
 started: 2026-10-24T21:41:33Z
 depends: [fam-9c8dd1]
 tags: [attention]
@@ -40,3 +40,4 @@ Final review round 3 of fam-9c8dd1 found that a familiar-niri watch coordinator 
 - 2026-10-25T00:27:05Z (feat/attention-health): plan accepted at 3d6da97; executing subagent-driven (own call: interacting interfaces and timing races justify per-task review)
 - 2026-10-25T01:45:43Z (feat/attention-health): review: impl round 1 — verdict: revise; findings: Minor 6; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T01:50:57Z (feat/attention-health): review: impl round 2 — verdict: accept; findings: Minor 2; reviewer: claude-code/claude-opus-5-5
+- 2026-10-25T02:01:51Z (feat/attention-health): attached: sdd-ledger.md (9254 bytes): SDD ledger: pre-flight scan, per-task reviews, rulings and deferred minors for the crash-history plan
