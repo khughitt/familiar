@@ -676,7 +676,8 @@ plan must provide tests for:
   notice, DND, flap limiting, stale heartbeat after reboot, and successful recovery;
 - crash history: extended across an unclean restart, not extended across a clean
   stop (including SIGTERM and SIGINT to a real process group with a real child,
-  asserting exit 0 and `stopped: true`), reset by a schema-1, invalid or
+  asserting exit 0 and `stopped: true`; a signal to the child alone exits 1; a stop
+  during recovery exits 0 with no heartbeat), reset by a schema-1, invalid or
   other-epoch record, bounded, pruned at ten minutes and normalised across a
   backward clock step; unstable at two crashes and cleared as they age out; one
   notice per unstable episode across restarts, DND-checked and sharing the flap
