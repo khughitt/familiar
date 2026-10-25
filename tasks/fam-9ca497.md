@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:01:24Z
-updated: 2026-10-25T02:11:50Z
+updated: 2026-10-25T02:12:52Z
 started: 2026-10-25T02:04:50Z
 completed: 2026-10-25T02:11:50Z
 closed: 2026-10-25T02:11:50Z
@@ -36,3 +36,4 @@ Only the self-date was judged; the document body was outside this pass's 800-lin
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T02:11:50Z (docs/relay-cutover): Removed the misleading whole-reference self-date without asserting the graphics reference body is current.
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:12:52Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/docs-relay-cutover","state":"released","verification":"verified","purpose":"Merged locally into main at 7a8088e; post-merge just check passed and all non-task files match the tested branch. tt-report ran; Git clean, no submodules or host pointers. Discarded regenerable node_modules; full review and ledger preserved in verified task attachments. Worktree and merged branch removed.","next_owner":"none","cleanup_trigger":"none"}
