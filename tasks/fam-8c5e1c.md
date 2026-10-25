@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/attention-health
 created: 2026-10-24T21:32:07Z
-updated: 2026-10-25T02:01:55Z
+updated: 2026-10-25T02:03:54Z
 started: 2026-10-24T21:41:33Z
 completed: 2026-10-25T02:01:55Z
 closed: 2026-10-25T02:01:55Z
@@ -47,3 +47,4 @@ Final review round 3 of fam-9c8dd1 found that a familiar-niri watch coordinator 
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T02:01:55Z (feat/attention-health): heartbeat schema 2 with a crash history; bar warns 'unstable' at 2 crashes in 10 min without changing gates; clean group stops not counted; docs and upgrade runbook
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T02:03:54Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/attention-health","state":"released","verification":"verified","purpose":"removed after merge 7143e04; ignored node_modules (regenerable) and .superpowers/sdd plan workspace (ledger attached as sdd-ledger.md, sha256 matched) discarded; tt-report run; no host pointer resolved into it","next_owner":"none","cleanup_trigger":"none"}
