@@ -7,7 +7,7 @@ size: xs
 complexity: low
 process: direct
 created: 2026-10-24T21:32:13Z
-updated: 2026-10-24T23:47:37Z
+updated: 2026-10-25T02:04:05Z
 depends: [fam-9c8dd1]
 tags: [attention, docs]
 agent: claude-code/claude-opus-5-5
@@ -18,3 +18,4 @@ docs/runbooks/desktop-attention-rollout.md from fam-9c8dd1: make step 3's popup 
 ## Notes
 
 - 2026-10-24T23:47:37Z (feat/attention-health): fam-8c5e1c (feat/attention-health) rewrites the runbook's start-limit paragraph and switches the kill check to SIGKILL; leave those two items to it
+- 2026-10-25T02:04:05Z (main): runbook upgrade step (from fam-8c5e1c): when its lines are run together as one script (bash -c), pgrep -f '[f]amiliar-niri watch' and the qs pattern also match that shell, whose own command line holds the spawn-sh text; stop_and_wait correctly refused the two-pid result. Interactive shells are unaffected. Consider pgrep -x by process name plus an argv check, or capture pids in a separate step.
