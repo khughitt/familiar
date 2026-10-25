@@ -23,6 +23,11 @@ const DEBOUNCE_MS = 100;
 const FRESHNESS_MS = 1000;
 const HEARTBEAT_MS = 2000;
 const WINDOWS_TIMEOUT_MS = 2000;
+// After the event stream's lines end: how long its child may take to report its close,
+// and, when a signal the coordinator did not send killed it, how long the coordinator's
+// own stop signal may take to follow (a group stop signals both at once).
+const STREAM_CLOSE_MS = 1000;
+const STOP_SIGNAL_MS = 1000;
 
 const SUMMARY = {
   'needs-input': 'Agent needs input',
@@ -291,6 +296,14 @@ async function lifetime({
     run(resync);
 
     const stream = eventStream();
+    // Set once the coordinator closes the stream itself, so a signal it sent is never
+    // taken for a stop from outside.
+    let closedStream = false;
+    const closeStream = () => {
+      closedStream = true;
+      stream.close();
+    };
+    let streamTimer = null;
     const consumed = (async () => {
       for await (const line of stream.lines) {
         if (exitCode !== null) return null;
@@ -307,7 +320,7 @@ async function lifetime({
             feed.publish(topology);
           }
         } catch (error) {
-          return error.message;
+          return { failure: error.message };
         }
         const activated = event.WorkspaceActivated;
         if (activated?.focused === true) {
@@ -315,20 +328,55 @@ async function lifetime({
         }
         if (shouldResync(event)) schedule();
       }
-      return 'niri event stream closed';
+      return { failure: null };
     })();
-    consumed.then((reason) => {
-      if (reason === null || exitCode !== null) return;
-      log(reason);
+    // The lines end before the child's `close` reports how it ended. A child killed by a
+    // SIGTERM or SIGINT the coordinator did not send is most likely a group stop whose
+    // signal to this process is still on its way: that stop is clean. Every other end
+    // is a failure, left to supervision.
+    const streamEnded = async () => {
+      const how = await Promise.race([stream.ended, new Promise((resolve) => {
+        streamTimer = clock.setTimeout(() => resolve(null), STREAM_CLOSE_MS);
+      })]);
+      clock.clearTimeout(streamTimer);
+      streamTimer = null;
+      if (exitCode !== null) return;
+      if (how === null) {
+        log(`niri event stream closed but its process was still running after ${STREAM_CLOSE_MS} ms`);
+        closeStream();
+        stop(1);
+        return;
+      }
+      const { code, signal } = how;
+      if (!closedStream && (signal === 'SIGTERM' || signal === 'SIGINT')) {
+        streamTimer = clock.setTimeout(() => {
+          streamTimer = null;
+          log(`niri event stream killed by ${signal}, and no stop signal followed within ${STOP_SIGNAL_MS} ms`);
+          stop(1);
+        }, STOP_SIGNAL_MS);
+        return;
+      }
+      const end = signal !== null ? `killed by ${signal}` : code !== null ? `exit code ${code}` : 'spawn error';
+      log(`niri event stream closed (${end})`);
       stop(1);
+    };
+    consumed.then((result) => {
+      if (result === null || exitCode !== null) return;
+      if (result.failure !== null) {
+        log(result.failure);
+        stop(1);
+        return;
+      }
+      streamEnded();
     });
 
     await done;
     clock.clearInterval(heartbeat);
     clock.clearInterval(freshness);
     clock.clearTimeout(pending);
+    clock.clearTimeout(streamTimer);
     watcher.close();
-    stream.close();
+    closeStream();
     unregister();
     // A heartbeat already started lands before anything that follows, so it can never
     // replace the final record.

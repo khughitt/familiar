@@ -61,16 +61,26 @@ function fakeClock(settle) {
   };
 }
 
-// A pushable stand-in for `niri msg -j event-stream`.
+// A pushable stand-in for `niri msg -j event-stream`. Its lines can end in four ways,
+// each with the `ended` the child's `close` event would give: `end()` is the compositor
+// going away (exit 1), `close()` the coordinator's own SIGTERM, `endBy(signal)` a signal
+// someone else sent (`endBy(null)` is a spawn error), and `hang()` a child that closed
+// its output but never exits.
 function fakeStream() {
   const queue = [];
   let wake = null;
   let ended = false;
+  let finish;
+  const finished = new Promise((resolve) => { finish = resolve; });
+  const endLines = () => { ended = true; wake?.(); };
   const stream = {
     closed: false,
+    ended: finished,
     push(event) { queue.push(JSON.stringify(event)); wake?.(); },
-    end() { ended = true; wake?.(); },
-    close() { stream.closed = true; ended = true; wake?.(); },
+    end() { endLines(); finish({ code: 1, signal: null }); },
+    endBy(signal) { endLines(); finish({ code: null, signal }); },
+    hang() { endLines(); },
+    close() { stream.closed = true; endLines(); finish({ code: null, signal: 'SIGTERM' }); },
     lines: {
       async *[Symbol.asyncIterator]() {
         for (;;) {
@@ -300,6 +310,64 @@ test('a compositor disconnect publishes a disconnected feed and exits nonzero fo
   assert.equal(h.watcher().closed, true);
   assert.equal(h.clock.pending(), 0);
   assert.match(h.stderr(), /event stream closed/);
+});
+
+// Whether the run has not yet stopped after `ms` more of fake time, counted from once
+// what the test just did has been consumed. A stop closes the watcher at once, before
+// the exit's own writes, so this reads the stop itself.
+const runningAfter = async (h, ms) => {
+  await h.settle();
+  await h.clock.advance(ms);
+  return !h.watcher().closed;
+};
+
+test('a child stopped by the group signal before ours is a clean stop', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.endBy('SIGTERM');
+  assert.equal(await runningAfter(h, 500), true);
+  h.signals.emit('SIGTERM');
+  assert.equal(await h.exit(), 0);
+  assert.equal((await readHealthFile(h)).stopped, true);
+  assert.equal(h.clock.pending(), 0);
+  assert.equal(h.signals.count(), 0);
+});
+
+test('a child signalled alone exits 1 after a second', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.endBy('SIGTERM');
+  assert.equal(await runningAfter(h, 999), true);
+  assert.equal(await runningAfter(h, 1), false);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
+});
+
+test('a child that closes its output but stays alive is a stream failure', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.hang();
+  assert.equal(await runningAfter(h, 999), true);
+  assert.equal(h.stream.closed, false);
+  assert.equal(await runningAfter(h, 1), false);
+  assert.equal(h.stream.closed, true);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
+});
+
+test('a spawn error ends the stream as a failure', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  // What a spawn error resolves `ended` with: neither an exit code nor a signal.
+  h.stream.endBy(null);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
 });
 
 test('a workspace delta before the full snapshot fails the stream rather than guessing', async (t) => {

@@ -86,13 +86,22 @@ const clock = {
   clearInterval: (id) => clearInterval(id),
 };
 
-// Niri's event stream as lines; closing it reaps the child.
+// Niri's event stream as lines; closing it reaps the child. `ended` says how the child
+// ended, from its `close` event, which comes after the lines end; a spawn error is an
+// end with neither an exit code nor a signal.
 function eventStream() {
   const child = spawn('niri', ['msg', '-j', 'event-stream'], { stdio: ['ignore', 'pipe', 'inherit'] });
-  child.on('error', (error) => process.stderr.write(`niri event stream: ${error.message}\n`));
+  const ended = new Promise((resolve) => {
+    child.on('error', (error) => {
+      process.stderr.write(`niri event stream: ${error.message}\n`);
+      resolve({ code: null, signal: null });
+    });
+    child.on('close', (code, signal) => resolve({ code, signal }));
+  });
   return {
     lines: createInterface({ input: child.stdout }),
     close: () => child.kill('SIGTERM'),
+    ended,
   };
 }
 
