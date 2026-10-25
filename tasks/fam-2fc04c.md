@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:00:20Z
-updated: 2026-10-25T02:10:35Z
+updated: 2026-10-25T02:10:57Z
 started: 2026-10-25T02:05:03Z
 depends: []
 tags: [docs]
@@ -27,3 +27,4 @@ docs/surfaces.md still lists Familiar hooks and a Familiar OpenCode server plugi
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T02:07:19Z (docs/relay-cutover): Verified src/install/setup.js, src/install/opencode.js and src/observe/run.js: relay owns hooks/server lifecycle; familiar observe owns presentation and Codex convergence; Familiar installs only the OpenCode TUI renderer and removes verified retired server entries. Preserve platform/tmux limits. Shared worktree .worktrees/docs-relay-cutover; baseline just test: 1341 passed, 5 skipped, zero failures. No test-one recipe: use just test-fast for the existing documentation-reading CLI test.
 - 2026-10-25T02:10:35Z (docs/relay-cutover): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T02:10:57Z (docs/relay-cutover): attached: docs-review-report.md (2867 bytes): Read-only whole-branch review of fc1043d; codex/gpt-6.1-sol accepted with no findings
