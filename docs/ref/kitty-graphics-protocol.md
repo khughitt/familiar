@@ -1,6 +1,6 @@
 # Kitty graphics protocol
 
-A concise engineering reference for familiar. Current as of 2026-07-17.
+A concise engineering reference for familiar.
 
 ## Rule of thumb
 

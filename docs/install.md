@@ -151,6 +151,16 @@ create its parent directory and an empty JSON object before planning. Codex asks
 for a one-time trust confirmation before it runs hooks. Codex draws its own pet,
 so it has no status line entry — see Codex pets below for the art.
 
+When hooks run under Codex's shared app-server daemon (observed with Codex
+0.160.1), launch the TUI with `codex --no-daemon`. The daemon has no owning
+session terminal in its ancestor chain, so Familiar's observer cannot attribute
+terminal presentation or converge the project's pet selection. Disabling daemon
+auto-start alone does not detach a TUI from an already-running daemon.
+
+This launch requirement applies to Familiar's presentation and automatic project
+selection. Codex's native pet renderer works independently, using the installed
+art and `[tui] pet` setting described [below](#codex-pets).
+
 ## Project identity and Git worktrees
 
 A registered project's colour chooses its familiar as described below. Without
@@ -225,11 +235,11 @@ Run it from inside the project you want a pet in. Codex draws nothing until a
 what a fresh `familiar theme add` leaves — the current repository is the only
 thing to select, and this is what selects it.
 
-Compiling the pets is a prerequisite, not a convenience: after the first
-`install pets`, a Codex session maintains its own project's selection from its
-first turn onward, but it will refuse to select a member whose pet has not been
-compiled for the active theme, and say so. Re-run `familiar install pets` after
-switching themes.
+Compiling the pets is a prerequisite, not a convenience. After the first
+`install pets`, the [relay lifecycle setup](#codex-lifecycle-hooks) lets Familiar's
+observer maintain a Codex session's project selection from its first turn onward.
+It refuses to select a member whose pet has not been compiled for the active
+theme, and says so. Re-run `familiar install pets` after switching themes.
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. In a Git worktree the config is written in that worktree

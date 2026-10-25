@@ -1,15 +1,17 @@
 ---
 id: fam-2fc04c
 title: Update surface ownership after the relay cutover
-status: doing
+status: done
 priority: 3
 size: xs
 complexity: low
 process: direct
-owner: main
+owner: docs/relay-cutover
 created: 2026-10-25T01:00:20Z
-updated: 2026-10-25T02:05:03Z
+updated: 2026-10-25T02:11:54Z
 started: 2026-10-25T02:05:03Z
+completed: 2026-10-25T02:11:54Z
+closed: 2026-10-25T02:11:54Z
 depends: []
 tags: [docs]
 source: fam-3f208e
@@ -22,4 +24,16 @@ docs/surfaces.md still lists Familiar hooks and a Familiar OpenCode server plugi
 
 - 2026-10-25T01:00:31Z (main): concerns: fam-6e8321 defect — the landed relay cutover left the current surface guide assigning hooks and the OpenCode server plugin to Familiar.
 - 2026-10-25T02:05:03Z (main): started
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:05:30Z (docs/relay-cutover): resumed
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:07:19Z (docs/relay-cutover): Verified src/install/setup.js, src/install/opencode.js and src/observe/run.js: relay owns hooks/server lifecycle; familiar observe owns presentation and Codex convergence; Familiar installs only the OpenCode TUI renderer and removes verified retired server entries. Preserve platform/tmux limits. Shared worktree .worktrees/docs-relay-cutover; baseline just test: 1341 passed, 5 skipped, zero failures. No test-one recipe: use just test-fast for the existing documentation-reading CLI test.
+- 2026-10-25T02:10:35Z (docs/relay-cutover): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
+- 2026-10-25T02:10:57Z (docs/relay-cutover): attached: docs-review-report.md (2867 bytes): Read-only whole-branch review of fc1043d; codex/gpt-6.1-sol accepted with no findings
+- 2026-10-25T02:10:59Z (docs/relay-cutover): attached: review-ledger.md (1147 bytes): Controller rulings on the three review scope exclusions; no deferred minors
+- 2026-10-25T02:11:47Z (docs/relay-cutover): Verification: post-edit just test-fast ran 1336 tests (1331 passed, 5 skipped), including the documentation-reading CLI test; just check, tasks check and git diff --check passed with zero warnings. Full baseline just test also passed (1331 fast plus 10 slow passed, 5 skipped). Full review and scope rulings attached and byte-verified; temporary review workspace copies removed. No task scratch or off-tree evidence retained.
+- 2026-10-25T02:11:49Z (docs/relay-cutover): retained: {"host":"titan","kind":"worktree","path":".worktrees/docs-relay-cutover","state":"kept","verification":"verified","purpose":"Immediate local merge to main and checked removal in this closing session; ignored node_modules is regenerable, review report and ledger are attached to all three tasks","next_owner":"session:codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","cleanup_trigger":"After local merge succeeds, verify clean Git state and no host pointers, then remove this worktree in the current turn"}
+- 2026-10-25T02:11:54Z (docs/relay-cutover): done
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:11:54Z (docs/relay-cutover): Aligned surface ownership and OpenCode installation with relay lifecycle events and Familiar observers; preserved rendering and platform limits.
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
