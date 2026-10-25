@@ -1,17 +1,15 @@
 ---
 id: fam-bdc129
 title: "Coordinator crash history, final record and early signal handling"
-status: done
+status: todo
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: feat/attention-health
 created: 2026-10-25T00:19:54Z
-updated: 2026-10-25T00:48:12Z
+updated: 2026-10-25T01:46:17Z
 started: 2026-10-25T00:32:11Z
-completed: 2026-10-25T00:48:12Z
-closed: 2026-10-25T00:48:12Z
 depends: []
 parent: fam-8c5e1c
 tags: [attention]
