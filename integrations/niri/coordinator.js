@@ -9,7 +9,9 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { reduceAttention } from '../../src/attention/model.js';
-import { mutateAttention, readAttention, writeHealth } from '../../src/attention/store.js';
+import {
+  carriedCrashes, mutateAttention, normaliseCrashes, readAttention, readHealthRecord, writeHealth,
+} from '../../src/attention/store.js';
 import { readJson, writeJsonAtomic } from '../../src/bus/store.js';
 import { withLock } from '../../src/bus/lock.js';
 import { readDnd, sendToast } from '../noctalia/adapter.js';
@@ -163,6 +165,8 @@ function attentionPass({ paths, execFile, lockWith, loadContext, relay, clock, i
 const recover = ({ paths, lockWith, instanceId, clock }) => mutateAttention({ paths, lockWith }, async (state) => reduceAttention(state, {
   type: 'recover', instanceId, ids: queuedIds(state), now: clock.now(),
 }));
+// What a start gave up, so the journal shows what each crash cost.
+const recovered = ({ result }) => `recover: suppressed ${result.suppressedIds.length} queued, ${result.uncertainIds.length} uncertain`;
 
 const SINGLETON = { staleMs: Infinity, retries: 1 };
 const refused = (error) => /could not acquire lock/.test(error.message);
@@ -191,8 +195,6 @@ async function lifetime({
 }) {
   const log = (message) => stderr.write(`familiar-niri: ${message}\n`);
   const epoch = liveEpoch();
-  const feed = createLatestWriter({ path: niriWorkspacesPath(paths), writeAtomic, onError: (error) => log(`workspace feed: ${error.message}`) });
-  let topology = null;
   let exitCode = null;
   let finished;
   const done = new Promise((resolve) => { finished = resolve; });
@@ -201,113 +203,153 @@ async function lifetime({
     exitCode = code;
     finished();
   };
-  const mutate = (fn) => mutateAttention({ paths, lockWith }, fn);
-  await recover({ paths, lockWith, instanceId, clock });
-  const pass = attentionPass({
-    paths, execFile, lockWith, loadContext, relay, clock, instanceId, log, syncWindows,
-    topology: () => topology, stopped: () => exitCode !== null,
-  });
-  const resync = pass.resync;
-  const pollDnd = async () => {
-    if (await pass.dndChanged() && exitCode === null) schedule();
-  };
-
-  const beat = () => writeHealth({ paths, writeAtomic, health: { schema: 2, instanceId, epoch, owner, writtenAt: clock.now(), stopped: false, crashedAt: [] } })
-    .catch((error) => log(`heartbeat: ${error.message}`));
-
-  let chain = Promise.resolve();
-  let pending = null;
-  const run = (task) => {
-    chain = chain.then(task).catch((error) => log(`attention: ${error.message}`));
-    return chain;
-  };
-  function schedule() {
-    if (exitCode !== null) return;
-    clock.clearTimeout(pending);
-    pending = clock.setTimeout(() => {
-      pending = null;
-      run(resync);
-    }, DEBOUNCE_MS);
-  }
-
-  // A visit marks seen only what it found unseen there, rechecked under the lock; with
-  // nothing unseen on the focused workspace no lock is taken at all.
-  let focusChain = Promise.resolve();
-  const onFocus = async (workspaceId) => {
-    const view = await readAttention(paths);
-    const seenIds = Object.values(view.episodes).filter((episode) => !episode.closed && !episode.seen && !episode.dismissed
-      && episode.rootKey !== null && view.desktop.origins[episode.rootKey]?.workspaceId === workspaceId).map((episode) => episode.id);
-    if (seenIds.length === 0) return;
-    const rows = topology?.connected ? topology.workspaces : null;
-    await mutate(async (state) => reduceAttention(state, {
-      type: 'desktop', ...state.desktop, ...(rows ? { workspaces: rows } : {}), seenIds, now: clock.now(),
-    }));
-  };
-
-  const watched = new Set([basename(paths.sessionsPath), basename(paths.intentPath), basename(paths.attentionPath)]);
-  const watcher = watch(paths.stateDir, (_event, file) => {
-    if (watched.has(file)) schedule();
-  });
+  // Registered before recovery, which can wait on the presentation lock: a stop that
+  // arrives meanwhile takes effect when recovery returns, before anything has started.
   const onSignal = () => stop(0);
+  const unregister = () => {
+    signals.off('SIGTERM', onSignal);
+    signals.off('SIGINT', onSignal);
+  };
   signals.on('SIGTERM', onSignal);
   signals.on('SIGINT', onSignal);
+  try {
+    // Read under the singleton lock and before recovery, so no other coordinator can
+    // change the record meanwhile.
+    const carried = carriedCrashes(await readHealthRecord(paths), epoch);
+    if (carried.unusable) log('health record unusable; crash history reset');
+    const history = carried.crashedAt;
+    log(recovered(await recover({ paths, lockWith, instanceId, clock })));
+    if (exitCode !== null) return 0;
 
-  beat();
-  const heartbeat = clock.setInterval(() => {
-    beat();
-    pollDnd();
-  }, HEARTBEAT_MS);
-  const freshness = clock.setInterval(() => {
-    if (topology !== null) feed.publish({ ...topology, writtenAt: clock.now() });
-  }, FRESHNESS_MS);
-  run(resync);
+    const feed = createLatestWriter({ path: niriWorkspacesPath(paths), writeAtomic, onError: (error) => log(`workspace feed: ${error.message}`) });
+    let topology = null;
+    const mutate = (fn) => mutateAttention({ paths, lockWith }, fn);
+    const pass = attentionPass({
+      paths, execFile, lockWith, loadContext, relay, clock, instanceId, log, syncWindows,
+      topology: () => topology, stopped: () => exitCode !== null,
+    });
+    const resync = pass.resync;
+    const pollDnd = async () => {
+      if (await pass.dndChanged() && exitCode === null) schedule();
+    };
 
-  const stream = eventStream();
-  const consumed = (async () => {
-    for await (const line of stream.lines) {
-      if (exitCode !== null) return null;
-      let event;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue; // a non-JSON banner line
-      }
-      try {
-        const next = reduceTopology(topology, event, { now: clock.now(), instanceId, epoch });
-        if (next !== topology) {
-          topology = next;
-          feed.publish(topology);
-        }
-      } catch (error) {
-        return error.message;
-      }
-      const activated = event.WorkspaceActivated;
-      if (activated?.focused === true) {
-        focusChain = focusChain.then(() => onFocus(String(activated.id))).catch((error) => log(`focus: ${error.message}`));
-      }
-      if (shouldResync(event)) schedule();
+    // Each heartbeat restates the carried history against the clock reading that becomes
+    // its `writtenAt`. Every write still in flight is tracked, and the last one that
+    // landed is what a clean stop marks stopped.
+    let lastWritten = null;
+    let inFlight = Promise.resolve();
+    const beat = () => {
+      const now = clock.now();
+      const health = { schema: 2, instanceId, epoch, owner, writtenAt: now, stopped: false, crashedAt: normaliseCrashes(history, now) };
+      const write = writeHealth({ paths, writeAtomic, health })
+        .then(() => { lastWritten = health; }, (error) => log(`heartbeat: ${error.message}`));
+      inFlight = Promise.all([inFlight, write]).then(() => {});
+    };
+
+    let chain = Promise.resolve();
+    let pending = null;
+    const run = (task) => {
+      chain = chain.then(task).catch((error) => log(`attention: ${error.message}`));
+      return chain;
+    };
+    function schedule() {
+      if (exitCode !== null) return;
+      clock.clearTimeout(pending);
+      pending = clock.setTimeout(() => {
+        pending = null;
+        run(resync);
+      }, DEBOUNCE_MS);
     }
-    return 'niri event stream closed';
-  })();
-  consumed.then((reason) => {
-    if (reason === null || exitCode !== null) return;
-    log(reason);
-    stop(1);
-  });
 
-  await done;
-  clock.clearInterval(heartbeat);
-  clock.clearInterval(freshness);
-  clock.clearTimeout(pending);
-  watcher.close();
-  stream.close();
-  signals.off('SIGTERM', onSignal);
-  signals.off('SIGINT', onSignal);
-  if (exitCode !== 0 && topology !== null) await feed.publish({ ...topology, connected: false, writtenAt: clock.now() });
-  await chain;
-  await focusChain;
-  await feed.idle();
-  return exitCode;
+    // A visit marks seen only what it found unseen there, rechecked under the lock; with
+    // nothing unseen on the focused workspace no lock is taken at all.
+    let focusChain = Promise.resolve();
+    const onFocus = async (workspaceId) => {
+      const view = await readAttention(paths);
+      const seenIds = Object.values(view.episodes).filter((episode) => !episode.closed && !episode.seen && !episode.dismissed
+        && episode.rootKey !== null && view.desktop.origins[episode.rootKey]?.workspaceId === workspaceId).map((episode) => episode.id);
+      if (seenIds.length === 0) return;
+      const rows = topology?.connected ? topology.workspaces : null;
+      await mutate(async (state) => reduceAttention(state, {
+        type: 'desktop', ...state.desktop, ...(rows ? { workspaces: rows } : {}), seenIds, now: clock.now(),
+      }));
+    };
+
+    const watched = new Set([basename(paths.sessionsPath), basename(paths.intentPath), basename(paths.attentionPath)]);
+    const watcher = watch(paths.stateDir, (_event, file) => {
+      if (watched.has(file)) schedule();
+    });
+
+    beat();
+    const heartbeat = clock.setInterval(() => {
+      beat();
+      pollDnd();
+    }, HEARTBEAT_MS);
+    const freshness = clock.setInterval(() => {
+      if (topology !== null) feed.publish({ ...topology, writtenAt: clock.now() });
+    }, FRESHNESS_MS);
+    run(resync);
+
+    const stream = eventStream();
+    const consumed = (async () => {
+      for await (const line of stream.lines) {
+        if (exitCode !== null) return null;
+        let event;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue; // a non-JSON banner line
+        }
+        try {
+          const next = reduceTopology(topology, event, { now: clock.now(), instanceId, epoch });
+          if (next !== topology) {
+            topology = next;
+            feed.publish(topology);
+          }
+        } catch (error) {
+          return error.message;
+        }
+        const activated = event.WorkspaceActivated;
+        if (activated?.focused === true) {
+          focusChain = focusChain.then(() => onFocus(String(activated.id))).catch((error) => log(`focus: ${error.message}`));
+        }
+        if (shouldResync(event)) schedule();
+      }
+      return 'niri event stream closed';
+    })();
+    consumed.then((reason) => {
+      if (reason === null || exitCode !== null) return;
+      log(reason);
+      stop(1);
+    });
+
+    await done;
+    clock.clearInterval(heartbeat);
+    clock.clearInterval(freshness);
+    clock.clearTimeout(pending);
+    watcher.close();
+    stream.close();
+    unregister();
+    // A heartbeat already started lands before anything that follows, so it can never
+    // replace the final record.
+    await inFlight;
+    if (exitCode !== 0 && topology !== null) await feed.publish({ ...topology, connected: false, writtenAt: clock.now() });
+    await chain;
+    await focusChain;
+    await feed.idle();
+    // A clean stop marks the last heartbeat that landed as stopped, its `writtenAt` and
+    // history unchanged, so a stopped coordinator is not refreshed into looking healthy.
+    // With none, the predecessor's record stands. A failed write leaves `stopped` false,
+    // counted as the crash it then looks like.
+    if (exitCode === 0 && lastWritten !== null) {
+      await writeHealth({ paths, writeAtomic, health: { ...lastWritten, stopped: true } })
+        .catch((error) => log(`final heartbeat: ${error.message}`));
+    }
+    return exitCode;
+  } finally {
+    // Also on a stop during recovery and on a throw before the main loop.
+    unregister();
+  }
 }
 
 // `familiar-niri sync`: one attention pass from a workspace query, as a short-lived

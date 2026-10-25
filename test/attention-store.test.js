@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initialAttention, reduceAttention } from '../src/attention/model.js';
 import {
-  healthStatus, mutateAttention, readAttention, readAttentionView, writeHealth,
+  carriedCrashes, healthStatus, mutateAttention, normaliseCrashes, readAttention, readAttentionView,
+  readHealthRecord, writeHealth,
 } from '../src/attention/store.js';
 import { paths as familiarPaths } from '../src/bus/paths.js';
 import { withLock } from '../src/bus/lock.js';
@@ -215,3 +216,51 @@ test('the view compares the coordinator that classified the saved state', async 
   assert.equal(view.health.status, 'mismatched');
 });
 
+
+test('crash history normalises against one clock reading', () => {
+  const now = 1_000_000;
+  assert.deepEqual(normaliseCrashes([now - 600_000, now], now), [now - 600_000, now]);
+  assert.deepEqual(normaliseCrashes([now + 1, now - 600_001, now - 5], now), [now - 5]);
+  assert.deepEqual(normaliseCrashes([3, 1, 2], 10), [1, 2, 3]);
+});
+
+test('the history keeps the newest eight', () => {
+  const now = 1_000_000;
+  const ten = Array.from({ length: 10 }, (_, i) => now - 10 + i);
+  assert.deepEqual(normaliseCrashes(ten, now), ten.slice(2));
+});
+
+test('a predecessor contributes its history only when valid and of the live epoch', () => {
+  const W = 700_000;
+  const live = epoch;
+  const empty = { crashedAt: [], unusable: false };
+  const unusable = { crashedAt: [], unusable: true };
+  assert.deepEqual(carriedCrashes(null, live), empty);
+  assert.deepEqual(carriedCrashes(undefined, live), unusable);
+  const { stopped, crashedAt, ...schemaOne } = health({ schema: 1 });
+  assert.deepEqual(carriedCrashes(schemaOne, live), unusable);
+  assert.deepEqual(carriedCrashes(health({ writtenAt: W, crashedAt: [W - 4, W - 5] }), live), unusable);
+  assert.deepEqual(carriedCrashes(health({ crashedAt: 'none' }), { ...live, bootId: null }), unusable);
+  for (const other of [{ bootId: null }, { desktopSession: null }, { bootId: '33333333-3333-4333-8333-333333333333' },
+    { desktopSession: '/other.sock' }]) {
+    assert.deepEqual(carriedCrashes(health({ writtenAt: W, crashedAt: [W - 5] }), { ...live, ...other }), empty);
+  }
+  assert.deepEqual(carriedCrashes(health({ epoch: { bootId: null, desktopSession: SOCKET } }), { ...live, bootId: null }), empty);
+  assert.deepEqual(carriedCrashes(health({ writtenAt: W, crashedAt: [W - 5] }), live), { crashedAt: [W - 5, W], unusable: false });
+  assert.deepEqual(carriedCrashes(health({ writtenAt: W, stopped: true, crashedAt: [W - 5] }), live), { crashedAt: [W - 5], unusable: false });
+});
+
+test('a health record that cannot be read is unusable, a missing one is null, and neither throws', async (t) => {
+  const { paths } = await fixture(t);
+  assert.equal(await readHealthRecord(paths), null);
+  await mkdir(paths.stateDir, { recursive: true });
+  await writeHealth({ paths, health: health() });
+  assert.deepEqual(await readHealthRecord(paths), health());
+  await writeFile(paths.attentionHealthPath, '{"schema":');
+  assert.equal(await readHealthRecord(paths), undefined);
+  await writeFile(paths.attentionHealthPath, 'null');
+  assert.equal(await readHealthRecord(paths), undefined);
+  await rm(paths.attentionHealthPath);
+  await mkdir(paths.attentionHealthPath);
+  assert.equal(await readHealthRecord(paths), undefined);
+});

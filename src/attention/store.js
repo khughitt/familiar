@@ -96,6 +96,42 @@ export function currentEpoch({ env = process.env, processOps = createProcessOps(
   return { bootId, desktopSession: text(env.NIRI_SOCKET) ? env.NIRI_SOCKET : null };
 }
 
+// Against the one clock reading that becomes `writtenAt`: nothing later than it or older
+// than the window, ascending, the newest few. A backward clock step therefore never
+// makes the writer's own record invalid.
+export function normaliseCrashes(list, now) {
+  return list.filter((at) => at <= now && at >= now - CRASH_WINDOW_MS)
+    .sort((a, b) => a - b).slice(-CRASH_HISTORY_MAX);
+}
+
+// What a starting coordinator inherits from the record its predecessor left. Only a
+// valid record of this boot and desktop session counts, and an unknown live identity
+// never matches; a predecessor that did not stop cleanly adds its own end, its last
+// `writtenAt`. A record that could not be read or validated is `unusable`.
+export function carriedCrashes(previous, live) {
+  if (previous === null) return { crashedAt: [], unusable: false };
+  if (previous === undefined || !validHealth(previous)) return { crashedAt: [], unusable: true };
+  if (!text(live.bootId) || !text(live.desktopSession) || previous.epoch.bootId !== live.bootId
+    || previous.epoch.desktopSession !== live.desktopSession) return { crashedAt: [], unusable: false };
+  return { crashedAt: previous.stopped ? [...previous.crashedAt] : [...previous.crashedAt, previous.writtenAt], unusable: false };
+}
+
+// The saved health record as parsed JSON: `null` when there is none, `undefined` when it
+// cannot be read or parsed (a parsed `null` included, which is no record). Never throws.
+export async function readHealthRecord(paths) {
+  let contents;
+  try {
+    contents = await readFile(paths.attentionHealthPath, 'utf8');
+  } catch (error) {
+    return error.code === 'ENOENT' ? null : undefined;
+  }
+  try {
+    return JSON.parse(contents) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function readHealth(paths) {
   const contents = await readText(paths.attentionHealthPath);
   if (contents === null) return { record: null, valid: true };
