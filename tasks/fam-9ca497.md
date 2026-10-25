@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:01:24Z
-updated: 2026-10-25T02:10:49Z
+updated: 2026-10-25T02:10:51Z
 started: 2026-10-25T02:04:50Z
 depends: []
 tags: [docs]
@@ -27,3 +27,4 @@ Only the self-date was judged; the document body was outside this pass's 800-lin
 - 2026-10-25T02:07:15Z (docs/relay-cutover): Scope: remove only the misleading whole-reference self-date; no claim that the graphics reference body was revalidated. Shared worktree .worktrees/docs-relay-cutover; hydrated with npm ci and pinned Luau fetch. Baseline just test: fast 1336 tests (1331 passed, 5 skipped), slow 10 passed, zero failures.
 - 2026-10-25T02:10:29Z (docs/relay-cutover): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T02:10:49Z (docs/relay-cutover): attached: docs-review-report.md (2867 bytes): Read-only whole-branch review of fc1043d; codex/gpt-6.1-sol accepted with no findings
+- 2026-10-25T02:10:51Z (docs/relay-cutover): attached: review-ledger.md (1147 bytes): Controller rulings on the three review scope exclusions; no deferred minors
