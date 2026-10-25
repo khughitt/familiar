@@ -18,8 +18,8 @@
 - The theme contract lives in the `familiar-theme` package (git dependency);
   do not deep-import beyond its package export.
 - Pre-split history and design docs: https://github.com/khughitt/familiar-archive (private archive)
-- Design specs live under `docs/specs/` and implementation plans under `docs/plans/`;
-  they are committed. `docs/superpowers/` holds the earlier ones and takes no new docs.
+- Design specs and implementation plans live in the records root (`tasks where` names it);
+  `docs/specs/`, `docs/plans/` and `docs/notes/` keep only those the code cites.
 
 ## Tasks workflow
 
