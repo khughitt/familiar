@@ -1,13 +1,15 @@
 ---
 id: fam-bdc129
 title: "Coordinator crash history, final record and early signal handling"
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
+owner: feat/attention-health
 created: 2026-10-25T00:19:54Z
-updated: 2026-10-25T00:19:54Z
+updated: 2026-10-25T00:32:11Z
+started: 2026-10-25T00:32:11Z
 depends: []
 parent: fam-8c5e1c
 tags: [attention]
@@ -15,3 +17,8 @@ agent: claude-code
 plan: docs/plans/2026-10-24-attention-crash-history.md
 step: "Task 2: Coordinator crash history, final record and early signal handling"
 ---
+
+## Notes
+
+- 2026-10-25T00:32:11Z (feat/attention-health): started
+  provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
