@@ -197,12 +197,16 @@ running coordinator, plugin and popup keep their loaded code until restarted.
 Niri starts the watcher, Noctalia and the popup itself (`spawn-at-startup` and
 `spawn-sh-at-startup` in its config). Relaunch each through Niri, so it lands in the
 same scope with the same environment as at startup rather than in this terminal's
-scope, and wait for the old process to exit first. The shell helper below stops a pid
-and waits up to 10 s for it to be gone; define it once in the shell you run these in:
+scope, and wait for the old process to exit first. The shell helper below stops one pid
+(refusing an empty or multi-pid argument) and waits up to 10 s for it to be gone;
+define it once in the shell you run these in:
 
 ```sh
 stop_and_wait() {  # stop_and_wait <pid>
-  kill "$1"
+  case "$1" in
+    ''|*[!0-9]*) echo "stop_and_wait: need exactly one pid, got: '$1'" >&2; return 1 ;;
+  esac
+  kill "$1" || { echo "could not stop pid $1" >&2; return 1; }
   for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
   echo "pid $1 still running after 10 s" >&2; return 1
 }
@@ -218,7 +222,7 @@ stop_and_wait() {  # stop_and_wait <pid>
    restarts), stop it and relaunch it through Niri:
 
    ```sh
-   stop_and_wait "$(pgrep -f '[f]amiliar-niri watch')"
+   stop_and_wait "$(pgrep -f '[f]amiliar-niri watch')" &&
    niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
    ```
 
@@ -230,14 +234,14 @@ stop_and_wait() {  # stop_and_wait <pid>
    and relaunch it through Niri:
 
    ```sh
-   stop_and_wait "$(pgrep -xo noctalia)"
+   stop_and_wait "$(pgrep -xo noctalia)" &&
    niri msg action spawn -- noctalia
    ```
 
 3. Restart the popup, as in step 6, the same way:
 
    ```sh
-   stop_and_wait "$(pgrep -f '[q]s -d -p .*/integrations/niri-desktop')"
+   stop_and_wait "$(pgrep -f '[q]s -d -p .*/integrations/niri-desktop')" &&
    niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
    ```
 
