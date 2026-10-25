@@ -8,7 +8,7 @@ complexity: mid
 process: direct
 owner: test-ci-audit
 created: 2026-09-04T21:44:54Z
-updated: 2026-10-25T01:02:22Z
+updated: 2026-10-25T02:08:36Z
 depends: [ops-31f038]
 tags: [testing]
 ---
@@ -25,3 +25,4 @@ Piece of ops-65837b (the cross-project audit in the ops hub). 1. Measure: full-s
 - 2026-09-28T08:34:43Z (main): Baseline window 2026-09-05..09-24 closes the day before ops host-budget worker sizing (09-25), the first timing change after step 1; no step-3 change had landed. Front-door total counts wrapper seconds of test, test-fast, check and both hooks. Next: step 3 (gates to ops design §4.6, the AGENTS.md inner-loop line, hygiene the numbers point at), then an after-window read with tt-report --since/--until.
 - 2026-09-28T10:26:53Z (main): Step 3 now follows ops docs/specs/2026-09-28-test-ci-act-design.md: copy templates/justfile's test-one, docs_paths/docs_check_cmd/hook-pre-commit-docs, ci_suite_refs/ci_remote/push_fast_cmd/hook-pre-push-fast and both templates/githooks; set ci_suite_refs from the refs CI actually runs the full suite for (say which in a note); add the AGENTS.md Gates line (templates/AGENTS.md). Then the after-window against this piece's baseline note.
 - 2026-10-25T01:02:22Z (main): curate-docs: fam-3f208e at 745b291 confirms: README.md offers npm test as equivalent to just test and AGENTS.md equates the suite with npm test/tools/test-runner.mjs fast. Since de63155 the justfile full-suite test_cmd is npm test && npm run test:slow, whereas npm test alone is the fast partition. Correct both guides as part of the test-route documentation already owned here; either omit the incomplete alternative or name both partitions. This note changes no claim, process or scope beyond the task's documented test instructions.
+- 2026-10-25T02:08:36Z (main): curate-docs: fam-3f208e at 7143e04 confirms: README.md's npm test alternative and AGENTS.md's suite description remain incorrect: justfile test_cmd runs npm test && npm run test:slow, while npm test runs tools/test-runner.mjs fast alone. The existing documented-test-route scope owns correcting both guides; no tests were run by this pass.
