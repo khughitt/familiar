@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:00:20Z
-updated: 2026-10-25T02:11:54Z
+updated: 2026-10-25T02:13:03Z
 started: 2026-10-25T02:05:03Z
 completed: 2026-10-25T02:11:54Z
 closed: 2026-10-25T02:11:54Z
@@ -37,3 +37,4 @@ docs/surfaces.md still lists Familiar hooks and a Familiar OpenCode server plugi
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
 - 2026-10-25T02:11:54Z (docs/relay-cutover): Aligned surface ownership and OpenCode installation with relay lifecycle events and Familiar observers; preserved rendering and platform limits.
   provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
+- 2026-10-25T02:13:03Z (main): retained: {"host":"titan","kind":"worktree","path":".worktrees/docs-relay-cutover","state":"released","verification":"verified","purpose":"Merged locally into main at 7a8088e; post-merge just check passed and all non-task files match the tested branch. tt-report ran; Git clean, no submodules or host pointers. Discarded regenerable node_modules; full review and ledger preserved in verified task attachments. Worktree and merged branch removed.","next_owner":"none","cleanup_trigger":"none"}
