@@ -494,8 +494,8 @@ stays up. Each start writes a fresh heartbeat within seconds, and a start limit
 such as the runbook's (five starts in 60 s) ends only fast crash loops: a
 coordinator that dies 15 s or more after each start restarts indefinitely and reads
 healthy. Each recovery suppresses what was queued and marks what was reserved
-uncertain, so every event arriving into a crashing instance can lose its toast with
-nothing on the bar.
+uncertain, so the episodes queued or reserved at each crash lose their toast with
+no health warning on the bar (their pill markers stay).
 
 The heartbeat therefore carries a bounded crash history. Only the singleton
 coordinator maintains it; consumers never infer restarts from instance changes.
@@ -503,44 +503,58 @@ coordinator maintains it; consumers never infer restarts from instance changes.
 Record. Schema 2 adds `stopped` (boolean) and `crashedAt` (integer milliseconds).
 `stopped` is false while the instance runs. `crashedAt` holds the ends of
 predecessors in the same boot and desktop session that did not stop cleanly, each
-approximated by that predecessor's last `writtenAt`. The predicate every
-restatement of the health rule applies (store, plugin, popup logic) is exact:
-schema 2, the schema-1 keys plus these two, `crashedAt` an array of at most eight
-non-decreasing integers each within `[writtenAt − 600 000, writtenAt]`. An empty
-array is valid; Luau decodes it as an empty table. Schema 1 is rejected (see
-Upgrade).
+approximated by that predecessor's last `writtenAt`. Every restatement of the
+health rule (store, plugin, popup logic) applies one predicate: schema 2, the
+schema-1 keys plus these two, `crashedAt` an array of at most eight non-decreasing
+integers each within `[writtenAt − 600 000, writtenAt]`. An empty array is valid.
+Luau decodes `[]` and `{}` alike as an empty table, so the plugin cannot reject
+`crashedAt: {}`; the writer never produces it. Schema 1 is rejected (see Upgrade).
 
 Clean stop. A stop is clean when the coordinator ends because of SIGTERM or SIGINT
 and exits 0. Stopping a unit with the default `KillMode=control-group` signals
 the `niri msg event-stream` child too, so its stream can end before the
-coordinator handles its own signal. The event stream therefore reports how its
-child ended: a child ended by SIGTERM or SIGINT that the coordinator did not send
-is a stop request (exit 0), not a stream failure. Any other stream end stays exit 1.
-The SIGTERM/SIGINT handlers are registered before `recover`, so a stop that
-arrives while recovery waits on the presentation lock is honoured once recovery
-returns.
+coordinator handles its own signal. The event stream therefore exposes one `ended`
+promise, resolved from the child's `close` event with its exit code and signal (a
+spawn error resolves it as a failure); readline closes before the child's `exit`,
+so the signal is not read when the lines end. After the lines end the coordinator
+awaits `ended`. When the child died by SIGTERM or SIGINT that the coordinator did
+not send (`niri msg` installs no handler for them), it waits up to one second for
+its own SIGTERM or SIGINT: on a real stop, systemd and a terminal signal the main
+process at the same moment, so that stop is clean (exit 0). If no signal arrives
+(someone signalled only the child, e.g. `pkill niri`), or the stream ended any
+other way, it exits 1 as today, and supervision restarts it.
+
+The SIGTERM/SIGINT handlers are registered before `recover`. A stop that arrives
+while recovery waits on the presentation lock takes effect when recovery returns:
+the instance exits 0 without starting the watcher, the event stream, the
+intervals, a heartbeat, a feed publish or a final record.
 
 Writer, in order:
 
 1. At start, under the singleton lock and before `recover`, read the existing
    record. A missing file or a record of another boot or desktop session (the
-   normal case after a reboot or Niri restart) starts an empty history silently. An
+   normal case after a reboot or Niri restart) starts an empty history silently;
+   an unknown live boot ID or desktop session never matches, as in the health rule. An
    unreadable, invalid or schema-1 record starts an empty history and logs one
    line; it never aborts startup. A valid schema-2 record of the live epoch
    contributes its `crashedAt`, plus its `writtenAt` when it is not `stopped`.
-2. Normalise at every write, before validating: drop entries later than the
-   writer's clock or more than ten minutes older than it, sort, keep the newest
-   eight. A backward clock step therefore never makes the writer's own record
+2. Normalise at every write, before validating, against the same clock reading
+   that becomes `writtenAt`: drop entries later than it or more than ten minutes
+   older, sort, keep the newest eight. A backward clock step therefore never makes the writer's own record
    invalid.
 3. The first heartbeat stays after `recover` (the saved state names the new
    instance first). Each heartbeat after that normalises and writes.
 4. On a clean stop: clear the heartbeat interval, wait for the in-flight heartbeat
    write to settle, drain as today (attention chain, focus chain, feed), then write
-   one final record with `stopped: true`. A stop that hangs in the drain until
-   systemd's SIGKILL is therefore counted as a crash. An instance that stops before
-   its first heartbeat writes no final record: its predecessor's record remains,
-   which keeps that predecessor's crash counted and adds none for this instance.
-5. At recovery, log how many queued episodes were suppressed and reserved ones made
+   one final record: the last successfully written heartbeat with `stopped: true`
+   and its `writtenAt` and `crashedAt` unchanged, so a stopped coordinator is not
+   refreshed into looking healthy for another ten seconds. A stop that hangs in the
+   drain until systemd's SIGKILL is therefore counted as a crash. An instance that
+   stops before its first successful heartbeat writes no final record: its
+   predecessor's record remains, which keeps that predecessor's crash counted and
+   adds none for this instance.
+5. `familiar-niri sync` neither reads nor writes the health record.
+6. At recovery, log how many queued episodes were suppressed and reserved ones made
    uncertain, so the journal shows what each crash cost.
 
 A crash, SIGKILL, OOM kill, abort or a failed final write leaves `stopped` false,
@@ -548,8 +562,8 @@ which is what a crash should look like. `stopped` does not change the health
 status: a stopped coordinator's record goes stale like any other.
 
 Reader. The shared rule derives `crashes`, the number of `crashedAt` entries with
-`0 ≤ now − t ≤ 600 000` at the reader's clock, for any valid record; it is null
-when the record is missing or invalid. The coordinator is **unstable** while the
+`0 ≤ now − t ≤ 600 000` at the reader's clock, for a valid record of the live boot
+and desktop session (both known); otherwise it is null. The coordinator is **unstable** while the
 health status is `healthy` and `crashes` is two or more. Two crashes in ten minutes
 reports any crash loop with a period under about five minutes, whatever the unit's
 restart and start-limit properties; rarer crashes are not reported.
@@ -571,7 +585,11 @@ validates schema 2 but does not compute `crashes`.
   restart it. Each episode sends one notice, "Agent alerts unstable — the
   coordinator keeps crashing", including an episode found when the plugin starts.
   It uses the same path as the disconnected notice (live DND check, no replay) with
-  its own generation guard, and shares the one-per-minute bound with it.
+  its own generation guard, and shares the one-per-minute bound with it. A notice
+  the bound or DND refuses is dropped, not delayed; the widget node remains the
+  lasting signal.
+- The plugin service publishes `crashes` and `unstable` in its shared health
+  state beside `status` and `disconnected`.
 - `familiar attention status` reports `health.crashes` beside `health.status`.
 
 Out of scope: a coordinator that hangs without crashing. Its heartbeat timer is
@@ -579,14 +597,21 @@ independent of attention passes by design, and detecting a wedged pass is separa
 work.
 
 Upgrade. Old readers reject a schema-2 record and new readers reject schema 1, so
-merging this change is an activation step, like the original merge. The CLI and the
-popup logic switch as soon as main changes; the running coordinator and the
-plugin keep their loaded code until restarted. Until all of them run the new code
-the plugin reads the record as invalid and shows the disconnected indication (with
-its one notice), and the popup gate stays closed. The runbook gives the upgrade
-sequence (restart the coordinator, then reload the plugin; the popup reloads
-itself), its expected transient and how to confirm health afterwards; those host
-steps need approval at the time.
+merging this change is an activation step, like the original merge. The CLI
+switches as soon as main changes; the running coordinator, the plugin and the popup
+keep their loaded code until restarted. That leaves two windows:
+
+- From the merge until the coordinator restarts, the old coordinator writes schema
+  1. The old plugin still reads healthy, but the new CLI's popup gate is closed:
+  popups are lost with the bar reading healthy, and popup opportunities queued
+  meanwhile are suppressed at the next recovery, not replayed.
+- From the coordinator restart until the plugin and popup restart, each old consumer
+  reads schema 2 as invalid: the plugin shows disconnected and sends its one notice,
+  and the old popup logic shows nothing.
+
+The runbook's upgrade step therefore restarts the coordinator, the plugin and the
+popup immediately after the merge, under the same approval, so both windows last
+seconds, and confirms health afterwards. Those host steps need approval at the time.
 
 The rollout runbook also says what the start limit does and does not end, and its
 kill check kills only the main process with SIGKILL, since a SIGTERM kill is a clean
