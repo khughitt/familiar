@@ -1,14 +1,14 @@
 ---
 id: fam-f9cd46
 title: Reference docs and runbook
-status: todo
+status: doing
 priority: 2
 size: s
 complexity: mid
 process: direct
 owner: feat/attention-health
 created: 2026-10-25T00:19:58Z
-updated: 2026-10-25T01:46:20Z
+updated: 2026-10-25T01:46:21Z
 started: 2026-10-25T01:29:32Z
 depends: []
 parent: fam-8c5e1c
@@ -25,4 +25,6 @@ step: "Task 5: Reference docs and runbook"
 - 2026-10-25T01:37:32Z (feat/attention-health): done
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
 - 2026-10-25T01:37:32Z (feat/attention-health): attention.md crash history, runbook start-limit/kill check/upgrade step (dfc1f40, fb1fda7)
+  provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T01:46:21Z (feat/attention-health): resumed
   provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
