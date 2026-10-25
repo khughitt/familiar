@@ -8,7 +8,7 @@ complexity: mid
 process: planned
 owner: feat/attention-health
 created: 2026-10-24T21:32:07Z
-updated: 2026-10-25T00:02:09Z
+updated: 2026-10-25T00:05:53Z
 started: 2026-10-24T21:41:33Z
 depends: [fam-9c8dd1]
 tags: [attention]
@@ -31,3 +31,4 @@ Final review round 3 of fam-9c8dd1 found that a familiar-niri watch coordinator 
 - 2026-10-24T23:54:25Z (feat/attention-health): review: spec round 1 — verdict: revise; findings: Important 4, Minor 8; reviewer: claude-code/claude-opus-5-5
 - 2026-10-24T23:55:21Z (feat/attention-health): spec revision e69266c (sha256 4d132aeb…) answers round 1: child-signal clean-stop rule, handlers before recover, writer normalisation, unstable episodes, explicit upgrade activation; round 2 review dispatched
 - 2026-10-25T00:02:09Z (feat/attention-health): review: spec round 2 — verdict: revise; findings: Important 1, Minor 7; reviewer: claude-code/claude-opus-5-5
+- 2026-10-25T00:05:53Z (feat/attention-health): review: spec round 3 — verdict: accept; findings: Minor 3; reviewer: claude-code/claude-opus-5-5
