@@ -25,7 +25,7 @@
 
 ## Review Focus
 
-1. A heartbeat write racing the final clean-stop write. Expected: the final record is the last successful heartbeat with `stopped: true`, never overwritten by a late beat. Pinned in Task 2, "a late heartbeat cannot overwrite the final record", which holds that beat on a gate the test releases only after the final write was issued.
+1. A heartbeat write racing the final clean-stop write. Expected: the final record is the last successful heartbeat with `stopped: true`, never overwritten by a late beat. Pinned in Task 2, "a late heartbeat cannot overwrite the final record", which holds that beat on a gate and proves no final write is issued while it is held, then that the final record follows it.
 2. A wall clock stepping backwards between instances. Expected: the writer drops future entries and keeps writing valid records, so health never fails closed. Pinned in Task 2, "a backward clock step keeps the heartbeat valid".
 3. A plugin started (Noctalia restart) while the coordinator is already unstable. Expected: one notice for that episode, not one per restart afterwards. Pinned in Task 4, "an unstable episode found at plugin start sends one notice".
 4. Only the `niri msg` child signalled (`kill <child pid>`). Expected: exit 1, so supervision restarts it. Pinned in Task 3's real-process test.
@@ -72,19 +72,20 @@
 
 - [ ] **Step 1: Write the failing store tests.** `normaliseCrashes` keeps `[now − 600000, now]`, drops `now + 1` and `now − 600001`, sorts `[3, 1, 2]`, and keeps the newest 8 of 10 ("the history keeps the newest eight"). `carriedCrashes` covers each numbered case under Produces, including an invalid record with an unknown live boot ID (unusable). `readHealthRecord` returns `undefined` when the health path is a directory.
 - [ ] **Step 2: Extend the coordinator harness.**
-  - `deps.eventStream` returns a fresh `fakeStream()` per start and stores it as `h.stream`.
+  - `start()`/`restart()` create each run's `fakeStream()` before calling `runCoordinator`, store it as `h.stream`, and `deps.eventStream` returns that run's stream (so `h.boot()`'s synchronous push reaches it).
   - `h.boot()` waits on a per-run counter, reset at each start, rather than the cumulative `calls.windows`.
   - `h.restart({ instanceId })` starts the next run.
-  - `h.holdHealthWrite()` returns a `release()` function. The next write to `attentionHealthPath` waits until it is called; the test releases it only after the final write has been issued.
+  - `h.holdHealthWrite()` returns a `release()` function; the next write to `attentionHealthPath` waits until it is called. `h.healthWrites` lists every health record whose write was issued, in order.
+  - `h.failHealthWrites({ after: n })` rejects every write to `attentionHealthPath` after the first `n`.
 - [ ] **Step 3: Write the failing coordinator tests**, using the harness, `h.boot()`, `h.stop()`, `h.exit()` and fake time. Read the record with `JSON.parse(await readFile(h.paths.attentionHealthPath))`.
   - `test('an unclean predecessor is counted; a clean one is not')`. Run 1 boots, then exits via `h.stream.end()` (exit 1). Run 2 boots, and its first heartbeat carries `crashedAt: [run 1's last writtenAt]`. Run 2 stops with SIGTERM: its final record has `stopped: true`, with `writtenAt` and `crashedAt` equal to its last periodic heartbeat. Run 3 boots, and its `crashedAt` equals run 2's.
   - `test('history from another boot, schema 1 or an invalid record starts empty')`. The schema-1 and invalid cases log one stderr line matching `/health record unusable/`, and another epoch logs none.
   - `test('a backward clock step keeps the heartbeat valid')`. Seed a valid schema-2 record of the live epoch with `crashedAt` and `writtenAt` 60 s in the future of the fake clock. The new coordinator's records are valid (`healthStatus` is `healthy`) and carry no future entry.
-  - `test('entries age out of the window while the coordinator runs')`. Seed entries 599 990 ms old and advance 20 s; the heartbeat's `crashedAt` is empty.
-  - `test('a failed final write leaves the crash countable')`, where the final write fails: the record keeps `stopped: false`, and stderr logs it. `test('a stop before any successful heartbeat writes no final record')`, where every health write fails.
+  - `test('entries age out of the window while the coordinator runs')`. Seed a `stopped: true` record of the live epoch with `writtenAt ≤ now` and entries 599 990 ms old, then advance 20 s; the heartbeat's `crashedAt` is empty.
+  - `test('a failed final write leaves the crash countable')`, using `h.failHealthWrites` so only the final write fails: the record keeps `stopped: false`, and stderr logs it. `test('a stop before any successful heartbeat writes no final record')`, using `h.failHealthWrites({ after: 0 })`: no record with `stopped: true` is issued.
   - `test('toasts are still claimed and sent after a start with two carried crashes')`.
-  - `test('a late heartbeat cannot overwrite the final record')`. Hold the next beat with `h.holdHealthWrite()`, advance until it is issued, emit SIGTERM, and release only after the final write was issued. The file afterwards has `stopped: true`, with `writtenAt` and `crashedAt` equal to that held beat's.
-  - `test('an unreadable health record resets the history and starts normally')`. The health path is a directory; one `/health record unusable/` line, normal boot.
+  - `test('a late heartbeat cannot overwrite the final record')`. Hold the next beat with `h.holdHealthWrite()` and advance until it is issued. Then emit SIGTERM, advance and settle, and assert that no record with `stopped: true` is in `h.healthWrites` while the beat is held. Release, then `h.exit()`. The last two entries of `h.healthWrites` are the held beat then the final record, and the file has `stopped: true` with `writtenAt` and `crashedAt` equal to the held beat's.
+  - `test('an unreadable health record resets the history and starts normally')`. The health path is a directory; one `/health record unusable/` line, and the main loop runs (a resync happens and the feed is published). Its own heartbeats also fail there, so assert no healthy heartbeat.
   - `test('a stop during recovery exits 0 with no heartbeat and leaves the predecessor record')`. Hold the presentation lock (as the existing "lock is held" test does), emit SIGTERM during `recover`, release the lock. Exit is 0, the health file is byte-identical to the seeded predecessor record, no watcher or stream was started, and `h.clock.pending() === 0`.
   - `test('recovery logs what it gave up')`. Seed one queued and one reserved episode. stderr matches `/recover: suppressed 1 queued, 1 uncertain/`.
 - [ ] **Step 4: Run `just test-fast`.** Expected: the new tests FAIL.
@@ -133,7 +134,7 @@
   - `test('a spawn error ends the stream as a failure')` (`ended` resolves `{ code: null, signal: null }`): exit 1.
 - [ ] **Step 2: Run `just test-fast`.** Expected: the new tests FAIL.
 - [ ] **Step 3: Implement.** After the lines end, race `ended` against a 1000 ms `clock` timeout, which on expiry calls `stream.close()` and counts as a failure. If the end came by `SIGTERM` or `SIGINT` that `close()` did not send, race a pending stop signal against another 1000 ms `clock` timeout: a signal arriving means `stop(0)`, and the timeout means log and `stop(1)`. Every other end is today's `stop(1)`. In `bin/familiar-niri`, resolve `ended` from `child.on('close', (code, signal) => …)`.
-- [ ] **Step 4: Write `test/attention-signals.slow.test.js`.** It spawns the real `bin/familiar-niri watch` as a process-group leader (`detached: true`), with a fake `niri` and `noctalia` on a test-owned `PATH`. Model them on `FAKE_NIRI` in `test/attention-e2e.slow.test.js`; the fake `niri msg -j event-stream` prints a `WorkspacesChanged` line and then blocks, installing no signal handler. The environment is built key by key (`PATH`, `HOME`, `FAMILIAR_STATE_DIR`, `NIRI_SOCKET`). It waits until the health file exists.
+- [ ] **Step 4: Write `test/attention-signals.slow.test.js`.** It spawns the real `bin/familiar-niri watch` as a process-group leader (`detached: true`), with a fake `niri` and `noctalia` on a test-owned `PATH`. Model them on `FAKE_NIRI` in `test/attention-e2e.slow.test.js`; the fake `niri msg -j event-stream` prints a `WorkspacesChanged` line and then blocks, installing no signal handler. The environment is built key by key, as `world()` in the e2e test builds it (`PATH`, `HOME`, `FAMILIAR_STATE_DIR`, `FAMILIAR_CONFIG_DIR`, `FAMILIAR_THEMES_DIR`, `NIRI_SOCKET`, `FAKE_DESKTOP`), plus the pid-file path for the fake `niri`. It waits until the health file exists.
   - `test('SIGTERM to the process group exits 0 with stopped: true')`, using `process.kill(-pid, 'SIGTERM')`.
   - `test('SIGINT to the process group exits 0 with stopped: true')`.
   - `test('SIGTERM to the event-stream child alone exits 1 with stopped: false')`. The fake `niri` writes its event-stream pid to a test-owned file, and the test signals that pid; never by name, and never from `/proc/.../children` (it also lists the short-lived windows and DND queries).
@@ -167,7 +168,7 @@
   - `P.unstableLabel(2)` is the Global Constraints text with N=2, and `P.unstableLabel(8)` reads `8 or more`.
   - Contract (scene with heartbeats every 2 s): `test('two crashes in ten minutes show the unstable node beside DND-unknown and send one notice')`. Heartbeats carry `crashedAt` with 2 entries. Assert the `status-unstable` node tooltip, one notice with `P.UNSTABLE_NOTICE`, the DND-unknown node also present when `dnd` is unknown, and pills still attributed.
   - `test('restarts inside an unstable episode do not re-notify')`. Interleave 2 s `mismatched` readings (instanceId changes, under `CONFIRM_MS`) between healthy unstable stretches over 5 minutes. Exactly one notice, with body `P.UNSTABLE_NOTICE`, and no disconnected notice.
-  - `test('a restart that reads disconnected keeps the unstable episode')`. One 4 s `mismatched` stretch: one disconnected notice (counted by body), and no second unstable notice after recovery.
+  - `test('a restart that reads disconnected keeps the unstable episode')`. One 4 s `mismatched` stretch, starting more than 60 s after the episode's unstable notice (the shared minute bound): one disconnected notice (counted by body), and no second unstable notice after recovery.
   - `test('an unstable episode found at plugin start sends one notice')`.
   - `test('disconnected hides the unstable node')`.
   - `test('a notice refused by the shared minute bound is dropped, not delayed')`. A disconnected notice, then an unstable episode starting 30 s later: no second notice ever, but the node shows.
@@ -197,8 +198,8 @@
 - [ ] **Step 2: Rewrite the runbook's start-limit paragraph.** The limit ends only fast crash loops, and the crash history reports any loop with a period under about five minutes as "unstable".
 - [ ] **Step 3: Replace the kill check with `systemctl --user kill --kill-whom=main --signal=SIGKILL familiar-attention`.** Say why a plain `systemctl --user kill` is a clean, unrestarted stop.
 - [ ] **Step 4: Add an upgrade step for merging this change.** Under one approval, run the following with exact commands:
-  1. Restart the coordinator: `systemctl --user restart familiar-attention` where the unit exists. Where only the Niri-started watcher runs, kill its recorded pid and relaunch it detached with all three streams redirected, since a SIGTERM is now a clean stop that nothing restarts.
-  2. Reload the plugin by restarting Noctalia's plugin the way the runbook's plugin step does.
+  1. Restart the coordinator: `systemctl --user restart familiar-attention` where the unit exists. Where only the Niri-started watcher runs, take its pid from `pgrep -f '[f]amiliar-niri watch'`, kill that pid, and relaunch it with the runbook's restore line (runbook:189), since a SIGTERM is now a clean stop that nothing restarts.
+  2. Reload the plugin: the runbook names no reload command. Find Noctalia 5.3's plugin reload route read-only (`noctalia --help`, `noctalia msg --help`, or the Noctalia API report attached to fam-9c8dd1) and write that command. If none exists, write a Noctalia restart and label it as one that redraws the bar.
   3. Restart the popup with the runbook's existing `qs` lines (runbook:145, 190). Then name the two transient windows from the spec's Upgrade paragraph, and confirm with `familiar attention status | jq -r '.health.status, .health.crashes'` (expected `healthy`, `0`).
 - [ ] **Step 5: Run `just check`.** Expected: PASS (`ops-check` and `tasks check` clean).
 - [ ] **Step 6: Commit** `docs(attention): document the crash history and the upgrade step`.
