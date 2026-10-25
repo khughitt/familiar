@@ -135,12 +135,20 @@ local function draw()
     elseif mode == "unavailable" then
         table.insert(children, statusNode("status-nav", "⊘", "error", P.NAVIGATION_UNAVAILABLE_LABEL))
     end
+    -- A fault or a disconnection replaces the warnings below it; an unstable coordinator
+    -- and an unknown DND status are separate warnings, shown side by side.
     local fault = attention and (attention.configError or attention.viewError)
+    local blocked = fault or (attention ~= nil and attention.health.disconnected)
     if fault then
         table.insert(children, statusNode("status-health", "⚠", "error", fault))
     elseif attention ~= nil and attention.health.disconnected then
         table.insert(children, statusNode("status-health", "⚠", "error", P.DISCONNECTED_LABEL))
-    elseif healthy and view ~= nil and view.desktop.dnd == "unknown" then
+    end
+    if not blocked and attention ~= nil and attention.health.unstable then
+        -- Alerts still work between crashes; the ones arriving at a crash may be lost.
+        table.insert(children, statusNode("status-unstable", "⚠", "outline", P.unstableLabel(attention.health.crashes)))
+    end
+    if not blocked and healthy and view ~= nil and view.desktop.dnd == "unknown" then
         -- Everything not yet shown is being held back, which a quiet bar would hide.
         table.insert(children, statusNode("status-dnd", "◐", "outline", P.DND_UNKNOWN_LABEL))
     end

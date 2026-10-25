@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initialAttention, reduceAttention } from '../src/attention/model.js';
 import {
-  carriedCrashes, healthStatus, mutateAttention, normaliseCrashes, readAttention, readAttentionView,
+  carriedCrashes, crashCount, healthStatus, mutateAttention, normaliseCrashes, readAttention, readAttentionView,
   readHealthRecord, writeHealth,
 } from '../src/attention/store.js';
 import { paths as familiarPaths } from '../src/bus/paths.js';
@@ -195,14 +195,18 @@ test('the view is the saved state plus independently read health, read while the
   const liveEpoch = () => epoch;
   const missing = await readAttentionView({ paths, now: 55_000, liveEpoch });
   assert.deepEqual({ ...missing, health: undefined }, { ...state, health: undefined });
-  assert.deepEqual(missing.health, { status: 'missing', record: null });
+  assert.deepEqual(missing.health, { status: 'missing', record: null, crashes: null });
   await writeHealth({ paths, health: health() });
   const view = await withLock(paths.presentationLockPath, () => readAttentionView({ paths, now: 55_000, liveEpoch }));
-  assert.deepEqual(view.health, { status: 'healthy', record: health() });
+  assert.deepEqual(view.health, { status: 'healthy', record: health(), crashes: 0 });
+  const crashed = health({ crashedAt: [40_000, 49_000] });
+  await writeHealth({ paths, health: crashed });
+  assert.deepEqual((await readAttentionView({ paths, now: 55_000, liveEpoch })).health, { status: 'healthy', record: crashed, crashes: 2 });
   await writeFile(paths.attentionHealthPath, '{"schema":');
-  assert.equal((await readAttentionView({ paths, now: 55_000, liveEpoch })).health.status, 'invalid');
-  await writeHealth({ paths, health: health() });
-  assert.equal((await readAttentionView({ paths, now: 55_000, liveEpoch: () => ({ ...epoch, bootId: '33333333-3333-4333-8333-333333333333' }) })).health.status, 'mismatched');
+  assert.deepEqual((await readAttentionView({ paths, now: 55_000, liveEpoch })).health, { status: 'invalid', record: null, crashes: null });
+  await writeHealth({ paths, health: crashed });
+  const otherBoot = (await readAttentionView({ paths, now: 55_000, liveEpoch: () => ({ ...epoch, bootId: '33333333-3333-4333-8333-333333333333' }) })).health;
+  assert.deepEqual([otherBoot.status, otherBoot.crashes], ['mismatched', null]);
 });
 
 test('the view compares the coordinator that classified the saved state', async (t) => {
@@ -214,6 +218,8 @@ test('the view compares the coordinator that classified the saved state', async 
   await writeHealth({ paths, health: health({ instanceId: 'coordinator-2' }) });
   const view = await readAttentionView({ paths, now: 55_000, liveEpoch: () => epoch });
   assert.equal(view.health.status, 'mismatched');
+  // Crashes belong to the boot and desktop session, not to one instance.
+  assert.equal(view.health.crashes, 0);
 });
 
 
@@ -263,4 +269,43 @@ test('a health record that cannot be read is unusable, a missing one is null, an
   await rm(paths.attentionHealthPath);
   await mkdir(paths.attentionHealthPath);
   assert.equal(await readHealthRecord(paths), undefined);
+});
+
+// The reader's rule. contract.test.mjs checks the Luau restatement over the same cases.
+const CRASH_COUNT_CASES = (() => {
+  const W = 700_000;
+  const live = { now: W, ...epoch };
+  const record = (extra) => health({ writtenAt: W, ...extra });
+  return [
+    // Two entries inside the window.
+    [record({ crashedAt: [W - 5, W - 4] }), live, 2],
+    [record({ crashedAt: [] }), live, 0],
+    [record({ crashedAt: [W - 5, W - 4], stopped: true }), live, 2],
+    // Another epoch, or a live identity that cannot be read.
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, bootId: '33333333-3333-4333-8333-333333333333' }, null],
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, desktopSession: '/other.sock' }, null],
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, bootId: null }, null],
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, desktopSession: '' }, null],
+    [record({ epoch: { bootId: BOOT, desktopSession: null }, crashedAt: [W - 5] }), { ...live, desktopSession: null }, null],
+    // An invalid or missing record.
+    [null, live, null],
+    [undefined, live, null],
+    [record({ schema: 1, crashedAt: [W - 5, W - 4] }), live, null],
+    [record({ crashedAt: [W - 4, W - 5] }), live, null],
+    [record({ crashedAt: [W - 600_001] }), live, null],
+    // The window at the reader's clock: inclusive at ten minutes, nothing older.
+    [record({ crashedAt: [W - 600_000, W - 5] }), live, 2],
+    [record({ crashedAt: [W - 600_000, W - 5] }), { ...live, now: W + 1 }, 1],
+    // Nothing later than the reader's clock, even in a record that is itself in the future
+    // (status `invalid`): the count follows its own rule.
+    [record({ crashedAt: [W - 10, W] }), { ...live, now: W - 5 }, 1],
+  ];
+})();
+
+test('crashCount counts the window for a valid record of the live boot and desktop session', () => {
+  for (const [record, live, expected] of CRASH_COUNT_CASES) {
+    assert.equal(crashCount(record, live), expected, JSON.stringify([record, live]));
+  }
+  const W = 700_000;
+  assert.equal(healthStatus(health({ writtenAt: W, crashedAt: [W - 10, W] }), { now: W - 5, ...epoch }), 'invalid');
 });

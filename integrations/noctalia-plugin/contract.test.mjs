@@ -12,7 +12,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { healthStatus as nodeHealthStatus } from '../../src/attention/store.js';
+import { crashCount as nodeCrashCount, healthStatus as nodeHealthStatus, normaliseCrashes } from '../../src/attention/store.js';
 import { writeJsonAtomic } from '../../src/bus/store.js';
 import { attentionByWorkspace } from '../niri/attention.js';
 import { createLatestWriter, reduceTopology } from '../niri/topology.js';
@@ -183,6 +183,49 @@ test('healthStatus in Luau is the Node rule', () => {
     emit(results)
   `, { fixtures: { cases: cases.map(([record, options]) => ({ record, live: { ...options, bootId: options.bootId ?? undefined } })) } }));
   assert.deepEqual(actual, expected);
+});
+
+test('crashCount in Luau is the Node rule', () => {
+  const W = 700_000;
+  const live = { now: W, bootId: 'b1', desktopSession: '/s' };
+  const record = (extra = {}) => ({ schema: 2, instanceId: 'c1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' },
+    writtenAt: W, stopped: false, crashedAt: [], ...extra });
+  const cases = [
+    [record({ crashedAt: [W - 5, W - 4] }), live], [record(), live], [record({ crashedAt: [W - 5, W - 4], stopped: true }), live],
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, bootId: 'b2' }], [record({ crashedAt: [W - 5, W - 4] }), { ...live, desktopSession: '/other' }],
+    [record({ crashedAt: [W - 5, W - 4] }), { ...live, bootId: null }], [record({ crashedAt: [W - 5, W - 4] }), { ...live, desktopSession: '' }],
+    [record({ epoch: { bootId: 'b1', desktopSession: null }, crashedAt: [W - 5] }), { ...live, desktopSession: null }],
+    [null, live], [record({ schema: 1, crashedAt: [W - 5, W - 4] }), live], [record({ crashedAt: [W - 4, W - 5] }), live],
+    [record({ crashedAt: [W - 600_001] }), live], [record({ extra: 1 }), live], [record({ crashedAt: { a: 1 } }), live],
+    [record({ crashedAt: [W - 600_000, W - 5] }), live], [record({ crashedAt: [W - 600_000, W - 5] }), { ...live, now: W + 1 }],
+    [record({ crashedAt: [W - 10, W] }), { ...live, now: W - 5 }],
+    [record({ crashedAt: Array.from({ length: 8 }, (_, i) => W - 8 + i) }), live],
+  ];
+  const expected = cases.map(([health, options]) => nodeCrashCount(health, options) ?? 'null');
+  assert.deepEqual(expected.slice(0, 3), [2, 0, 2]);
+  const [actual] = out(runLuau(`
+    local P = Host.module("presentation")
+    local results = {}
+    for i, case in fixture("cases") do
+      local count = P.crashCount(case.record, case.live)
+      results[i] = if count == nil then "null" else count
+    end
+    emit(results)
+  `, { fixtures: { cases: cases.map(([health, options]) => ({ record: health, live: options })) } }));
+  assert.deepEqual(actual, expected);
+});
+
+test('the unstable label names the count, and the cap as 8 or more', () => {
+  const [result] = out(runLuau(`
+    local P = Host.module("presentation")
+    emit({ two = P.unstableLabel(2), eight = P.unstableLabel(8), notice = P.UNSTABLE_NOTICE, threshold = P.UNSTABLE_CRASHES })
+  `));
+  assert.deepEqual(result, {
+    two: 'Agent alerts unstable — the coordinator crashed 2 times in 10 minutes; alerts arriving at each crash may be lost',
+    eight: 'Agent alerts unstable — the coordinator crashed 8 or more times in 10 minutes; alerts arriving at each crash may be lost',
+    notice: 'Agent alerts unstable — the coordinator keeps crashing',
+    threshold: 2,
+  });
 });
 
 test('Luau marker rules agree with the Node statement of them on the same state', () => {
@@ -627,6 +670,285 @@ for (const [name, stateAt, healthFrom] of [['state first', 20_000, 20_300], ['he
     assert.deepEqual(result, { alarmed: false, notices: 0, attributed: true });
   });
 }
+
+// --- an unstable coordinator ---------------------------------------------------------------------
+
+const UNSTABLE_TWO = 'Agent alerts unstable — the coordinator crashed 2 times in 10 minutes; alerts arriving at each crash may be lost';
+const UNSTABLE_NOTICE = 'Agent alerts unstable — the coordinator keeps crashing';
+const DISCONNECTED = 'Agent alerts disconnected — toasts unavailable';
+// Two crashes a minute apart, shortly before the plugin starts. Every heartbeat carries
+// them as the writer normalises them against its own clock.
+const CRASHES = [T0 - 120_000, T0 - 60_000];
+const crashedHealthAt = (at, crashes = CRASHES, extra = {}) => healthAt(at, { crashedAt: normaliseCrashes(crashes, at), ...extra });
+function unstableScene(state, until, crashes = CRASHES) {
+  const scene = steady(state, until);
+  scene.health = crashedHealthAt(T0, crashes);
+  scene.events = scene.events.map((e) => (e.file === 'attention-health.json' ? { ...e, value: crashedHealthAt(e.at, crashes) } : e));
+  return scene;
+}
+// Topology to `until` and nothing else after `from`: the caller adds its own heartbeats.
+function feedOnly(scene, from, until) {
+  scene.events = scene.events.filter((e) => e.file !== 'attention-health.json' || e.at < from);
+  for (let at = T0 + 1000; at <= until; at += 1000) {
+    if (!scene.events.some((e) => e.file === 'niri-workspaces.json' && e.at === at)) {
+      scene.events.push({ at, file: 'niri-workspaces.json', value: topologyAt(at) });
+    }
+  }
+  return scene;
+}
+const DND_OFF = `
+  Host.processHandler = function(argv)
+    if argv[1] == "noctalia" then return { exitCode = 0, stdout = "off", delay = 5 } end
+    return { exitCode = 0, stdout = "" }
+  end
+  local function bodies()
+    local list = {}
+    for _, n in Host.notifications do table.insert(list, n.body) end
+    return list
+  end
+`;
+const list = (value) => (Array.isArray(value) ? value : []);
+const restartedState = (state, instanceId) => {
+  const restarted = structuredClone(state);
+  restarted.desktop.instanceId = instanceId;
+  return restarted;
+};
+
+test('two crashes in ten minutes show the unstable node beside DND-unknown and send one notice', () => {
+  const { t } = attentionScene();
+  const state = structuredClone(t.state);
+  state.desktop.dnd = 'unknown';
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(30000)
+    local unstable = b:find("status-unstable")
+    local dnd = b:find("status-dnd")
+    emit({ unstableTip = unstable and unstable.props.tooltip, glyph = unstable and unstable.children[1].props.text,
+      color = unstable and unstable.children[1].props.color, dndTip = dnd and dnd.props.tooltip,
+      health = b:find("status-health") ~= nil, notices = bodies(), published = Host.state["familiar/attention"].health,
+      attributed = string.find(b:find("ws-21").props.tooltip or "", "Approval requested", 1, true) ~= nil })
+  `, unstableScene(state, 30_000)));
+  assert.equal(result.unstableTip, UNSTABLE_TWO);
+  assert.deepEqual([result.glyph, result.color], ['⚠', 'outline']);
+  assert.equal(result.dndTip, 'Do Not Disturb status unknown — toasts and popups are not shown, and are not replayed later');
+  assert.equal(result.health, false);
+  assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE]);
+  assert.deepEqual(result.published, { status: 'healthy', disconnected: false, crashes: 2, unstable: true });
+  const pillsStillAttributedWhileUnstable = result.attributed;
+  assert.equal(pillsStillAttributedWhileUnstable, true);
+});
+
+test('restarts inside an unstable episode do not re-notify', () => {
+  const { t } = attentionScene();
+  const until = T0 + 300_000;
+  const restarts = [60_000, 120_000, 180_000, 240_000].map((r) => T0 + r);
+  // Each restart is a crash: the new instance carries its predecessor's last heartbeat.
+  const before = (at) => restarts.filter((r) => r <= at);
+  const historyAt = (at) => [...CRASHES, ...before(at).map((r) => r - 2000)];
+  const scene = feedOnly(steady(t.state, 2000), T0 + 2000, until);
+  scene.health = crashedHealthAt(T0);
+  for (let at = T0 + 2000; at <= until; at += 2000) {
+    scene.events.push({ at, file: 'attention-health.json',
+      value: crashedHealthAt(at, historyAt(at), { instanceId: `coordinator-${before(at).length + 1}` }) });
+  }
+  // The heartbeat changes instance first; the saved state follows two seconds later.
+  restarts.forEach((r, i) => scene.events.push({ at: r + 2000, file: 'attention.json', value: restartedState(t.state, `coordinator-${i + 2}`) }));
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    local mismatched, alarmed = 0, false
+    for _ = 1, 1200 do
+      Host.advance(250)
+      if Host.state["familiar/attention"].health.status == "mismatched" then mismatched += 1 end
+      if b:find("status-health") ~= nil then alarmed = true end
+    end
+    emit({ mismatched = mismatched, alarmed = alarmed, notices = bodies(), unstable = b:find("status-unstable") ~= nil })
+  `, scene));
+  assert.ok(result.mismatched >= 4, `${result.mismatched} mismatched readings`);
+  assert.equal(result.alarmed, false);
+  assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE]);
+  assert.equal(result.unstable, true);
+});
+
+// The disconnected notice and the unstable one share the minute bound; the outage starts
+// more than a minute after the episode's notice, so its own notice is sent. Recovery must
+// not start a new episode. The long outage recovers more than a minute after the
+// disconnected notice, where a second unstable notice would not be refused by the bound.
+for (const [name, build] of [
+  ['a 4 s mismatched stretch', (t, scene) => {
+    const restart = T0 + 70_000;
+    for (let at = T0 + 2000; at <= T0 + 200_000; at += 2000) {
+      const after = at >= restart;
+      scene.events.push({ at, file: 'attention-health.json', value: crashedHealthAt(at, after ? [...CRASHES, restart - 2000] : CRASHES,
+        { instanceId: after ? 'coordinator-2' : 'coordinator-1' }) });
+    }
+    scene.events.push({ at: restart + 4000, file: 'attention.json', value: restartedState(t.state, 'coordinator-2') });
+  }],
+  ['a long outage', (t, scene) => {
+    const back = T0 + 150_000;
+    for (let at = T0 + 2000; at <= T0 + 200_000; at += 2000) {
+      if (at > T0 + 68_000 && at < back) continue;
+      const after = at >= back;
+      scene.events.push({ at, file: 'attention-health.json', value: crashedHealthAt(at, after ? [...CRASHES, T0 + 68_000] : CRASHES,
+        { instanceId: after ? 'coordinator-2' : 'coordinator-1' }) });
+    }
+    scene.events.push({ at: back, file: 'attention.json', value: restartedState(t.state, 'coordinator-2') });
+  }],
+]) {
+  test(`a restart that reads disconnected keeps the unstable episode (${name})`, () => {
+    const { t } = attentionScene();
+    const scene = feedOnly(steady(t.state, 2000), T0 + 2000, T0 + 200_000);
+    scene.health = crashedHealthAt(T0);
+    build(t, scene);
+    const [result] = out(luau(`
+      ${DND_OFF}
+      Host.service()
+      local b = Host.widget("HDMI-A-1")
+      local disconnected = false
+      for _ = 1, 800 do
+        Host.advance(250)
+        if Host.state["familiar/attention"].health.disconnected then disconnected = true end
+      end
+      local at = {}
+      for _, n in Host.notifications do table.insert(at, n.at) end
+      emit({ disconnected = disconnected, notices = bodies(), at = at, unstable = b:find("status-unstable") ~= nil })
+    `, scene));
+    assert.equal(result.disconnected, true);
+    assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE, DISCONNECTED]);
+    assert.ok(result.at[1] - result.at[0] > 60_000, JSON.stringify(result.at));
+    assert.equal(result.unstable, true);
+  });
+}
+
+test('an unstable episode found at plugin start sends one notice', () => {
+  const { t } = attentionScene();
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    Host.widget("HDMI-A-1")
+    Host.advance(150000)
+    emit({ notices = bodies(), first = Host.notifications[1] and Host.notifications[1].at })
+  `, unstableScene(t.state, 150_000)));
+  assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE]);
+  assert.ok(result.first - T0 < 1000, `${result.first - T0} ms after start`);
+});
+
+test('disconnected hides the unstable node', () => {
+  const { t } = attentionScene();
+  // Unstable and healthy, then the heartbeat stops: stale, so disconnected, from +14000.
+  const scene = feedOnly(unstableScene(t.state, 4000), T0 + 6000, T0 + 30_000);
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(3000)
+    local before = b:find("status-unstable") ~= nil
+    Host.advance(17000)
+    local health = b:find("status-health")
+    emit({ before = before, after = b:find("status-unstable") ~= nil, healthTip = health and health.props.tooltip })
+  `, scene));
+  assert.deepEqual(result, { before: true, after: false, healthTip: DISCONNECTED });
+  // The widget's own precedence, whatever is published: a shown fault or disconnection
+  // replaces the unstable node.
+  for (const [published, shown] of [
+    [{ health: { status: 'healthy', disconnected: false, crashes: 2, unstable: true } }, true],
+    [{ health: { status: 'healthy', disconnected: true, crashes: 2, unstable: true } }, false],
+    [{ configError: 'HOME must be an absolute path', health: { status: 'healthy', disconnected: false, crashes: 2, unstable: true } }, false],
+  ]) {
+    const [widget] = out(runLuau(`
+      Host.state["familiar/attention"] = fixture("published")
+      local w = Host.widget("HDMI-A-1")
+      local node = w:find("status-unstable")
+      emit({ shown = node ~= nil, tip = node and node.props.tooltip, health = w:find("status-health") ~= nil })
+    `, { fixtures: { published } }));
+    assert.deepEqual(widget, shown ? { shown, tip: UNSTABLE_TWO, health: false } : { shown, health: true }, JSON.stringify(published));
+  }
+});
+
+test('a notice refused by the shared minute bound is dropped, not delayed', () => {
+  const { t } = attentionScene();
+  // Healthy with no crashes, then the heartbeat stops (disconnected notice at +14000). A
+  // restarted instance resumes at +44000 carrying two crashes: its episode's notice
+  // falls inside the minute.
+  const back = T0 + 44_000;
+  const scene = feedOnly(steady(t.state, 4000), T0 + 6000, T0 + 200_000);
+  for (let at = back; at <= T0 + 200_000; at += 2000) {
+    scene.events.push({ at, file: 'attention-health.json', value: crashedHealthAt(at, [T0 - 60_000, T0 + 4000], { instanceId: 'coordinator-2' }) });
+  }
+  scene.events.push({ at: back, file: 'attention.json', value: restartedState(t.state, 'coordinator-2') });
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(50000)
+    local early = b:find("status-unstable")
+    Host.advance(150000)
+    emit({ notices = bodies(), early = early and early.props.tooltip, late = b:find("status-unstable") ~= nil })
+  `, scene));
+  assert.deepEqual(list(result.notices), [DISCONNECTED]);
+  assert.equal(result.early, UNSTABLE_TWO);
+  assert.equal(result.late, true);
+});
+
+test('the unstable node clears when crashes age out', () => {
+  const { t } = attentionScene();
+  // The older crash leaves the window at +10000, ending the episode. A crash at +39000
+  // makes one again (no episode); another at +79000 makes two, a new episode more than a
+  // minute after the first notice: it notifies again.
+  const old = [T0 - 590_000, T0 - 580_000];
+  const later = (at) => [T0 + 39_000, T0 + 79_000].filter((crash) => at > crash);
+  const scene = feedOnly(steady(t.state, 2000), T0 + 2000, T0 + 120_000);
+  scene.health = crashedHealthAt(T0, old);
+  for (let at = T0 + 2000; at <= T0 + 120_000; at += 2000) {
+    scene.events.push({ at, file: 'attention-health.json', value: crashedHealthAt(at, [...old, ...later(at)]) });
+  }
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(5000)
+    local node = b:find("status-unstable")
+    local before = node and node.props.tooltip
+    Host.advance(15000)
+    local after = b:find("status-unstable") ~= nil
+    local aged = Host.state["familiar/attention"].health
+    Host.advance(70000)
+    emit({ before = before, after = after, aged = aged, notices = bodies(), again = b:find("status-unstable") ~= nil })
+  `, scene));
+  assert.equal(result.before, UNSTABLE_TWO);
+  assert.equal(result.after, false);
+  assert.deepEqual(result.aged, { status: 'healthy', disconnected: false, crashes: 1, unstable: false });
+  assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE, UNSTABLE_NOTICE]);
+  assert.equal(result.again, true);
+});
+
+test('an unstable notice is dropped on DND on, unknown or a failed query', () => {
+  const { t } = attentionScene();
+  for (const [name, handler] of [
+    ['DND on', '{ exitCode = 0, stdout = "on" }'],
+    ['an unknown DND answer', '{ exitCode = 0, stdout = "maybe" }'],
+    ['a failed DND query', '{ exitCode = 1, stdout = "off" }'],
+    ['a truncated DND answer', '{ exitCode = 0, stdout = "off", stdoutTruncated = true }'],
+    ['a slow DND query', '{ exitCode = 0, stdout = "off", delay = 5000 }'],
+  ]) {
+    const [result] = out(luau(`
+      Host.processHandler = function(argv)
+        if argv[1] == "noctalia" then return ${handler} end
+        return { exitCode = 0, stdout = "" }
+      end
+      Host.service()
+      local b = Host.widget("HDMI-A-1")
+      Host.advance(30000)
+      local queries = 0
+      for _, r in Host.processes do if r.argv[1] == "noctalia" then queries += 1 end end
+      emit({ notices = #Host.notifications, queries = queries, unstable = b:find("status-unstable") ~= nil })
+    `, unstableScene(t.state, 30_000)));
+    assert.deepEqual(result, { notices: 0, queries: 1, unstable: true }, name);
+  }
+});
 
 test('a dismissed withheld-completion diagnostic stays in the tooltip and says what dismissal does', () => {
   const { t } = attentionScene();

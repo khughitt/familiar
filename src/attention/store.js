@@ -80,6 +80,15 @@ export function healthStatus(health, { now, instanceId, bootId, desktopSession }
   return now - health.writtenAt > HEALTH_STALE_MS ? 'stale' : 'healthy';
 }
 
+// The crashes a reader counts: the entries no later than its clock and within the window,
+// for a valid record of this boot and desktop session (both known); otherwise null. The
+// record's own freshness does not matter here, only whose it is.
+export function crashCount(health, { now, bootId, desktopSession }) {
+  if (!validHealth(health) || !text(bootId) || !text(desktopSession) || health.epoch.bootId !== bootId
+    || health.epoch.desktopSession !== desktopSession) return null;
+  return health.crashedAt.filter((at) => now - at >= 0 && now - at <= CRASH_WINDOW_MS).length;
+}
+
 export async function writeHealth({ paths, health, writeAtomic = writeJsonAtomic }) {
   if (!validHealth(health)) throw new Error('attention: invalid health record');
   await writeAtomic(paths.attentionHealthPath, health);
@@ -153,5 +162,6 @@ export async function readAttentionView({ paths, now = Date.now(), liveEpoch = (
     now, ...(state.desktop.instanceId === null ? {} : { instanceId: state.desktop.instanceId }),
     bootId: live.bootId, desktopSession: live.desktopSession,
   }) : 'invalid';
-  return { ...state, health: { status, record: valid ? record : null } };
+  const crashes = valid ? crashCount(record, { now, bootId: live.bootId, desktopSession: live.desktopSession }) : null;
+  return { ...state, health: { status, record: valid ? record : null, crashes } };
 }

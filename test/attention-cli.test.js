@@ -37,7 +37,7 @@ const step = (paths, input) => mutateAttention({ paths }, async (state) => reduc
 
 // Two live approvals and a finished turn, classified by a healthy coordinator on a
 // workspace the user is not looking at.
-async function seed(paths, { health = true } = {}) {
+async function seed(paths, { health = true, crashesAgo = [] } = {}) {
   const registry = createRegistry({ now: () => 1000 });
   await step(paths, { type: 'observe', snapshot: snapshotOf([], { revision: 1 }), envelope: null, now: 1 });
   registry.apply(nativeEvent('codex', 'PermissionRequest', { session: 'a' }));
@@ -56,9 +56,10 @@ async function seed(paths, { health = true } = {}) {
     enrichment: {}, now: 3,
   });
   if (health) {
+    const writtenAt = Date.now();
     await writeHealth({ paths, health: {
       schema: 2, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET },
-      owner: { pid: 77, start: '1' }, writtenAt: Date.now(), stopped: false, crashedAt: [],
+      owner: { pid: 77, start: '1' }, writtenAt, stopped: false, crashedAt: crashesAgo.map((ago) => writtenAt - ago),
     } });
   }
   const saved = await readAttention(paths);
@@ -80,6 +81,7 @@ test('status prints the whole view in every output mode and changes nothing', as
   for (const view of views.slice(1)) assert.deepEqual(view, views[0]);
   assert.deepEqual({ ...views[0], health: undefined }, { ...saved, health: undefined });
   assert.equal(views[0].health.status, 'healthy');
+  assert.equal(views[0].health.crashes, 0);
   assert.equal(readFileSync(f.paths.attentionPath, 'utf8'), before);
   assert.equal(existsSync(join(f.root, 'pwned')), false);
 });
@@ -89,8 +91,16 @@ test('status on a first run prints the initial state with missing health and wri
   const view = json(f.run(['attention', 'status']));
   assert.equal(view.schema, 1);
   assert.deepEqual(view.episodes, {});
-  assert.deepEqual(view.health, { status: 'missing', record: null });
+  assert.deepEqual(view.health, { status: 'missing', record: null, crashes: null });
   assert.equal(existsSync(f.state), false);
+});
+
+test('status reports the crashes in the window beside the health status', async (t) => {
+  const f = fixture(t);
+  await seed(f.paths, { crashesAgo: [120_000, 60_000] });
+  const { health } = json(f.run(['attention', 'status']));
+  assert.equal(health.status, 'healthy');
+  assert.equal(health.crashes, 2);
 });
 
 test('dismiss acts on the captured IDs only and reports the rest missing', async (t) => {
@@ -141,6 +151,15 @@ test('finish records the outcome for its own token only', async (t) => {
   assert.equal((await readAttention(f.paths)).episodes[a.id].delivery.popup.status, 'reserved');
   assert.deepEqual(json(popup(f, { op: 'finish', consumerId: 'popup-1', token: claim.token, outcome: 'interrupted' })), { finishedIds: [a.id] });
   assert.equal((await readAttention(f.paths)).episodes[a.id].delivery.popup.status, 'interrupted');
+});
+
+// Unstable is a warning, not a gate: the popup keeps claiming between crashes.
+test('a popup claim succeeds while the record carries two crashes', async (t) => {
+  const f = fixture(t);
+  const { a } = await seed(f.paths, { crashesAgo: [120_000, 60_000] });
+  const claim = json(popup(f, { op: 'claim', consumerId: 'popup-1' }));
+  assert.equal(claim.job.episodeId, a.id);
+  assert.equal(typeof claim.token, 'string');
 });
 
 test('a claim finds nothing while the coordinator is not healthy', async (t) => {

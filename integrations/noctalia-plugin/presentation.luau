@@ -3,8 +3,8 @@
 -- the workspace feed and the clock. The service reads files; the widget and panel
 -- draw; every decision about markers, health, navigation trust and motion is here.
 -- The marker rules restate integrations/niri/attention.js (attentionByWorkspace); the
--- health rule restates src/attention/store.js (healthStatus). JSON null arrives as an
--- absent key, so every optional field is read as possibly nil.
+-- health rules restate src/attention/store.js (healthStatus, crashCount). JSON null
+-- arrives as an absent key, so every optional field is read as possibly nil.
 
 local P = {}
 
@@ -17,10 +17,13 @@ P.CLAUDE_HINT = "Claude sub-agents share one session here: another sub-agent's a
 P.WITHHELD_LABEL = "Completion withheld — worker status unconfirmed"
 P.DIAGNOSTIC_HINT = "Dismissing only hides this notice: the completion gate stays closed until the worker reports or the session ends, and a completion withheld meanwhile is not shown later"
 P.DND_UNKNOWN_LABEL = "Do Not Disturb status unknown — toasts and popups are not shown, and are not replayed later"
+P.UNSTABLE_NOTICE = "Agent alerts unstable — the coordinator keeps crashing"
 
 P.HEALTH_STALE_MS = 10000
 P.CRASH_WINDOW_MS = 600000
 P.CRASH_HISTORY_MAX = 8
+-- Unstable: this many crashes in the window while the heartbeat is healthy.
+P.UNSTABLE_CRASHES = 2
 P.HEALTH_GRACE_MS = 10000
 P.TOPOLOGY_STALE_MS = 2000
 P.ARRIVAL_MS = 300
@@ -86,29 +89,53 @@ local function validCrashes(crashed: any, writtenAt: number): boolean
     return true
 end
 
+-- The one schema-2 predicate (store.js validHealth).
+local function validHealth(health: any): boolean
+    return isTable(health) and onlyKeys(health, { "schema", "instanceId", "epoch", "owner", "writtenAt", "stopped", "crashedAt" })
+        and health.schema == 2 and isText(health.instanceId) and #health.instanceId <= 128
+        and isTable(health.epoch) and onlyKeys(health.epoch, { "bootId", "desktopSession" })
+        and (health.epoch.bootId == nil or isText(health.epoch.bootId))
+        and (health.epoch.desktopSession == nil or isText(health.epoch.desktopSession))
+        and isTable(health.owner) and onlyKeys(health.owner, { "pid", "start" })
+        and isCount(health.owner.pid) and health.owner.pid > 0 and isDecimal(health.owner.start)
+        and isCount(health.writtenAt) and type(health.stopped) == "boolean"
+        and validCrashes(health.crashedAt, health.writtenAt)
+end
+
+-- A saved epoch is this boot's and this desktop session's only when both live IDs are known.
+local function liveEpoch(health: any, live: { [string]: any }): boolean
+    return isText(live.bootId) and isText(live.desktopSession) and health.epoch.bootId == live.bootId
+        and health.epoch.desktopSession == live.desktopSession
+end
+
 -- The health rule every consumer applies. A live identity that cannot be read is
 -- unknown and never matches a saved one.
 function P.healthStatus(health: any, live: { [string]: any }): string
     if health == nil then return "missing" end
-    if not isTable(health) or not onlyKeys(health, { "schema", "instanceId", "epoch", "owner", "writtenAt", "stopped", "crashedAt" })
-        or health.schema ~= 2 or not isText(health.instanceId) or #health.instanceId > 128
-        or not isTable(health.epoch) or not onlyKeys(health.epoch, { "bootId", "desktopSession" })
-        or (health.epoch.bootId ~= nil and not isText(health.epoch.bootId))
-        or (health.epoch.desktopSession ~= nil and not isText(health.epoch.desktopSession))
-        or not isTable(health.owner) or not onlyKeys(health.owner, { "pid", "start" })
-        or not isCount(health.owner.pid) or health.owner.pid <= 0 or not isDecimal(health.owner.start)
-        or not isCount(health.writtenAt) or type(health.stopped) ~= "boolean"
-        or not validCrashes(health.crashedAt, health.writtenAt) then
-        return "invalid"
-    end
-    if health.writtenAt > live.now then return "invalid" end
-    if not isText(live.bootId) or not isText(live.desktopSession) or health.epoch.bootId ~= live.bootId
-        or health.epoch.desktopSession ~= live.desktopSession
-        or (live.instanceId ~= nil and health.instanceId ~= live.instanceId) then
+    if not validHealth(health) or health.writtenAt > live.now then return "invalid" end
+    if not liveEpoch(health, live) or (live.instanceId ~= nil and health.instanceId ~= live.instanceId) then
         return "mismatched"
     end
     if live.now - health.writtenAt > P.HEALTH_STALE_MS then return "stale" end
     return "healthy"
+end
+
+-- The crashes a reader counts (store.js crashCount): entries no later than its clock and
+-- within the window, for a valid record of the live boot and desktop session; else nil.
+function P.crashCount(health: any, live: { [string]: any }): number?
+    if not validHealth(health) or not liveEpoch(health, live) then return nil end
+    local count = 0
+    for _, at in health.crashedAt do
+        if live.now - at >= 0 and live.now - at <= P.CRASH_WINDOW_MS then count += 1 end
+    end
+    return count
+end
+
+-- The widget's lasting signal; the history keeps at most CRASH_HISTORY_MAX entries, so
+-- a count at the cap may stand for more.
+function P.unstableLabel(crashes: number): string
+    local n = if crashes >= P.CRASH_HISTORY_MAX then tostring(P.CRASH_HISTORY_MAX) .. " or more" else tostring(crashes)
+    return "Agent alerts unstable — the coordinator crashed " .. n .. " times in 10 minutes; alerts arriving at each crash may be lost"
 end
 
 -- The attention view as `familiar attention status` prints it, read strictly: an

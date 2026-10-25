@@ -84,6 +84,19 @@ test('viewOf reads health against the live boot and session, never the saved one
   assert.equal(L.viewOf(t.state, '{oops', { now: 200, bootId: 'b1', desktopSession: '/s' }).health.status, 'invalid');
 });
 
+// Unstable changes no gate: the popup logic validates the history and keeps claiming.
+test('a record with two crashes is healthy to the popup logic and still leads to a claim', () => {
+  const { t, send } = scene();
+  send('codex', 'PermissionRequest', { session: 'a' });
+  t.desktop({ focused: '1', origins: { 'codex:a': '2' } });
+  const health = { schema: 2, instanceId: 'coordinator-1', epoch: { bootId: 'b1', desktopSession: '/s' }, owner: { pid: 7, start: '1' },
+    writtenAt: 700_000, stopped: false, crashedAt: [580_000, 640_000] };
+  const snapshot = plain(L.viewOf(t.state, JSON.stringify(health), { now: 700_100, bootId: 'b1', desktopSession: '/s' }));
+  assert.deepEqual(snapshot.health, { status: 'healthy' });
+  assert.equal(L.nextMoment(snapshot, undefined).action, 'initialise');
+  assert.equal(L.nextMoment(snapshot, null).action, 'claim');
+});
+
 test('the first snapshot attaches by suppressing what it already shows, in bounded batches', () => {
   const { t, send } = scene();
   send('codex', 'PermissionRequest', { session: 'a' });

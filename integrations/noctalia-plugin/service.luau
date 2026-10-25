@@ -4,7 +4,8 @@
 -- in flight per file and no subprocess for polling. When the feed is untrusted it asks
 -- Niri directly, read-only, at most every 250 ms and never overlapping. It publishes
 -- what the widgets and the panel draw through noctalia.state, only when it changed, and
--- sends the one health notice a disconnection earns (checking DND itself first).
+-- sends the one health notice a disconnection or an unstable episode earns (checking DND
+-- itself first).
 
 local P = require("./presentation.luau")
 
@@ -60,6 +61,13 @@ local lastRows: any = nil
 local disconnected = false
 local unhealthySince: number? = nil
 local failureGeneration = 0
+-- Unstable is the current reading (healthy, crashes at the threshold); the episode runs
+-- from the first such healthy reading to the first healthy reading below it, and readings
+-- that are not healthy (each restart passes through `mismatched`) leave it as it is.
+local unstable = false
+local unstableEpisode = false
+local unstableGeneration = 0
+-- Shared by both notices: at most one a minute, whichever asks.
 local noticeAt = -math.huge
 
 local function publish(key: string, value: any)
@@ -132,18 +140,28 @@ local function startFallback(now: number)
     if not queued then fallback.inflight = false end
 end
 
--- One notice per failure, at most one a minute across flaps, only after an exact
--- `off` from Noctalia's own DND query; a reply from before a recovery sends nothing.
-local function notice(now: number)
+-- One notice per failure or unstable episode, at most one a minute across both, only
+-- after an exact `off` from Noctalia's own DND query. A notice the minute or DND refuses
+-- is dropped, never delayed; `current` drops a reply whose cause has since ended.
+local function notice(now: number, body: string, current: () -> boolean)
     if now - noticeAt < NOTICE_SPACING_MS then return end
     noticeAt = now
-    local generation = failureGeneration
     noctalia.runAsync({ "noctalia", "msg", "notification-dnd-status" }, function(result: any)
-        if generation ~= failureGeneration or not disconnected then return end
+        if not current() then return end
         if result.exitCode == 0 and not result.timedOut and not result.stdoutTruncated and result.stdout == "off" then
-            noctalia.notify("familiar", P.DISCONNECTED_LABEL)
+            noctalia.notify("familiar", body)
         end
     end, 2000)
+end
+
+local function disconnectedNotice(now: number)
+    local generation = failureGeneration
+    notice(now, P.DISCONNECTED_LABEL, function() return generation == failureGeneration and disconnected end)
+end
+
+local function unstableNotice(now: number)
+    local generation = unstableGeneration
+    notice(now, P.UNSTABLE_NOTICE, function() return generation == unstableGeneration and unstableEpisode end)
 end
 
 function evaluate()
@@ -182,11 +200,19 @@ function evaluate()
     if down ~= disconnected then
         disconnected = down
         failureGeneration += 1
-        if down then notice(now) end
+        if down then disconnectedNotice(now) end
+    end
+
+    local crashes = if healthInvalid then nil else P.crashCount(healthRecord, live)
+    unstable = status == "healthy" and crashes ~= nil and crashes >= P.UNSTABLE_CRASHES
+    if status == "healthy" and unstable ~= unstableEpisode then
+        unstableEpisode = unstable
+        unstableGeneration += 1
+        if unstable then unstableNotice(now) end
     end
     publish(ATTENTION, {
         view = view, viewError = viewError, configError = configError,
-        health = { status = status, disconnected = down },
+        health = { status = status, disconnected = down, crashes = crashes, unstable = unstable },
     })
 end
 
