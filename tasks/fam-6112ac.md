@@ -8,7 +8,7 @@ complexity: low
 process: direct
 owner: docs/relay-cutover
 created: 2026-10-25T01:01:07Z
-updated: 2026-10-25T02:10:53Z
+updated: 2026-10-25T02:10:55Z
 started: 2026-10-25T02:05:00Z
 depends: []
 tags: [docs]
@@ -28,3 +28,4 @@ docs/install.md explains installing relay Codex hooks and Familiar pets but omit
 - 2026-10-25T02:07:17Z (docs/relay-cutover): Verified src/render/harness.js, src/observe/enrich.js and run.js against fam-ac775c: daemon-hosted hooks cannot prove terminal ownership; --no-daemon worked in the 0.160.1 pilot, disabling daemon auto-start did not. Document conditional launch prerequisite and link automatic selection guidance, preserving independent Codex-native rendering. Shared worktree .worktrees/docs-relay-cutover; baseline just test: 1341 passed, 5 skipped, zero failures.
 - 2026-10-25T02:10:32Z (docs/relay-cutover): review: impl round 1 — verdict: accept; findings: none; reviewer: codex/gpt-6.1-sol
 - 2026-10-25T02:10:53Z (docs/relay-cutover): attached: docs-review-report.md (2867 bytes): Read-only whole-branch review of fc1043d; codex/gpt-6.1-sol accepted with no findings
+- 2026-10-25T02:10:55Z (docs/relay-cutover): attached: review-ledger.md (1147 bytes): Controller rulings on the three review scope exclusions; no deferred minors
