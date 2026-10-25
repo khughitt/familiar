@@ -1,15 +1,17 @@
 ---
 id: fam-8c5e1c
 title: Detect a slow crash-looping attention coordinator
-status: doing
+status: done
 priority: 2
 size: s
 complexity: mid
 process: planned
 owner: feat/attention-health
 created: 2026-10-24T21:32:07Z
-updated: 2026-10-25T02:01:51Z
+updated: 2026-10-25T02:01:55Z
 started: 2026-10-24T21:41:33Z
+completed: 2026-10-25T02:01:55Z
+closed: 2026-10-25T02:01:55Z
 depends: [fam-9c8dd1]
 tags: [attention]
 agent: claude-code/claude-opus-5-5
@@ -41,3 +43,7 @@ Final review round 3 of fam-9c8dd1 found that a familiar-niri watch coordinator 
 - 2026-10-25T01:45:43Z (feat/attention-health): review: impl round 1 — verdict: revise; findings: Minor 6; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T01:50:57Z (feat/attention-health): review: impl round 2 — verdict: accept; findings: Minor 2; reviewer: claude-code/claude-opus-5-5
 - 2026-10-25T02:01:51Z (feat/attention-health): attached: sdd-ledger.md (9254 bytes): SDD ledger: pre-flight scan, per-task reviews, rulings and deferred minors for the crash-history plan
+- 2026-10-25T02:01:55Z (feat/attention-health): done
+  provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
+- 2026-10-25T02:01:55Z (feat/attention-health): heartbeat schema 2 with a crash history; bar warns 'unstable' at 2 crashes in 10 min without changing gates; clean group stops not counted; docs and upgrade runbook
+  provenance: {"harness_session":"claude-code:bd545b63-145e-4536-a6e1-addc72bbcb4b","harness_session_source":"CLAUDE_CODE_SESSION_ID"}
