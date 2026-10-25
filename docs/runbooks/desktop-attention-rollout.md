@@ -101,9 +101,14 @@ familiar attention status | jq -r '.health.status, .desktop.status, .desktop.dnd
 #                            "unknown" DND drops every popup and toast, never replayed)
 ```
 
-The start limit matters: each start writes a fresh heartbeat, so a coordinator that
-crashes right after starting would otherwise look healthy forever. With the limit, a
-crash loop ends in a failed unit, its heartbeat goes stale, and the bar reports it.
+The start limit ends only fast crash loops: each start writes a fresh heartbeat, so a
+coordinator that crashes right after starting would otherwise look healthy forever, and
+with the limit such a loop ends in a failed unit, its heartbeat goes stale, and the bar
+reports it. A coordinator that lives 15 s or more between crashes never reaches the
+limit and restarts indefinitely. The heartbeat's crash history covers that case: two
+crashes within ten minutes, which any loop with a period under about five minutes
+produces, show the bar's "Agent alerts unstable" node and one notice. Rarer crashes are
+not reported; read `journalctl --user -u familiar-attention` for them.
 
 Status, logs and stop:
 
@@ -165,10 +170,14 @@ one toast:
 - Dismissal: right click and the Alerts panel; a request arriving meanwhile survives.
 - DND on and unknown: nothing pops or toasts; markers stay; turning DND off replays
   nothing.
-- Kill the coordinator (`systemctl --user kill familiar-attention`), then freeze it
-  (`kill -STOP`): within 10 s the bar shows "Agent alerts disconnected — toasts
-  unavailable" and one notice (DND off); navigation keeps working; restart and
-  `kill -CONT` recover without a backlog.
+- Kill the coordinator, then freeze it (`kill -STOP`). Kill only the main process with
+  SIGKILL: `systemctl --user kill --kill-whom=main --signal=SIGKILL familiar-attention`.
+  A plain `systemctl --user kill` sends SIGTERM to the whole control group, which is a
+  clean stop: the coordinator exits 0, `Restart=on-failure` does not restart it, and
+  it is not counted as a crash. Within 10 s the bar shows "Agent alerts disconnected —
+  toasts unavailable" and one notice (DND off); navigation keeps working; restart and
+  `kill -CONT` recover without a backlog. The SIGKILL is also a counted crash: two
+  within ten minutes show "Agent alerts unstable".
 - Two outputs: the visible workspace on the other monitor stays unseen; output B's
   pill focuses output B's workspace while output A is focused.
 - Latency: over 100 workspace switches, event to pill update p95 <= 100 ms and
@@ -177,6 +186,62 @@ one toast:
 
 Record each result on fam-9c8dd1 and ops-e40874. A duplicate native and familiar toast,
 a missed request marker, or an undetected dead coordinator fails acceptance.
+
+## Upgrade: the crash history (approval: "restart the attention coordinator, plugin and popup")
+
+Merging the crash history changes the heartbeat to schema 2. Old readers reject it and
+new readers reject schema 1, so the merge is an activation step: run the following
+right after it, under that one approval. The CLI switches as soon as main changes; the
+running coordinator, plugin and popup keep their loaded code until restarted.
+
+1. Restart the coordinator. Where the `familiar-attention` unit exists:
+
+   ```sh
+   systemctl --user restart familiar-attention
+   ```
+
+   Where only the Niri-started watcher runs, take its pid, kill that pid, and relaunch
+   it with the restore line from the Rollback section (a SIGTERM is now a clean stop
+   that nothing restarts):
+
+   ```sh
+   pgrep -f '[f]amiliar-niri watch'
+   kill <pid>
+   ~/d/familiar/bin/familiar-niri watch </dev/null >/dev/null 2>&1 &
+   ```
+
+2. Reload the plugin. Noctalia 5.3 has no plugin reload command: `noctalia msg` offers
+   `plugin` (dispatches an event to an entry) and `plugins` (list, enable, disable,
+   update, source), and no reload. Restart Noctalia instead, which redraws the whole
+   bar. Stop it and start it again; the new process inherits this shell's environment,
+   so check that its `PATH` resolves `familiar` as in the preflight check above:
+
+   ```sh
+   kill "$(pgrep -xo noctalia)"
+   noctalia -d </dev/null >/dev/null 2>&1
+   ```
+
+3. Restart the popup, as in step 6:
+
+   ```sh
+   pkill -f '[q]s -d -p .*/integrations/niri-desktop'
+   qs -d -p ~/d/familiar/integrations/niri-desktop
+   ```
+
+Two windows are transient. From the merge until the coordinator restarts, the old
+coordinator writes schema 1: the old plugin reads healthy, but the new CLI's popup gate
+is closed, so popups are lost with the bar reading healthy, and popup opportunities
+queued meanwhile are suppressed at the next recovery, not replayed. From the
+coordinator restart until the plugin and popup restart, each old consumer reads schema
+2 as invalid: the plugin shows disconnected and sends its one notice, the old popup
+shows nothing, and popup-eligible episodes from that window are suppressed when the
+restarted popup starts, not replayed. Doing the three restarts together keeps both
+windows to seconds. Confirm:
+
+```sh
+familiar attention status | jq -r '.health.status, .health.crashes'
+# healthy / 0
+```
 
 ## Rollback
 
