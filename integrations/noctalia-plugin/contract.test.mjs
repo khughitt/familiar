@@ -773,6 +773,51 @@ test('restarts inside an unstable episode do not re-notify', () => {
   assert.equal(result.unstable, true);
 });
 
+// The node is the lasting signal: a restart's `mismatched` moment inside the episode does
+// not blink it off, and it clears when the episode ends, at the first healthy reading
+// with fewer than two crashes.
+test('the unstable node stays through a restart and clears when the episode ends', () => {
+  const { t } = attentionScene();
+  // The two older crashes leave the window at +50000 and +60000; the restart at +20000
+  // adds one, so the count reads 2, 3, 2, then 1.
+  const old = [T0 - 550_000, T0 - 540_000];
+  const restart = T0 + 20_000;
+  const scene = feedOnly(steady(t.state, 2000), T0 + 2000, T0 + 80_000);
+  scene.health = crashedHealthAt(T0, old);
+  for (let at = T0 + 2000; at <= T0 + 80_000; at += 2000) {
+    const after = at >= restart;
+    scene.events.push({ at, file: 'attention-health.json', value: crashedHealthAt(at, after ? [...old, restart - 2000] : old,
+      { instanceId: after ? 'coordinator-2' : 'coordinator-1' }) });
+  }
+  scene.events.push({ at: restart + 2000, file: 'attention.json', value: restartedState(t.state, 'coordinator-2') });
+  const [result] = out(luau(`
+    ${DND_OFF}
+    Host.service()
+    local b = Host.widget("HDMI-A-1")
+    Host.advance(5000)
+    local mismatched, gaps, clearedAt = 0, 0, nil
+    while Host.now < ${T0 + 75_000} do
+      Host.advance(50)
+      local shown = b:find("status-unstable") ~= nil
+      if Host.state["familiar/attention"].health.status == "mismatched" then mismatched += 1 end
+      if clearedAt == nil and not shown then
+        if Host.now < ${T0 + 60_000} then gaps += 1 else clearedAt = Host.now end
+      elseif clearedAt ~= nil and shown then
+        gaps += 1
+      end
+    end
+    emit({ mismatched = mismatched, gaps = gaps, clearedAt = clearedAt, notices = bodies(),
+      health = b:find("status-health") ~= nil, published = Host.state["familiar/attention"].health })
+  `, scene));
+  assert.ok(result.mismatched >= 20, `${result.mismatched} mismatched samples`);
+  const nodeBlinkedOffDuringTheEpisode = result.gaps > 0;
+  assert.equal(nodeBlinkedOffDuringTheEpisode, false);
+  assert.ok(result.clearedAt > T0 + 60_000 && result.clearedAt <= T0 + 60_500, `${result.clearedAt - T0}`);
+  assert.equal(result.health, false);
+  assert.deepEqual(list(result.notices), [UNSTABLE_NOTICE]);
+  assert.deepEqual(result.published, { status: 'healthy', disconnected: false, crashes: 1, unstable: false });
+});
+
 // The disconnected notice and the unstable one share the minute bound; the outage starts
 // more than a minute after the episode's notice, so its own notice is sent. Recovery must
 // not start a new episode. The long outage recovers more than a minute after the

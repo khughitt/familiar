@@ -61,9 +61,10 @@ local lastRows: any = nil
 local disconnected = false
 local unhealthySince: number? = nil
 local failureGeneration = 0
--- Unstable is the current reading (healthy, crashes at the threshold); the episode runs
--- from the first such healthy reading to the first healthy reading below it, and readings
--- that are not healthy (each restart passes through `mismatched`) leave it as it is.
+-- An unstable episode runs from the first healthy reading with crashes at the threshold
+-- to the first healthy reading below it; readings that are not healthy (each restart
+-- passes through `mismatched`) leave it as it is. `unstable`, what the widgets show,
+-- follows the open episode, so a restart does not blink the warning off.
 local unstable = false
 local unstableEpisode = false
 local unstableGeneration = 0
@@ -204,12 +205,15 @@ function evaluate()
     end
 
     local crashes = if healthInvalid then nil else P.crashCount(healthRecord, live)
-    unstable = status == "healthy" and crashes ~= nil and crashes >= P.UNSTABLE_CRASHES
-    if status == "healthy" and unstable ~= unstableEpisode then
-        unstableEpisode = unstable
+    local atThreshold = crashes ~= nil and crashes >= P.UNSTABLE_CRASHES
+    if status == "healthy" and atThreshold ~= unstableEpisode then
+        unstableEpisode = atThreshold
         unstableGeneration += 1
-        if unstable then unstableNotice(now) end
+        if atThreshold then unstableNotice(now) end
     end
+    -- A reading that cannot state two crashes (another epoch's record, or none) shows no
+    -- count it does not have; one that lasts becomes a disconnection, which hides it anyway.
+    unstable = unstableEpisode and atThreshold
     publish(ATTENTION, {
         view = view, viewError = viewError, configError = configError,
         health = { status = status, disconnected = down, crashes = crashes, unstable = unstable },
