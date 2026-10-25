@@ -4,13 +4,13 @@
 // and the real atomic writer; no host socket, signal, compositor or notification.
 import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadThemePack } from 'familiar-theme';
 import { reduceAttention } from '../src/attention/model.js';
-import { mutateAttention, readAttention } from '../src/attention/store.js';
+import { healthStatus, mutateAttention, readAttention } from '../src/attention/store.js';
 import { paths as familiarPaths } from '../src/bus/paths.js';
 import { withLock } from '../src/bus/lock.js';
 import { writeJsonAtomic } from '../src/bus/store.js';
@@ -61,16 +61,26 @@ function fakeClock(settle) {
   };
 }
 
-// A pushable stand-in for `niri msg -j event-stream`.
+// A pushable stand-in for `niri msg -j event-stream`. Its lines can end in four ways,
+// each with the `ended` the child's `close` event would give: `end()` is the compositor
+// going away (exit 1), `close()` the coordinator's own SIGTERM, `endBy(signal)` a signal
+// someone else sent (`endBy(null)` is a spawn error), and `hang()` a child that closed
+// its output but never exits.
 function fakeStream() {
   const queue = [];
   let wake = null;
   let ended = false;
+  let finish;
+  const finished = new Promise((resolve) => { finish = resolve; });
+  const endLines = () => { ended = true; wake?.(); };
   const stream = {
     closed: false,
+    ended: finished,
     push(event) { queue.push(JSON.stringify(event)); wake?.(); },
-    end() { ended = true; wake?.(); },
-    close() { stream.closed = true; ended = true; wake?.(); },
+    end() { endLines(); finish({ code: 1, signal: null }); },
+    endBy(signal) { endLines(); finish({ code: null, signal }); },
+    hang() { endLines(); },
+    close() { stream.closed = true; endLines(); finish({ code: null, signal: 'SIGTERM' }); },
     lines: {
       async *[Symbol.asyncIterator]() {
         for (;;) {
@@ -98,17 +108,19 @@ async function harness(t, { dnd = () => 'off', send = async () => {}, windows = 
   const io = new Set();
   const settle = async () => {
     for (let i = 0; i < 8; i++) {
-      while (io.size) await Promise.all([...io]);
+      while (io.size) await Promise.allSettled([...io]);
       await new Promise((resolve) => setImmediate(resolve));
     }
   };
   const clock = fakeClock(settle);
-  const stream = fakeStream();
-  const calls = { windows: 0, dnd: 0, toasts: [], locks: 0 };
+  const calls = { windows: 0, dnd: 0, toasts: [], locks: 0, eventStreams: 0 };
   const writes = [];
+  // Per run: the window queries since the latest start, so a restart's boot waits on its own.
+  let runWindows = 0;
   const execFile = async (file, args) => {
     if (file === 'niri' && args.join(' ') === 'msg -j windows') {
       calls.windows += 1;
+      runWindows += 1;
       return { stdout: JSON.stringify(windows()), stderr: '' };
     }
     if (file === 'noctalia' && args[1] === 'notification-dnd-status') {
@@ -133,7 +145,24 @@ async function harness(t, { dnd = () => 'off', send = async () => {}, windows = 
     emit: (name) => listeners.get(name)?.(),
     count: () => listeners.size,
   };
+  // Health writes: every record issued, in order; one may be held before it enters `io`
+  // (so `settle` never waits on it), and every write after a budget may be made to fail.
+  const healthWrites = [];
+  let heldHealthWrite = null;
+  let healthWritesLeft = null;
   const writeAtomic = async (path, value) => {
+    if (path === paths.attentionHealthPath) {
+      healthWrites.push(value);
+      if (healthWritesLeft !== null) {
+        if (healthWritesLeft === 0) throw new Error('health write refused by the test');
+        healthWritesLeft -= 1;
+      }
+      if (heldHealthWrite !== null) {
+        const held = heldHealthWrite;
+        heldHealthWrite = null;
+        await held;
+      }
+    }
     if (writeDelayMs) await clock.sleep(writeDelayMs);
     const done = writeJsonAtomic(path, value);
     io.add(done);
@@ -149,7 +178,10 @@ async function harness(t, { dnd = () => 'off', send = async () => {}, windows = 
     paths, execFile, watch, clock, signals, writeAtomic, lockWith,
     stderr: { write: (text) => { stderr += text; } },
     relay: { ancestors: chainsFor },
-    eventStream: () => stream,
+    eventStream: () => {
+      calls.eventStreams += 1;
+      return h.stream;
+    },
     loadContext: async () => ({ pack, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     liveEpoch: () => EPOCH, instanceId: 'coordinator-1', owner: { pid: 77, start: '123' },
   };
@@ -176,16 +208,37 @@ async function harness(t, { dnd = () => 'off', send = async () => {}, windows = 
     assert.fail(`timed out waiting for ${what}; stderr: ${stderr}`);
   };
   const touch = (file) => watcher.listener('rename', file);
-  const start = () => runCoordinator(deps);
+  // Each run gets its own event stream, created before the coordinator asks for it.
+  const begin = (overrides) => {
+    h.stream = fakeStream();
+    runWindows = 0;
+    h.running = runCoordinator({ ...deps, ...overrides });
+    return h.running;
+  };
+  const start = () => begin({});
   const h = {
-    dir, paths, clock, stream, calls, writes, signals, settle, capture, until, touch, deps, start,
+    dir, paths, clock, calls, writes, healthWrites, signals, settle, capture, until, touch, deps, start,
+    stream: null, running: null,
     stderr: () => stderr, watcher: () => watcher,
     state: () => readAttention(paths),
-    // Start, seed the topology, and wait for the first resync to settle.
-    async boot() {
-      h.running = start();
-      stream.push({ WorkspacesChanged: { workspaces: WORKSPACES } });
-      await until(async () => calls.windows > 0, 'the first resync');
+    // The next run, as a new coordinator instance in the same state directory.
+    restart: ({ instanceId }) => begin({ instanceId }),
+    // The next health write waits until the returned function is called.
+    holdHealthWrite() {
+      let release;
+      heldHealthWrite = new Promise((resolve) => { release = resolve; });
+      return release;
+    },
+    // Every health write after the next `after` fails.
+    failHealthWrites({ after }) {
+      healthWritesLeft = after;
+    },
+    // Start (or, given an instance ID, restart), seed the topology, and wait for the
+    // run's first resync to settle.
+    async boot({ instanceId } = {}) {
+      if (instanceId === undefined) start(); else h.restart({ instanceId });
+      h.stream.push({ WorkspacesChanged: { workspaces: WORKSPACES } });
+      await until(async () => runWindows > 0, 'the first resync');
       await clock.advance(200);
       await h.quiesce();
     },
@@ -257,6 +310,64 @@ test('a compositor disconnect publishes a disconnected feed and exits nonzero fo
   assert.equal(h.watcher().closed, true);
   assert.equal(h.clock.pending(), 0);
   assert.match(h.stderr(), /event stream closed/);
+});
+
+// Whether the run has not yet stopped after `ms` more of fake time, counted from once
+// what the test just did has been consumed. A stop closes the watcher at once, before
+// the exit's own writes, so this reads the stop itself.
+const runningAfter = async (h, ms) => {
+  await h.settle();
+  await h.clock.advance(ms);
+  return !h.watcher().closed;
+};
+
+test('a child stopped by the group signal before ours is a clean stop', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.endBy('SIGTERM');
+  assert.equal(await runningAfter(h, 500), true);
+  h.signals.emit('SIGTERM');
+  assert.equal(await h.exit(), 0);
+  assert.equal((await readHealthFile(h)).stopped, true);
+  assert.equal(h.clock.pending(), 0);
+  assert.equal(h.signals.count(), 0);
+});
+
+test('a child signalled alone exits 1 after a second', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.endBy('SIGTERM');
+  assert.equal(await runningAfter(h, 999), true);
+  assert.equal(await runningAfter(h, 1), false);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
+});
+
+test('a child that closes its output but stays alive is a stream failure', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.hang();
+  assert.equal(await runningAfter(h, 999), true);
+  assert.equal(h.stream.closed, false);
+  assert.equal(await runningAfter(h, 1), false);
+  assert.equal(h.stream.closed, true);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
+});
+
+test('a spawn error ends the stream as a failure', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  // What a spawn error resolves `ended` with: neither an exit code nor a signal.
+  h.stream.endBy(null);
+  assert.equal(await h.exit(), 1);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.match(h.stderr(), /event stream/);
+  assert.equal(h.clock.pending(), 0);
 });
 
 test('a workspace delta before the full snapshot fails the stream rather than guessing', async (t) => {
@@ -529,6 +640,206 @@ test('heartbeat and feed renames never trigger a resync, and a rename burst coal
   await h.quiesce();
   assert.equal(h.calls.windows, before + 1);
   await h.stop();
+});
+
+// --- crash history ---------------------------------------------------------------------------
+
+const readHealthFile = async (h) => JSON.parse(await readFile(h.paths.attentionHealthPath, 'utf8'));
+const heartbeatsOf = (h, instanceId) => h.healthWrites.filter((record) => record.instanceId === instanceId);
+const predecessor = (extra = {}) => ({
+  schema: 2, instanceId: 'old-instance', epoch: EPOCH, owner: { pid: 66, start: '42' }, writtenAt: START - 1000,
+  stopped: false, crashedAt: [], ...extra,
+});
+const unusableLines = (h) => h.stderr().split('health record unusable; crash history reset').length - 1;
+
+test('an unclean predecessor is counted; a clean one is not', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.stream.end();
+  assert.equal(await h.exit(), 1);
+  const run1 = await readHealthFile(h);
+  assert.equal(run1.stopped, false);
+  await h.boot({ instanceId: 'coordinator-2' });
+  assert.deepEqual(heartbeatsOf(h, 'coordinator-2')[0].crashedAt, [run1.writtenAt]);
+  assert.equal(await h.stop(), 0);
+  const run2 = await readHealthFile(h);
+  const lastPeriodic = heartbeatsOf(h, 'coordinator-2').filter((record) => !record.stopped).at(-1);
+  assert.deepEqual(run2, { ...lastPeriodic, stopped: true });
+  await h.boot({ instanceId: 'coordinator-3' });
+  assert.deepEqual(heartbeatsOf(h, 'coordinator-3')[0].crashedAt, run2.crashedAt);
+  assert.equal(await h.stop(), 0);
+});
+
+test('history from another boot, schema 1 or an invalid record starts empty', async (t) => {
+  const { stopped, crashedAt, ...schemaOne } = predecessor({ schema: 1 });
+  const cases = [
+    ['another boot', predecessor({ epoch: { ...EPOCH, bootId: '22222222-2222-4222-8222-222222222222' }, crashedAt: [START - 2000] }), 0],
+    ['another desktop session', predecessor({ epoch: { ...EPOCH, desktopSession: '/run/other.sock' }, crashedAt: [START - 2000] }), 0],
+    ['schema 1', schemaOne, 1],
+    ['invalid', predecessor({ crashedAt: [START - 1000, START - 2000] }), 1],
+  ];
+  for (const [name, record, lines] of cases) {
+    const h = await harness(t);
+    await writeJsonAtomic(h.paths.attentionHealthPath, record);
+    await h.boot();
+    assert.deepEqual(heartbeatsOf(h, 'coordinator-1')[0].crashedAt, [], name);
+    assert.equal(unusableLines(h), lines, `${name}: ${h.stderr()}`);
+    assert.equal(await h.stop(), 0);
+  }
+});
+
+test('a backward clock step keeps the heartbeat valid', async (t) => {
+  const h = await harness(t);
+  const ahead = START + 60_000;
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor({ writtenAt: ahead, crashedAt: [ahead] }));
+  await h.boot();
+  await h.clock.advance(2000);
+  const record = await readHealthFile(h);
+  assert.equal(healthStatus(record, { now: h.clock.now(), instanceId: 'coordinator-1', ...EPOCH }), 'healthy');
+  const own = heartbeatsOf(h, 'coordinator-1');
+  assert.ok(own.length > 1);
+  assert.ok(own.every((beat) => beat.crashedAt.every((at) => at <= beat.writtenAt)), JSON.stringify(own));
+  assert.doesNotMatch(h.stderr(), /heartbeat:/);
+  assert.equal(await h.stop(), 0);
+});
+
+test('a future crash dropped after a backward clock step does not come back', async (t) => {
+  const h = await harness(t);
+  const ahead = START + 5000;
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor({ writtenAt: ahead, crashedAt: [ahead] }));
+  await h.boot();
+  assert.ok(heartbeatsOf(h, 'coordinator-1').every((beat) => !beat.crashedAt.includes(ahead)));
+  await h.clock.advance(8000);
+  const own = heartbeatsOf(h, 'coordinator-1');
+  assert.ok(own.at(-1).writtenAt > ahead, JSON.stringify(own));
+  assert.ok(own.every((beat) => !beat.crashedAt.includes(ahead)), JSON.stringify(own));
+  assert.equal(await h.stop(), 0);
+});
+
+test('entries age out of the window while the coordinator runs', async (t) => {
+  const h = await harness(t);
+  const old = START - 599_990;
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor({ writtenAt: START, stopped: true, crashedAt: [old, old] }));
+  // Started without moving the clock, so the first heartbeat is written at START.
+  h.start();
+  for (let i = 0; i < 1000 && h.healthWrites.length === 0; i++) await new Promise((resolve) => setTimeout(resolve, 2));
+  assert.deepEqual([h.healthWrites[0].writtenAt, h.healthWrites[0].crashedAt], [START, [old, old]]);
+  h.stream.push({ WorkspacesChanged: { workspaces: WORKSPACES } });
+  await h.clock.advance(20_000);
+  assert.deepEqual((await readHealthFile(h)).crashedAt, []);
+  assert.equal(await h.stop(), 0);
+});
+
+test('a failed final write leaves the crash countable', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  h.failHealthWrites({ after: 0 });
+  assert.equal(await h.stop(), 0);
+  assert.equal((await readHealthFile(h)).stopped, false);
+  assert.equal(h.healthWrites.at(-1).stopped, true);
+  assert.match(h.stderr(), /final heartbeat: health write refused by the test/);
+});
+
+test('a stop before any successful heartbeat writes no final record', async (t) => {
+  const h = await harness(t);
+  h.failHealthWrites({ after: 0 });
+  await h.boot();
+  await h.clock.advance(2000);
+  assert.equal(await h.stop(), 0);
+  assert.ok(h.healthWrites.length > 1);
+  assert.equal(h.healthWrites.some((record) => record.stopped), false);
+  await assert.rejects(readFile(h.paths.attentionHealthPath), { code: 'ENOENT' });
+});
+
+test('toasts are still claimed and sent after a start with two carried crashes', async (t) => {
+  const h = await harness(t, { windows: onWorkspace({ 101: 2 }) });
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor({ writtenAt: START - 1000, crashedAt: [START - 2000] }));
+  await h.boot();
+  assert.deepEqual(heartbeatsOf(h, 'coordinator-1')[0].crashedAt, [START - 2000, START - 1000]);
+  await h.capture('codex', 'PermissionRequest', { session: 'a' }, 101);
+  h.touch('attention.json');
+  await h.until(async () => h.calls.toasts.length === 1, 'one toast');
+  await h.until(async () => episodeOf(await h.state(), 'codex:a').delivery.toast.status === 'delivered', 'delivered');
+  assert.equal(await h.stop(), 0);
+});
+
+test('a late heartbeat cannot overwrite the final record', async (t) => {
+  const h = await harness(t);
+  await h.boot();
+  const before = h.healthWrites.length;
+  const release = h.holdHealthWrite();
+  await h.clock.advance(2000);
+  assert.equal(h.healthWrites.length, before + 1);
+  const held = h.healthWrites.at(-1);
+  h.signals.emit('SIGTERM');
+  await h.clock.advance(100);
+  await h.settle();
+  const finalIssuedWhileBeatHeld = h.healthWrites.some((record) => record.stopped);
+  release();
+  assert.equal(await h.exit(), 0);
+  assert.equal(finalIssuedWhileBeatHeld, false);
+  assert.deepEqual(h.healthWrites.slice(-2), [held, { ...held, stopped: true }]);
+  assert.deepEqual(await readHealthFile(h), { ...held, stopped: true });
+});
+
+test('an unreadable health record resets the history and starts normally', async (t) => {
+  const h = await harness(t);
+  await mkdir(h.paths.attentionHealthPath, { recursive: true });
+  await h.boot();
+  assert.equal(unusableLines(h), 1, h.stderr());
+  assert.ok(h.calls.windows > 0);
+  const feed = JSON.parse(await readFile(niriWorkspacesPath(h.paths), 'utf8'));
+  assert.equal(feed.connected, true);
+  // Its own heartbeats cannot replace a directory either.
+  assert.match(h.stderr(), /heartbeat:/);
+  assert.equal(h.writes.some((write) => write.path === h.paths.attentionHealthPath), false);
+  assert.equal(await h.stop(), 0);
+});
+
+test('a stop during recovery exits 0 with no heartbeat and leaves the predecessor record', async (t) => {
+  const h = await harness(t);
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor());
+  const seeded = await readFile(h.paths.attentionHealthPath, 'utf8');
+  let release;
+  const held = withLock(h.paths.presentationLockPath, () => new Promise((resolve) => { release = resolve; }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const running = h.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const handlersDuringRecovery = h.signals.count();
+  h.signals.emit('SIGTERM');
+  release();
+  await held;
+  assert.equal(handlersDuringRecovery, 2);
+  assert.equal(await h.exit(running), 0);
+  assert.equal(await readFile(h.paths.attentionHealthPath, 'utf8'), seeded);
+  assert.equal(h.healthWrites.length, 0);
+  assert.equal(h.watcher(), null);
+  assert.equal(h.calls.eventStreams, 0);
+  assert.equal(h.clock.pending(), 0);
+  assert.equal(h.signals.count(), 0);
+  await assert.rejects(readFile(niriWorkspacesPath(h.paths)), { code: 'ENOENT' });
+});
+
+test('recovery logs what it gave up', async (t) => {
+  const h = await harness(t, { windows: onWorkspace({ 101: 2, 201: 2 }) });
+  await h.capture('codex', 'PermissionRequest', { session: 'a' }, 101);
+  await h.capture('codex', 'PermissionRequest', { session: 'b' }, 201);
+  await mutateAttention({ paths: h.paths }, async (state) => {
+    let next = reduceAttention(state, { type: 'desktop', instanceId: 'old-instance', status: 'known', dnd: 'off',
+      workspaces: [], origins: {}, enrichment: {}, now: h.clock.now() }).state;
+    next = reduceAttention(next, { type: 'claim', surface: 'toast', consumerId: 'old-instance', token: 'old', now: h.clock.now() }).state;
+    return { state: next, result: null };
+  });
+  await mutateAttention({ paths: h.paths }, async (state) => {
+    const next = structuredClone(state);
+    // a is only reserved, b only queued.
+    next.episodes[episodeOf(state, 'codex:a').id].delivery.popup = { status: 'suppressed' };
+    next.episodes[episodeOf(state, 'codex:b').id].delivery.toast = { status: 'eligible' };
+    return { state: next, result: null };
+  });
+  await h.boot();
+  assert.match(h.stderr(), /recover: suppressed 1 queued, 1 uncertain/);
+  assert.equal(await h.stop(), 0);
 });
 
 // --- one-shot sync ----------------------------------------------------------------------------

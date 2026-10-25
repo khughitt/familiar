@@ -95,13 +95,74 @@ refuses to start). It keeps three paths apart so none can stall another:
   A starting coordinator first records itself in the saved state with the desktop
   `unknown`, so nothing is claimed or classified on its predecessor's readings.
   It is healthy only while under 10 s old, from this boot and this desktop session, and
-  from the coordinator that classified the saved state.
+  from the coordinator that classified the saved state. The record is schema 2 and has
+  exactly these keys: `schema`, `instanceId`, `epoch`, `owner`, `writtenAt`, `stopped`
+  and `crashedAt`. Schema 1 is invalid for every reader. See "Crash history" below.
 - **Attention**: debounced passes that take the presentation lock only when attribution
   changed or an episode awaits classification, with all IPC outside the lock. Focus
   changes take the lock only to mark unseen episodes on the newly focused workspace.
 
 DND is polled with the heartbeat. `familiar-niri sync` runs one pass of the same work
 and leaves attention alone while `watch` runs.
+
+### Crash history
+
+A live heartbeat shows the current instance is alive, not that the coordinator stays
+up: each start writes a fresh heartbeat, and a coordinator that dies and restarts
+every few minutes reads healthy. Each recovery suppresses what was queued and marks
+what was reserved uncertain, so the alerts arriving at each crash can lose their toast
+(their pill markers stay). The heartbeat therefore carries a bounded crash history,
+which only the singleton coordinator maintains.
+
+- `stopped` is `false` while an instance runs. `crashedAt` lists the ends of
+  predecessors, in the same boot and desktop session, that did not stop cleanly; each
+  end is that predecessor's last `writtenAt`. It holds at most 8 non-decreasing
+  integer milliseconds, each within 10 minutes before the record's `writtenAt` and no
+  later than it. An empty list is valid, and a record that breaks any of this is
+  invalid for every reader (`validHealth`).
+- A starting coordinator reads the existing record under the singleton lock, before
+  recovery. A record of another boot or desktop session, or a missing one, starts an
+  empty history silently (an unknown live boot ID or desktop session never matches).
+  An unreadable, invalid or schema-1 record starts an empty history and logs one line;
+  it never aborts startup. A valid record of this boot and session contributes its
+  `crashedAt`, plus its `writtenAt` when it is not `stopped`.
+- Every heartbeat restates the history against the clock reading that becomes
+  `writtenAt`: entries later than it or more than 10 minutes older are dropped, the
+  rest sorted, the newest 8 kept. Recovery logs how many queued episodes it suppressed
+  and how many reserved ones it made uncertain.
+- A stop is clean when the coordinator ends on SIGTERM or SIGINT and exits 0. The
+  handlers are registered before recovery, so a stop that arrives during recovery
+  exits 0 without starting the watcher, event stream, intervals, heartbeat or final
+  record. On a clean stop the coordinator clears the heartbeat interval, waits for the
+  in-flight write, drains, and writes one final record: the last heartbeat that landed
+  with `stopped: true`, its `writtenAt` and `crashedAt` unchanged (so it is not
+  refreshed into looking healthy). An instance that stops before its first heartbeat
+  writes none, and its predecessor's record stands. A crash, SIGKILL, OOM kill, abort,
+  a stop that hangs in the drain until systemd kills it, or a failed final write
+  leaves `stopped` false and counts as a crash. `stopped` does not change the health
+  status.
+- Stopping a unit signals the `niri msg event-stream` child too, so the stream can end
+  before the coordinator sees its own signal. When the lines end, the coordinator waits
+  up to 1 s for the child's `close` (a child still alive then is killed and the end is
+  a failure, exit 1). If the child died by a SIGTERM or SIGINT the coordinator did not
+  send, it waits up to 1 s for its own SIGTERM or SIGINT: one that arrives is a clean
+  stop (exit 0); none arriving (only the child was signalled), or any other end of the
+  stream, exits 1 and supervision restarts it.
+- `familiar-niri sync` neither reads nor writes the health record.
+
+Readers derive `crashes`: the number of `crashedAt` entries with `0 <= now - t <= 10
+minutes` at the reader's clock, for a valid record of the live boot and desktop
+session (both known); otherwise null. The coordinator is **unstable** while the health
+status is `healthy` and `crashes` is 2 or more. That reports any crash loop with a
+period under about five minutes, whatever the unit's restart and start-limit
+properties; rarer crashes are not reported. A coordinator that hangs without crashing
+is not detected.
+
+Unstable is a warning beside health, not a health status, and changes no gate: the
+popup gate, the widget's trusted attribution and the coordinator's toast claims keep
+requiring and doing what they did, so alerts keep working between crashes. The popup
+logic validates schema 2 but does not compute `crashes`.
+`familiar attention status` reports `health.crashes` beside `health.status`.
 
 ## The bar plugin
 
@@ -125,6 +186,19 @@ own output:
   3 s before it counts. Otherwise an unhealthy coordinator shows "Agent alerts
   disconnected — toasts unavailable" and sends one notice through Noctalia (only on an
   exact DND `off`, at most one a minute, never as a backlog).
+- An unstable coordinator (see "Crash history") shows a persistent node, "Agent alerts
+  unstable — the coordinator crashed N times in 10 minutes; alerts arriving at each
+  crash may be lost" (N is "8 or more" at the cap). It sits below a fault or a
+  disconnection (either hides it) and beside the unknown-DND indication. An unstable
+  episode runs from the first healthy reading with `crashes` of 2 or more to the first
+  healthy reading with fewer; the non-healthy readings between (each restart passes
+  through a mismatched record) neither end nor restart it, so the node stays through a
+  brief restart and clears when `crashes` falls below 2. Each episode, including one
+  found when the plugin starts, sends one notice, "Agent alerts unstable — the
+  coordinator keeps crashing", by the disconnected notice's path (exact DND `off`, no
+  replay) and its one-a-minute bound shared with it; a notice the bound or DND refuses
+  is dropped, not delayed. The service publishes `crashes` and `unstable` in its shared
+  health state.
 - An unknown Do Not Disturb status is shown ("toasts and popups are not shown, and are
   not replayed later"), since it drops everything not yet shown.
 - A dismissed withheld-completion diagnostic loses its glyph but stays in the tooltip

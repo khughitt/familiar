@@ -27,7 +27,7 @@ test('an unseen request overnight costs at most five widget updates a second', (
     { id: 21, idx: 2, name: null, output: 'HDMI-A-1', is_urgent: false, is_active: false, is_focused: false, active_window_id: 1 },
     { id: 10, idx: 1, name: null, output: 'DP-1', is_urgent: false, is_active: true, is_focused: true, active_window_id: 1 },
   ] } }, { now: T0, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET } });
-  const health = { schema: 1, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET }, owner: { pid: 77, start: '1' }, writtenAt: T0 };
+  const health = { schema: 2, instanceId: 'coordinator-1', epoch: { bootId: BOOT, desktopSession: SOCKET }, owner: { pid: 77, start: '1' }, writtenAt: T0, stopped: false, crashedAt: [] };
   const files = {
     '/proc/sys/kernel/random/boot_id': `${BOOT}\n`,
     [`${STATE}/attention.json`]: bytesOf(t.state),

@@ -67,12 +67,19 @@ function parseAttention(text) {
 // The same rule as healthStatus in src/attention/store.js. A live identity that cannot
 // be read is unknown and never matches a saved one.
 function validHealth(value) {
-  var keys = ['schema', 'instanceId', 'epoch', 'owner', 'writtenAt'];
+  var keys = ['schema', 'instanceId', 'epoch', 'owner', 'writtenAt', 'stopped', 'crashedAt'];
   if (!isObject(value) || Object.keys(value).length !== keys.length) return false;
   for (var i = 0; i < keys.length; i++) if (!Object.prototype.hasOwnProperty.call(value, keys[i])) return false;
   var epoch = value.epoch;
   var owner = value.owner;
-  return value.schema === 1 && isText(value.instanceId) && value.instanceId.length <= 128
+  var crashed = value.crashedAt;
+  if (!Array.isArray(crashed) || crashed.length > 8 || typeof value.stopped !== 'boolean') return false;
+  if (!(Number.isSafeInteger(value.writtenAt) && value.writtenAt >= 0)) return false;
+  for (var j = 0; j < crashed.length; j++) {
+    if (!Number.isSafeInteger(crashed[j]) || crashed[j] < 0 || crashed[j] > value.writtenAt
+        || crashed[j] < value.writtenAt - 600000 || (j > 0 && crashed[j] < crashed[j - 1])) return false;
+  }
+  return value.schema === 2 && isText(value.instanceId) && value.instanceId.length <= 128
     && isObject(epoch) && Object.keys(epoch).length === 2
     && (epoch.bootId === null || isText(epoch.bootId))
     && (epoch.desktopSession === null || isText(epoch.desktopSession))
