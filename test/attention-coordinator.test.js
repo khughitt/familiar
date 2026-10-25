@@ -703,6 +703,19 @@ test('a backward clock step keeps the heartbeat valid', async (t) => {
   assert.equal(await h.stop(), 0);
 });
 
+test('a future crash dropped after a backward clock step does not come back', async (t) => {
+  const h = await harness(t);
+  const ahead = START + 5000;
+  await writeJsonAtomic(h.paths.attentionHealthPath, predecessor({ writtenAt: ahead, crashedAt: [ahead] }));
+  await h.boot();
+  assert.ok(heartbeatsOf(h, 'coordinator-1').every((beat) => !beat.crashedAt.includes(ahead)));
+  await h.clock.advance(8000);
+  const own = heartbeatsOf(h, 'coordinator-1');
+  assert.ok(own.at(-1).writtenAt > ahead, JSON.stringify(own));
+  assert.ok(own.every((beat) => !beat.crashedAt.includes(ahead)), JSON.stringify(own));
+  assert.equal(await h.stop(), 0);
+});
+
 test('entries age out of the window while the coordinator runs', async (t) => {
   const h = await harness(t);
   const old = START - 599_990;

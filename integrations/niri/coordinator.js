@@ -222,7 +222,7 @@ async function lifetime({
     // change the record meanwhile.
     const carried = carriedCrashes(await readHealthRecord(paths), epoch);
     if (carried.unusable) log('health record unusable; crash history reset');
-    const history = carried.crashedAt;
+    let history = carried.crashedAt;
     log(recovered(await recover({ paths, lockWith, instanceId, clock })));
     if (exitCode !== null) return 0;
 
@@ -245,7 +245,8 @@ async function lifetime({
     let inFlight = Promise.resolve();
     const beat = () => {
       const now = clock.now();
-      const health = { schema: 2, instanceId, epoch, owner, writtenAt: now, stopped: false, crashedAt: normaliseCrashes(history, now) };
+      history = normaliseCrashes(history, now);
+      const health = { schema: 2, instanceId, epoch, owner, writtenAt: now, stopped: false, crashedAt: history };
       const write = writeHealth({ paths, writeAtomic, health })
         .then(() => { lastWritten = health; }, (error) => log(`heartbeat: ${error.message}`));
       inFlight = Promise.all([inFlight, write]).then(() => {});
