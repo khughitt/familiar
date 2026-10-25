@@ -1,13 +1,15 @@
 ---
 id: fam-2fc04c
 title: Update surface ownership after the relay cutover
-status: todo
+status: doing
 priority: 3
 size: xs
 complexity: low
 process: direct
+owner: main
 created: 2026-10-25T01:00:20Z
-updated: 2026-10-25T01:00:31Z
+updated: 2026-10-25T02:05:03Z
+started: 2026-10-25T02:05:03Z
 depends: []
 tags: [docs]
 source: fam-3f208e
@@ -19,3 +21,5 @@ docs/surfaces.md still lists Familiar hooks and a Familiar OpenCode server plugi
 ## Notes
 
 - 2026-10-25T01:00:31Z (main): concerns: fam-6e8321 defect — the landed relay cutover left the current surface guide assigning hooks and the OpenCode server plugin to Familiar.
+- 2026-10-25T02:05:03Z (main): started
+  provenance: {"harness_session":"codex:01a170cc-d59c-78d3-86c0-1256b06a0a11","harness_session_source":"CODEX_THREAD_ID"}
