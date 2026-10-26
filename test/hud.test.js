@@ -286,3 +286,134 @@ test('the project name is painted with the project stop, not the light stop', ()
   assert.ok(identity.includes(fg('#317d01') + 'ns'));
   assert.ok(!identity.includes(fg(color.light) + 'ns'));
 });
+
+// --- the claimed task -------------------------------------------------------
+//
+// `project (id +N)` in the identity slot. The id is NEVER truncated: it is there to be copied
+// into `tasks show`, and a cut id names nothing. The branch takes what is left.
+
+const LONG_BRANCH = 'feature/very-long-description-here-ABC-1234';
+
+// Captured from the renderer BEFORE the claim existed. With no claim the line must not move by
+// one byte, colour included.
+test('with no claim the identity line is byte-identical to the claim-less renderer', () => {
+  const fields = { ...FIELDS, branch: LONG_BRANCH };
+  const color = identityColors({ slot: 3, projectColor: '#317d01' }, DARK);
+  for (const claim of [undefined, null]) {
+    assert.deepEqual(hudLines({ intent: null, fields: { ...fields, claim } }), [
+      '▎ familiar  ⎇ feature/very…ere-ABC-1234', '▎ Opus 4.8 (1M context)', '▎ ▰▰▱▱▱▱▱▱▱▱  22%', '▎ —',
+    ]);
+    assert.equal(
+      hudLines({ intent: { color, urgency: 'notice', state: 'done' }, fields: { ...fields, claim } })[0],
+      '\x1b[38;2;139;189;107m▎\x1b[0m \x1b[38;2;49;125;1mfamiliar\x1b[0m  '
+        + '\x1b[38;2;84;127;57m⎇ feature/very…ere-ABC-1234\x1b[0m',
+    );
+  }
+});
+
+test('one claim reads as `project (id)` before the branch', () => {
+  const [identity] = plain(hudLines({ intent: null, fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 0 } } }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)  ⎇ main');
+});
+
+test('further claims are counted, not listed', () => {
+  const [identity] = plain(hudLines({ intent: null, fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 2 } } }));
+  assert.equal(identity, '▎ familiar (fam-ff5351 +2)  ⎇ main');
+});
+
+test('the claim shows with no branch at all', () => {
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, branch: null, claim: { id: 'fam-ff5351', others: 0 } },
+  }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)');
+});
+
+test('the branch gets the room the line has left, and the id survives whole', () => {
+  const claim = { id: 'autonomy-c6c847', others: 2 };
+  const [identity] = plain(hudLines({
+    intent: null, fields: { project: 'p'.repeat(40), branch: 'b'.repeat(26), model: null, usedPercent: null, claim },
+  }));
+  assert.ok(identity.includes('(autonomy-c6c847 +2)'), identity);
+  assert.equal(width(identity), BUDGET, `the branch should fill the line to ${BUDGET}`);
+});
+
+// A short project leaves room the claim-less line never used: a branch that fits stays whole.
+test('a branch that fits beside a short project and its claim is not cut', () => {
+  const [identity] = plain(hudLines({
+    intent: null,
+    fields: { ...FIELDS, branch: 'fam-ff5351-statusline-task', claim: { id: 'fam-ff5351', others: 0 } },
+  }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)  ⎇ fam-ff5351-statusline-task');
+});
+
+test('the branch never exceeds its own cap, claim or not', () => {
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p', branch: 'b'.repeat(60), claim: { id: 'p-abcdef', others: 0 } },
+  }));
+  assert.equal(width(identity.slice(identity.indexOf('⎇ ') + 2)), CAPS.branch);
+});
+
+test('an id too wide to leave the branch any room drops the branch, never the id', () => {
+  const id = `${'x'.repeat(30)}-abcdef`;
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p'.repeat(40), claim: { id, others: 12 } },
+  }));
+  assert.ok(identity.includes(`(${id} +12)`), identity);
+  assert.doesNotMatch(identity, /⎇/);
+  assert.ok(width(identity) <= BUDGET, `${width(identity)} > ${BUDGET}`);
+});
+
+// The ellipsis is two cells wide, so four is the narrowest branch that keeps a character on
+// each side of it. Below that the branch drops rather than printing a head and no tail.
+test('the branch shows at four cells and drops at three', () => {
+  const identityAt = (idLength) => strip(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p', branch: 'b'.repeat(60), claim: { id: 'x'.repeat(idLength), others: 0 } },
+  })[0]);
+  // lead 3 + project 1 + ` (id)` + `  ⎇ ` 5 + branch = 60
+  assert.equal(identityAt(44).slice(identityAt(44).indexOf('⎇ ') + 2), 'b…b');
+  assert.doesNotMatch(identityAt(45), /⎇/);
+});
+
+test('the claim is sanitised like every other field', () => {
+  const lines = hudLines({
+    intent: null, fields: { ...FIELDS, claim: { id: 'fam-\x1b]0;x\x07ff\n5351', others: 0 } },
+  });
+  assert.equal(lines.length, 4);
+  assert.ok(!lines[0].includes('\x1b') && !lines[0].includes('\n'), JSON.stringify(lines[0]));
+});
+
+test('the task id takes the project stop; its frame is dim', () => {
+  const color = identityColors({ slot: 3, projectColor: '#317d01' }, DARK);
+  const [identity] = hudLines({
+    intent: { color, urgency: 'none', state: 'idle' },
+    fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 1 } },
+  });
+  assert.ok(identity.includes(fg('#317d01') + 'fam-ff5351'), JSON.stringify(identity));
+  assert.ok(identity.includes(fg(color.shadow) + ' +1)'), JSON.stringify(identity));
+});
+
+// THE SWEEP, AGAIN, WITH A CLAIM PRESENT. The longest prefix registered today is eight
+// characters (`autonomy`), against a branch at its full 26-cell cap, with `+N`: the widest
+// identity line real data produces. Every state, both tones, every height.
+test('with a claim, every state, tone and height stays inside the budget', () => {
+  const fields = {
+    project: 'p'.repeat(40), branch: 'b'.repeat(26), model: 'm'.repeat(120), usedPercent: 100,
+    claim: { id: 'autonomy-c6c847', others: 9 },
+  };
+  const fixtures = [
+    { intent: null, fields },
+    ...[DARK, LIGHT].flatMap((tone) => STATES.map((state) => ({ intent: intentFor(state, 0, tone), fields }))),
+  ];
+  for (const fixture of fixtures) {
+    for (const rows of [1, 2, 3, 4, 5, 12, 40]) {
+      const lines = hudLines({ ...fixture, rows });
+      assert.equal(lines.length, Math.min(4, rows), `rows=${rows}`);
+      for (const line of lines) {
+        assert.notEqual(strip(line).trim(), '', `rows=${rows}: empty slot`);
+        assert.ok(!line.includes('\n'), `rows=${rows}: newline inside a slot`);
+        assert.ok(width(line) <= BUDGET, `rows=${rows}: ${width(line)} > ${BUDGET} in ${JSON.stringify(strip(line))}`);
+      }
+      if (rows >= 2) assert.ok(strip(lines[0]).includes('(autonomy-c6c847 +9)'), `rows=${rows}`);
+    }
+  }
+});

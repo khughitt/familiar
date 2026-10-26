@@ -48,6 +48,9 @@ export const GLYPHS = Object.freeze({
 export const CAPS = Object.freeze({ project: 20, branch: 26, model: 52 });
 export const BUDGET = 60;
 export const BAR_CELLS = 10;
+// The narrowest branch worth printing: one character each side of the ellipsis, which
+// width() counts as two cells.
+const MIN_BRANCH = 4;
 
 export function truncEnd(text, cap) {
   const s = String(text);
@@ -103,12 +106,29 @@ function slotBuilders(pen, fields, state) {
   const project = sanitize(fields.project) || ABSENT;
   const branch = sanitize(fields.branch);
   const model = sanitize(fields.model);
+  const claimId = fields.claim ? sanitize(fields.claim.id) : '';
 
   return {
+    // `project (id +N)  ⎇ branch`. THE ID IS NEVER TRUNCATED: it is on the line to be copied
+    // into `tasks show`, and a cut id names nothing. The branch takes what the line has left,
+    // up to its own cap -- with no claim that is always the cap, so the claim-less line is
+    // unchanged. An id too wide to leave the branch MIN_BRANCH cells drops the branch, and
+    // past that the project yields too. Only a task segment of 56 cells or more (an id near
+    // 50 once `+N` is counted) could still overrun BUDGET, and there the id wins: real ids are
+    // a short prefix and six hex digits.
     identity: () => {
-      const head = pen.project(truncEnd(project, CAPS.project));
-      if (!branch) return `${pen.rule} ${head}`;
-      return `${pen.rule} ${head}  ${pen.dim(`${BRANCH} ${truncMiddle(branch, CAPS.branch)}`)}`;
+      const more = claimId && fields.claim.others > 0 ? ` +${fields.claim.others}` : '';
+      const task = claimId ? ` (${claimId}${more})` : '';
+      const lead = width(`${RULE} `);
+      const shown = truncEnd(project, Math.min(CAPS.project, BUDGET - lead - width(task)));
+      const head = pen.project(shown)
+        + (claimId ? pen.dim(' (') + pen.project(claimId) + pen.dim(`${more})`) : '');
+      const branchCap = Math.min(
+        CAPS.branch,
+        BUDGET - lead - width(shown) - width(task) - width(`  ${BRANCH} `),
+      );
+      if (!branch || branchCap < MIN_BRANCH) return `${pen.rule} ${head}`;
+      return `${pen.rule} ${head}  ${pen.dim(`${BRANCH} ${truncMiddle(branch, branchCap)}`)}`;
     },
 
     model: () => `${pen.rule} ${pen.dim(model ? truncEnd(model, CAPS.model) : ABSENT)}`,

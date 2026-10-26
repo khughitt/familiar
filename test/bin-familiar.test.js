@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
-import { fg } from '../src/render/term/sgr.js';
+import { fg, strip } from '../src/render/term/sgr.js';
 import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { displayProject } from '../src/bus/identity.js';
 import { paths } from '../src/bus/paths.js';
@@ -1440,6 +1440,27 @@ test('the project label is the identity\'s, not the payload directory\'s', async
   assert.doesNotMatch(result.stdout, /(?<![\w/])src(?![\w/])/);
 });
 
+// The claim lookup on both branches: a session the bus has not seen yet, and one it has.
+test('statusline names the task its session has claimed, on and off the bus', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, 'claimed');
+  e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
+    { id: 'fam-ff5351', session: 'claimed', started: '2026-10-26T00:38:48Z', live: true },
+    { id: 'fam-aaaaaa', session: 'claimed', started: '2026-10-25T00:00:00Z', live: true },
+    { id: 'fam-bbbbbb', session: 'not-on-the-bus', started: '2026-10-25T00:00:00Z', live: true },
+    { id: 'fam-cccccc', session: 'claimed', started: '2026-10-27T00:00:00Z', live: false },
+  ] });
+  const render = (sessionId) => {
+    const result = statusline(e, [], { session_id: sessionId, cwd: process.cwd() });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    return strip(result.stdout);
+  };
+  assert.match(render('claimed'), /\(fam-ff5351 \+1\)/);
+  assert.match(render('not-on-the-bus'), /\(fam-bbbbbb\)/);
+  assert.doesNotMatch(render('nobody'), /\(fam-/);
+});
+
 test('statusline still honours --with, unchanged', () => {
   const result = statusline(statuslineEnv(), ['--with', 'printf custom'], { session_id: 'x', cwd: process.cwd() });
   assert.equal(result.status, 0, result.stderr);
@@ -1767,5 +1788,7 @@ test('the status line paints the label in the colour its record carries', async 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
   assert.ok(r.stdout.includes(fg('#317d01') + 'api'));
-  assert.equal(existsSync(e.FAKE_TASKS_LOG), false);
+  // The colour comes from the record, never from a `tasks resolve` per render. The one call
+  // this path does make is the claim lookup.
+  assert.equal(readFileSync(e.FAKE_TASKS_LOG, 'utf8'), 'claims --json\n');
 });
