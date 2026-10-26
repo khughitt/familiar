@@ -229,12 +229,36 @@ test('unparseable JSON leaves the segment off and says so once', () => {
 });
 
 test('JSON of the wrong shape is a fault, not an empty list', () => {
-  for (const body of [{}, { claims: {} }, { claims: [{ ...claimRow(), id: 7 }] }, { claims: [{ ...claimRow(), started: null }] }]) {
+  for (const body of [
+    {}, { claims: {} }, { claims: [null] },
+    { claims: [{ ...claimRow(), id: 7 }] },
+    { claims: [{ ...claimRow(), started: null }] },
+    { claims: [{ ...claimRow(), started: 'yesterday' }] },
+  ]) {
     const { result, warnings } = lookup(body);
     assert.equal(result, null, JSON.stringify(body));
     assert.equal(warnings.length, 1, JSON.stringify(body));
     assert.match(warnings[0], /tasks claims/);
   }
+});
+
+// The registry spans every project's store. A malformed row the session does not hold is
+// someone else's fault, and must not take this session's segment down with it.
+test('a malformed claim of another session does not hide this one', () => {
+  assert.deepEqual(lookup({
+    claims: [{ id: 7, session: 'someone-else', live: true }, { session: SESSION, live: false }, claimRow()],
+  }), { result: { id: 'fam-ff5351', others: 0 }, warnings: [] });
+});
+
+// Time order, not string order: `.` sorts before `Z`, so fractional seconds would invert it.
+test('started is compared as a time, not as a string', () => {
+  const { result } = lookup({
+    claims: [
+      claimRow({ id: 'fam-aaaaaa', started: '2026-10-26T00:38:48Z' }),
+      claimRow({ id: 'fam-bbbbbb', started: '2026-10-26T00:38:48.500Z' }),
+    ],
+  });
+  assert.deepEqual(result, { id: 'fam-bbbbbb', others: 1 });
 });
 
 test('a non-zero exit leaves the segment off and says so once', () => {

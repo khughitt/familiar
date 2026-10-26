@@ -109,16 +109,22 @@ function slotBuilders(pen, fields, state) {
 
   return {
     // `project (id +N)  ⎇ branch`. THE ID IS NEVER TRUNCATED: it is on the line to be copied
-    // into `tasks show`, and a cut id names nothing. The branch pays for it, cell for cell, so
-    // a claim adds no width the claim-less line did not already budget for. An id too wide to
-    // leave the branch MIN_BRANCH cells drops the branch; past that the project yields too.
+    // into `tasks show`, and a cut id names nothing. The branch takes what the line has left,
+    // up to its own cap -- with no claim that is always the cap, so the claim-less line is
+    // unchanged. An id too wide to leave the branch MIN_BRANCH cells drops the branch, and
+    // past that the project yields too. Only an id of some 55 cells could still overrun
+    // BUDGET, and there the id wins: real ids are a short prefix and six hex digits.
     identity: () => {
       const more = claimId && fields.claim.others > 0 ? ` +${fields.claim.others}` : '';
       const task = claimId ? ` (${claimId}${more})` : '';
-      const projectCap = Math.min(CAPS.project, BUDGET - width(`${RULE} `) - width(task));
-      const head = pen.project(truncEnd(project, projectCap))
+      const lead = width(`${RULE} `);
+      const shown = truncEnd(project, Math.min(CAPS.project, BUDGET - lead - width(task)));
+      const head = pen.project(shown)
         + (claimId ? pen.dim(' (') + pen.project(claimId) + pen.dim(`${more})`) : '');
-      const branchCap = CAPS.branch - width(task);
+      const branchCap = Math.min(
+        CAPS.branch,
+        BUDGET - lead - width(shown) - width(task) - width(`  ${BRANCH} `),
+      );
       if (!branch || branchCap < MIN_BRANCH) return `${pen.rule} ${head}`;
       return `${pen.rule} ${head}  ${pen.dim(`${BRANCH} ${truncMiddle(branch, branchCap)}`)}`;
     },

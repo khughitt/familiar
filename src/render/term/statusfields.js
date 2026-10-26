@@ -95,16 +95,23 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
     warn(`tasks claims: unparseable JSON: ${error.message}`);
     return null;
   }
-  if (!Array.isArray(claims)
-    || !claims.every((c) => typeof c?.id === 'string' && typeof c.started === 'string')) {
-    warn('tasks claims: unexpected JSON shape: want {claims: [{id, started, ...}]}');
+  if (!Array.isArray(claims) || !claims.every((c) => c !== null && typeof c === 'object')) {
+    warn('tasks claims: unexpected JSON shape: want {claims: [{...}]}');
     return null;
   }
 
-  // `started` is RFC 3339 UTC from one writer, so string order is time order.
+  // ONLY THIS SESSION'S ROWS ARE HELD TO THE SHAPE. The list spans every project's claim
+  // store on the host; a malformed row some other session holds is that store's fault, and
+  // failing on it would take every status line's segment down with it.
   const mine = claims
     .filter((c) => c.live === true && c.session === sessionId)
-    .sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0));
+    .map((c) => ({ id: c.id, at: typeof c.started === 'string' ? Date.parse(c.started) : NaN }));
+  if (!mine.every((c) => typeof c.id === 'string' && Number.isFinite(c.at))) {
+    warn('tasks claims: unexpected JSON shape: want a string id and an RFC 3339 started');
+    return null;
+  }
+  // By time, not by string: `.` sorts before `Z`, so fractional seconds would invert it.
+  mine.sort((a, b) => b.at - a.at);
   return mine.length ? { id: mine[0].id, others: mine.length - 1 } : null;
 }
 

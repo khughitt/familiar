@@ -328,15 +328,29 @@ test('the claim shows with no branch at all', () => {
   assert.equal(identity, '▎ familiar (fam-ff5351)');
 });
 
-test('the branch cap shrinks by the task segment; the id survives whole', () => {
+test('the branch gets the room the line has left, and the id survives whole', () => {
   const claim = { id: 'autonomy-c6c847', others: 2 };
   const [identity] = plain(hudLines({
     intent: null, fields: { project: 'p'.repeat(40), branch: 'b'.repeat(26), model: null, usedPercent: null, claim },
   }));
   assert.ok(identity.includes('(autonomy-c6c847 +2)'), identity);
-  assert.ok(width(identity) <= BUDGET, `${width(identity)} > ${BUDGET}`);
-  const branch = identity.slice(identity.indexOf('⎇ ') + 2);
-  assert.equal(width(branch), CAPS.branch - width(' (autonomy-c6c847 +2)'));
+  assert.equal(width(identity), BUDGET, `the branch should fill the line to ${BUDGET}`);
+});
+
+// A short project leaves room the claim-less line never used: a branch that fits stays whole.
+test('a branch that fits beside a short project and its claim is not cut', () => {
+  const [identity] = plain(hudLines({
+    intent: null,
+    fields: { ...FIELDS, branch: 'fam-ff5351-statusline-task', claim: { id: 'fam-ff5351', others: 0 } },
+  }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)  ⎇ fam-ff5351-statusline-task');
+});
+
+test('the branch never exceeds its own cap, claim or not', () => {
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p', branch: 'b'.repeat(60), claim: { id: 'p-abcdef', others: 0 } },
+  }));
+  assert.equal(width(identity.slice(identity.indexOf('⎇ ') + 2)), CAPS.branch);
 });
 
 test('an id too wide to leave the branch any room drops the branch, never the id', () => {
