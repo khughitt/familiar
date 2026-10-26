@@ -10,6 +10,8 @@ Desktop/terminal/agent familiar engine. Themes install separately with
   provisional — see [surfaces](docs/surfaces.md) for what each platform claims.
 - Desktop attention (Niri popup, Noctalia workspace pills, toasts): [docs/attention.md](docs/attention.md).
 - Run tests: `just test` (or `npm test` without [just](https://just.systems))
+  On macOS, run them with `TMPDIR=/tmp`: the per-user temporary directory is too long
+  for the suite's Unix-socket fixtures, and the runner refuses it.
 - Pre-split history: https://github.com/khughitt/familiar-archive (private archive)
 
 ## CLI

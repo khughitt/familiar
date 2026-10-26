@@ -279,7 +279,9 @@ test('statusline settles only for the recorded terminal owner', async () => {
   writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'new', seq: 2 }));
   const locks = [];
   const { withLock } = await import('../src/bus/lock.js');
-  const args = { record, intent: {}, paths: p,
+  // Linux, explicitly: its terminal target accepts a process record with no tty, where
+  // Darwin requires a validated one. Ownership, not the platform's tty rule, is under test.
+  const args = { record, intent: {}, paths: p, platform: 'linux',
     processOps: { recordOf: () => { throw new Error('superseded session probed the terminal'); },
       ownerAlive: () => false, startTimeOf: () => 1 },
     lockWith: (path, fn, options) => { locks.push(path); return withLock(path, fn, options); },

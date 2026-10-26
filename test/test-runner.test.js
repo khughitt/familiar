@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  pidNamespaceOf, runSuite, testInventory, withSuiteLease,
+  assertSocketRoom, pidNamespaceOf, runSuite, testInventory, withSuiteLease,
 } from '../tools/test-runner.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -106,6 +106,24 @@ test('Darwin suite lease refuses a held live lock with a generic error', async (
     }),
     { message: 'test runner: could not acquire suite lease' }
   );
+});
+
+test('a temporary root too long for the socket fixtures is refused with the remedy', () => {
+  const realpath = (path) => path;
+  // macOS's per-user TMPDIR, as the CI runner has it: 113-byte fixture sockets.
+  const perUser = '/private/var/folders/y6/nj790rtn62lfktb1sh__79hc0000gn/T';
+  assert.throws(
+    () => assertSocketRoom(perUser, { platform: 'darwin', realpath }),
+    (error) => error.message.includes(perUser) && error.message.includes('on darwin')
+      && /suite root 78 bytes, at most 47/.test(error.message) && /set TMPDIR to a shorter directory/.test(error.message)
+  );
+  assertSocketRoom('/private/tmp', { platform: 'darwin', realpath });
+  assertSocketRoom('/Users/runner/work/_temp', { platform: 'darwin', realpath });
+  assertSocketRoom('/tmp', { platform: 'linux', realpath });
+  assert.throws(() => assertSocketRoom(`/tmp/${'d'.repeat(30)}`, { platform: 'linux', realpath }), /at most 51/);
+  // The canonical path is what binds, so a short symlink to a long directory is refused.
+  assert.throws(() => assertSocketRoom('/tmp', { platform: 'darwin', realpath: () => perUser }), /suite root 78 bytes/);
+  assert.throws(() => assertSocketRoom('/tmp', { platform: 'win32', realpath }), /unsupported platform "win32"/);
 });
 
 test('owner scope is explicit on every supported platform', () => {

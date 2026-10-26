@@ -44,6 +44,10 @@ jobs:
       - run: npm ci
       - run: node tools/fetch-luau.mjs
       - name: fast suite with Darwin tests enforced
+        # The per-user TMPDIR under /private/var/folders is too long for the suite's
+        # Unix-socket fixtures (macOS holds 103 bytes); the runner refuses it.
+        env:
+          TMPDIR: /tmp
         run: |
           set -o pipefail
           python3 tools/tt ci-test -- npm test 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
@@ -53,6 +57,7 @@ jobs:
           grep -F 'Darwin copies a stable local pack through its pathname walker' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'an atomic intent commit wakes a directory watcher on this platform' "$RUNNER_TEMP/familiar-tests.log"
           grep -F 'intent-watch filenames on darwin:' "$RUNNER_TEMP/familiar-tests.log"
+          grep -F 'without a readable boot ID a saved health record never reads healthy and claims nothing' "$RUNNER_TEMP/familiar-tests.log"
       - name: linked command smoke
         run: |
           set -o pipefail
@@ -64,25 +69,28 @@ jobs:
             process.stdin.on("data", chunk => text += chunk);
             process.stdin.on("end", () => {
               const value = JSON.parse(text);
-              const hooks = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "StopFailure", "SessionEnd"];
-              if (JSON.stringify(Object.keys(value.hooks ?? {})) !== JSON.stringify(hooks)
-                  || !hooks.every(name => value.hooks[name].length > 0)
-                  || !value.hooks.SessionEnd[0].hooks[0].command.endsWith(" hook SessionEnd")
-                  || value.statusLine?.type !== "command"
-                  || !value.statusLine.command.endsWith(" statusline")
+              if (JSON.stringify(Object.keys(value)) !== JSON.stringify(["statusLine"])
+                  || value.statusLine.type !== "command"
+                  || !/^\x27\/.+\/bin\/familiar\x27 statusline$/.test(value.statusLine.command)
                   || value.statusLine.refreshInterval !== 2) process.exit(1);
             });
           '
-          familiar setup codex | node -e '
+          familiar setup relay | node -e '
             let text = "";
             process.stdin.setEncoding("utf8");
             process.stdin.on("data", chunk => text += chunk);
             process.stdin.on("end", () => {
               const value = JSON.parse(text);
-              const hooks = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Stop", "SessionEnd"];
-              if (JSON.stringify(Object.keys(value.hooks ?? {})) !== JSON.stringify(hooks)
-                  || !hooks.every(name => value.hooks[name].length > 0)
-                  || !value.hooks.SessionEnd[0].hooks[0].command.endsWith(" hook SessionEnd --agent codex")
-                  || value.statusLine !== undefined) process.exit(1);
+              const names = ["familiar", "familiar-opencode", "familiar-teardown"];
+              const bins = new Set(value.subscribers.map(entry => entry.argv[0]));
+              const [bin] = bins;
+              if (value.schema !== 1
+                  || JSON.stringify(value.subscribers.map(entry => entry.name)) !== JSON.stringify(names)
+                  || !value.subscribers.every(entry => entry.role === "observer" && entry.argv.length === 2 && entry.argv[1] === "observe")
+                  || bins.size !== 1 || !bin.startsWith("/") || !bin.endsWith("/bin/familiar")) process.exit(1);
             });
           '
+          # Hooks moved to relay; setup codex is a usage error, not empty settings.
+          status=0
+          familiar setup codex 2>/dev/null || status=$?
+          test "$status" -eq 2

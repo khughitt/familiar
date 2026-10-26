@@ -16,6 +16,13 @@ const OWNER = '.familiar-suite-owner.json';
 const OWNER_KIND = 'familiar-test-suite';
 const SUITE_LEASE = '\0familiar-test-suite';
 const STAGING_PREFIX = '.familiar-suite-';
+// The longest Unix-socket pathname each platform's sockaddr_un holds, less its NUL.
+// Beyond it Node on macOS truncates rather than failing, so a fixture's bind can land
+// on its own directory and report EADDRINUSE.
+const SOCKET_PATH_MAX = { linux: 107, darwin: 103 };
+// What the suite's socket fixtures need beneath the suite root: the deepest today is
+// familiar-cli-XXXXXX/scratch-XXXXXX/niri.sock (45 bytes), with room to spare.
+const SOCKET_FIXTURE_ROOM = 56;
 
 const ownerBytes = (pidNamespace, pid, starttime) => Buffer.from(`${JSON.stringify({
   version: 2,
@@ -87,6 +94,22 @@ export async function withSuiteLease(fn, {
     }
   }
   throw new Error(`test runner: unsupported platform ${JSON.stringify(platform)}`);
+}
+
+// Refuses a temporary root too long for the suite's socket fixtures before anything is
+// written, naming the remedy. macOS's per-user TMPDIR under /private/var/folders is one.
+export function assertSocketRoom(tempRoot, {
+  platform = process.platform, realpath = realpathSync,
+} = {}) {
+  const max = SOCKET_PATH_MAX[platform];
+  if (max === undefined) throw new Error(`test runner: unsupported platform ${JSON.stringify(platform)}`);
+  const canonicalTmp = realpath(tempRoot);
+  const bytes = Buffer.byteLength(join(canonicalTmp, `${STAGING_PREFIX.slice(1)}XXXXXX`));
+  if (bytes > max - SOCKET_FIXTURE_ROOM) {
+    throw new Error(`test runner: temporary directory ${canonicalTmp} is too long for the suite's`
+      + ` Unix-socket fixtures on ${platform} (suite root ${bytes} bytes, at most`
+      + ` ${max - SOCKET_FIXTURE_ROOM}); set TMPDIR to a shorter directory, such as /tmp`);
+  }
 }
 
 function exactKeys(value, keys) {
@@ -251,5 +274,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (extra.length) {
     throw new Error('usage: test-runner.mjs [fast | slow]');
   }
+  assertSocketRoom(tmpdir());
   process.exitCode = await runSuite(testFiles(process.cwd(), mode));
 }
