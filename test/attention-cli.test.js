@@ -17,6 +17,11 @@ import { createRegistry, nativeEvent, snapshotOf } from './helpers/attention.js'
 const BIN = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const SOCKET = '/run/user/1000/niri.wayland-1.sock';
 const BOOT = createProcessOps().handleOf(process.pid).bootId;
+// A healthy coordinator needs this boot's identity, which relay reads on Linux only: on
+// Darwin a process handle carries a null boot ID, and health never matches an unknown
+// identity. The scenarios that need a healthy coordinator are Linux scenarios.
+const requiresLinuxBoot = process.platform !== 'linux' ? 'requires a Linux boot ID' : false;
+const requiresDarwin = process.platform !== 'darwin' ? 'requires Darwin' : false;
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'familiar-attention-cli-'));
@@ -73,7 +78,7 @@ const json = (result) => {
   return JSON.parse(result.stdout);
 };
 
-test('status prints the whole view in every output mode and changes nothing', async (t) => {
+test('status prints the whole view in every output mode and changes nothing', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   const { saved } = await seed(f.paths);
   const before = readFileSync(f.paths.attentionPath, 'utf8');
@@ -95,7 +100,7 @@ test('status on a first run prints the initial state with missing health and wri
   assert.equal(existsSync(f.state), false);
 });
 
-test('status reports the crashes in the window beside the health status', async (t) => {
+test('status reports the crashes in the window beside the health status', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   await seed(f.paths, { crashesAgo: [120_000, 60_000] });
   const { health } = json(f.run(['attention', 'status']));
@@ -121,7 +126,7 @@ test('dismiss acts on the captured IDs only and reports the rest missing', async
 
 const popup = (f, request) => f.run(['attention', 'popup'], typeof request === 'string' ? request : JSON.stringify(request));
 
-test('a popup claim reserves one episode that a competing renderer cannot claim again', async (t) => {
+test('a popup claim reserves one episode that a competing renderer cannot claim again', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   const { a, b, c } = await seed(f.paths);
   const firstClaim = json(popup(f, { op: 'claim', consumerId: 'popup-1' }));
@@ -143,7 +148,7 @@ test('a popup claim reserves one episode that a competing renderer cannot claim 
   assert.deepEqual([a, b, c].map((episode) => saved.episodes[episode.id].delivery.popup.status), ['reserved', 'reserved', 'reserved']);
 });
 
-test('finish records the outcome for its own token only', async (t) => {
+test('finish records the outcome for its own token only', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   const { a } = await seed(f.paths);
   const claim = json(popup(f, { op: 'claim', consumerId: 'popup-1' }));
@@ -154,7 +159,7 @@ test('finish records the outcome for its own token only', async (t) => {
 });
 
 // Unstable is a warning, not a gate: the popup keeps claiming between crashes.
-test('a popup claim succeeds while the record carries two crashes', async (t) => {
+test('a popup claim succeeds while the record carries two crashes', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   const { a } = await seed(f.paths, { crashesAgo: [120_000, 60_000] });
   const claim = json(popup(f, { op: 'claim', consumerId: 'popup-1' }));
@@ -165,6 +170,16 @@ test('a popup claim succeeds while the record carries two crashes', async (t) =>
 test('a claim finds nothing while the coordinator is not healthy', async (t) => {
   const f = fixture(t);
   await seed(f.paths, { health: false });
+  assert.deepEqual(json(popup(f, { op: 'claim', consumerId: 'popup-1' })), { token: null, job: null });
+});
+
+test('without a readable boot ID a saved health record never reads healthy and claims nothing', { skip: requiresDarwin }, async (t) => {
+  const f = fixture(t);
+  assert.equal(BOOT, null);
+  await seed(f.paths);
+  const { health } = json(f.run(['attention', 'status']));
+  assert.equal(health.status, 'mismatched');
+  assert.equal(health.crashes, null);
   assert.deepEqual(json(popup(f, { op: 'claim', consumerId: 'popup-1' })), { token: null, job: null });
 });
 
