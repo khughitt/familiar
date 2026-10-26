@@ -234,6 +234,8 @@ test('JSON of the wrong shape is a fault, not an empty list', () => {
     { claims: [{ ...claimRow(), id: 7 }] },
     { claims: [{ ...claimRow(), started: null }] },
     { claims: [{ ...claimRow(), started: 'yesterday' }] },
+    { claims: [{ ...claimRow(), started: '2026-10-26T00:38:48' }] },
+    { claims: [{ ...claimRow(), started: 'Oct 26 2026' }] },
   ]) {
     const { result, warnings } = lookup(body);
     assert.equal(result, null, JSON.stringify(body));

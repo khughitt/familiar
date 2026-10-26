@@ -105,7 +105,7 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
   // failing on it would take every status line's segment down with it.
   const mine = claims
     .filter((c) => c.live === true && c.session === sessionId)
-    .map((c) => ({ id: c.id, at: typeof c.started === 'string' ? Date.parse(c.started) : NaN }));
+    .map((c) => ({ id: c.id, at: RFC3339.test(c.started) ? Date.parse(c.started) : NaN }));
   if (!mine.every((c) => typeof c.id === 'string' && Number.isFinite(c.at))) {
     warn('tasks claims: unexpected JSON shape: want a string id and an RFC 3339 started');
     return null;
@@ -114,6 +114,9 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
   mine.sort((a, b) => b.at - a.at);
   return mine.length ? { id: mine[0].id, others: mine.length - 1 } : null;
 }
+
+// Checked BEFORE Date.parse, which also takes `Oct 26 2026` and reads a zoneless time as local.
+const RFC3339 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/;
 
 // The same shape bin/familiar.js gives a visual fault: one line, prefixed, newlines flattened.
 function statuslineWarn(message) {

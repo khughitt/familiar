@@ -48,8 +48,9 @@ export const GLYPHS = Object.freeze({
 export const CAPS = Object.freeze({ project: 20, branch: 26, model: 52 });
 export const BUDGET = 60;
 export const BAR_CELLS = 10;
-// The narrowest branch worth printing: one character each side of the ellipsis.
-const MIN_BRANCH = 3;
+// The narrowest branch worth printing: one character each side of the ellipsis, which
+// width() counts as two cells.
+const MIN_BRANCH = 4;
 
 export function truncEnd(text, cap) {
   const s = String(text);
@@ -112,8 +113,9 @@ function slotBuilders(pen, fields, state) {
     // into `tasks show`, and a cut id names nothing. The branch takes what the line has left,
     // up to its own cap -- with no claim that is always the cap, so the claim-less line is
     // unchanged. An id too wide to leave the branch MIN_BRANCH cells drops the branch, and
-    // past that the project yields too. Only an id of some 55 cells could still overrun
-    // BUDGET, and there the id wins: real ids are a short prefix and six hex digits.
+    // past that the project yields too. Only a task segment of 56 cells or more (an id near
+    // 50 once `+N` is counted) could still overrun BUDGET, and there the id wins: real ids are
+    // a short prefix and six hex digits.
     identity: () => {
       const more = claimId && fields.claim.others > 0 ? ` +${fields.claim.others}` : '';
       const task = claimId ? ` (${claimId}${more})` : '';

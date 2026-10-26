@@ -290,7 +290,7 @@ test('the project name is painted with the project stop, not the light stop', ()
 // --- the claimed task -------------------------------------------------------
 //
 // `project (id +N)` in the identity slot. The id is NEVER truncated: it is there to be copied
-// into `tasks show`, and a cut id names nothing. The branch pays for it instead.
+// into `tasks show`, and a cut id names nothing. The branch takes what is left.
 
 const LONG_BRANCH = 'feature/very-long-description-here-ABC-1234';
 
@@ -361,6 +361,17 @@ test('an id too wide to leave the branch any room drops the branch, never the id
   assert.ok(identity.includes(`(${id} +12)`), identity);
   assert.doesNotMatch(identity, /⎇/);
   assert.ok(width(identity) <= BUDGET, `${width(identity)} > ${BUDGET}`);
+});
+
+// The ellipsis is two cells wide, so four is the narrowest branch that keeps a character on
+// each side of it. Below that the branch drops rather than printing a head and no tail.
+test('the branch shows at four cells and drops at three', () => {
+  const identityAt = (idLength) => strip(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p', branch: 'b'.repeat(60), claim: { id: 'x'.repeat(idLength), others: 0 } },
+  })[0]);
+  // lead 3 + project 1 + ` (id)` + `  ⎇ ` 5 + branch = 60
+  assert.equal(identityAt(44).slice(identityAt(44).indexOf('⎇ ') + 2), 'b…b');
+  assert.doesNotMatch(identityAt(45), /⎇/);
 });
 
 test('the claim is sanitised like every other field', () => {
