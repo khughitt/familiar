@@ -48,6 +48,8 @@ export const GLYPHS = Object.freeze({
 export const CAPS = Object.freeze({ project: 20, branch: 26, model: 52 });
 export const BUDGET = 60;
 export const BAR_CELLS = 10;
+// The narrowest branch worth printing: one character each side of the ellipsis.
+const MIN_BRANCH = 3;
 
 export function truncEnd(text, cap) {
   const s = String(text);
@@ -103,12 +105,22 @@ function slotBuilders(pen, fields, state) {
   const project = sanitize(fields.project) || ABSENT;
   const branch = sanitize(fields.branch);
   const model = sanitize(fields.model);
+  const claimId = fields.claim ? sanitize(fields.claim.id) : '';
 
   return {
+    // `project (id +N)  ⎇ branch`. THE ID IS NEVER TRUNCATED: it is on the line to be copied
+    // into `tasks show`, and a cut id names nothing. The branch pays for it, cell for cell, so
+    // a claim adds no width the claim-less line did not already budget for. An id too wide to
+    // leave the branch MIN_BRANCH cells drops the branch; past that the project yields too.
     identity: () => {
-      const head = pen.project(truncEnd(project, CAPS.project));
-      if (!branch) return `${pen.rule} ${head}`;
-      return `${pen.rule} ${head}  ${pen.dim(`${BRANCH} ${truncMiddle(branch, CAPS.branch)}`)}`;
+      const more = claimId && fields.claim.others > 0 ? ` +${fields.claim.others}` : '';
+      const task = claimId ? ` (${claimId}${more})` : '';
+      const projectCap = Math.min(CAPS.project, BUDGET - width(`${RULE} `) - width(task));
+      const head = pen.project(truncEnd(project, projectCap))
+        + (claimId ? pen.dim(' (') + pen.project(claimId) + pen.dim(`${more})`) : '');
+      const branchCap = CAPS.branch - width(task);
+      if (!branch || branchCap < MIN_BRANCH) return `${pen.rule} ${head}`;
+      return `${pen.rule} ${head}  ${pen.dim(`${BRANCH} ${truncMiddle(branch, branchCap)}`)}`;
     },
 
     model: () => `${pen.rule} ${pen.dim(model ? truncEnd(model, CAPS.model) : ABSENT)}`,

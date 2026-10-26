@@ -286,3 +286,109 @@ test('the project name is painted with the project stop, not the light stop', ()
   assert.ok(identity.includes(fg('#317d01') + 'ns'));
   assert.ok(!identity.includes(fg(color.light) + 'ns'));
 });
+
+// --- the claimed task -------------------------------------------------------
+//
+// `project (id +N)` in the identity slot. The id is NEVER truncated: it is there to be copied
+// into `tasks show`, and a cut id names nothing. The branch pays for it instead.
+
+const LONG_BRANCH = 'feature/very-long-description-here-ABC-1234';
+
+// Captured from the renderer BEFORE the claim existed. With no claim the line must not move by
+// one byte, colour included.
+test('with no claim the identity line is byte-identical to the claim-less renderer', () => {
+  const fields = { ...FIELDS, branch: LONG_BRANCH };
+  const color = identityColors({ slot: 3, projectColor: '#317d01' }, DARK);
+  for (const claim of [undefined, null]) {
+    assert.deepEqual(hudLines({ intent: null, fields: { ...fields, claim } }), [
+      '▎ familiar  ⎇ feature/very…ere-ABC-1234', '▎ Opus 4.8 (1M context)', '▎ ▰▰▱▱▱▱▱▱▱▱  22%', '▎ —',
+    ]);
+    assert.equal(
+      hudLines({ intent: { color, urgency: 'notice', state: 'done' }, fields: { ...fields, claim } })[0],
+      '\x1b[38;2;139;189;107m▎\x1b[0m \x1b[38;2;49;125;1mfamiliar\x1b[0m  '
+        + '\x1b[38;2;84;127;57m⎇ feature/very…ere-ABC-1234\x1b[0m',
+    );
+  }
+});
+
+test('one claim reads as `project (id)` before the branch', () => {
+  const [identity] = plain(hudLines({ intent: null, fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 0 } } }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)  ⎇ main');
+});
+
+test('further claims are counted, not listed', () => {
+  const [identity] = plain(hudLines({ intent: null, fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 2 } } }));
+  assert.equal(identity, '▎ familiar (fam-ff5351 +2)  ⎇ main');
+});
+
+test('the claim shows with no branch at all', () => {
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, branch: null, claim: { id: 'fam-ff5351', others: 0 } },
+  }));
+  assert.equal(identity, '▎ familiar (fam-ff5351)');
+});
+
+test('the branch cap shrinks by the task segment; the id survives whole', () => {
+  const claim = { id: 'autonomy-c6c847', others: 2 };
+  const [identity] = plain(hudLines({
+    intent: null, fields: { project: 'p'.repeat(40), branch: 'b'.repeat(26), model: null, usedPercent: null, claim },
+  }));
+  assert.ok(identity.includes('(autonomy-c6c847 +2)'), identity);
+  assert.ok(width(identity) <= BUDGET, `${width(identity)} > ${BUDGET}`);
+  const branch = identity.slice(identity.indexOf('⎇ ') + 2);
+  assert.equal(width(branch), CAPS.branch - width(' (autonomy-c6c847 +2)'));
+});
+
+test('an id too wide to leave the branch any room drops the branch, never the id', () => {
+  const id = `${'x'.repeat(30)}-abcdef`;
+  const [identity] = plain(hudLines({
+    intent: null, fields: { ...FIELDS, project: 'p'.repeat(40), claim: { id, others: 12 } },
+  }));
+  assert.ok(identity.includes(`(${id} +12)`), identity);
+  assert.doesNotMatch(identity, /⎇/);
+  assert.ok(width(identity) <= BUDGET, `${width(identity)} > ${BUDGET}`);
+});
+
+test('the claim is sanitised like every other field', () => {
+  const lines = hudLines({
+    intent: null, fields: { ...FIELDS, claim: { id: 'fam-\x1b]0;x\x07ff\n5351', others: 0 } },
+  });
+  assert.equal(lines.length, 4);
+  assert.ok(!lines[0].includes('\x1b') && !lines[0].includes('\n'), JSON.stringify(lines[0]));
+});
+
+test('the task id takes the project stop; its frame is dim', () => {
+  const color = identityColors({ slot: 3, projectColor: '#317d01' }, DARK);
+  const [identity] = hudLines({
+    intent: { color, urgency: 'none', state: 'idle' },
+    fields: { ...FIELDS, claim: { id: 'fam-ff5351', others: 1 } },
+  });
+  assert.ok(identity.includes(fg('#317d01') + 'fam-ff5351'), JSON.stringify(identity));
+  assert.ok(identity.includes(fg(color.shadow) + ' +1)'), JSON.stringify(identity));
+});
+
+// THE SWEEP, AGAIN, WITH A CLAIM PRESENT. The longest prefix registered today is eight
+// characters (`autonomy`), against a branch at its full 26-cell cap, with `+N`: the widest
+// identity line real data produces. Every state, both tones, every height.
+test('with a claim, every state, tone and height stays inside the budget', () => {
+  const fields = {
+    project: 'p'.repeat(40), branch: 'b'.repeat(26), model: 'm'.repeat(120), usedPercent: 100,
+    claim: { id: 'autonomy-c6c847', others: 9 },
+  };
+  const fixtures = [
+    { intent: null, fields },
+    ...[DARK, LIGHT].flatMap((tone) => STATES.map((state) => ({ intent: intentFor(state, 0, tone), fields }))),
+  ];
+  for (const fixture of fixtures) {
+    for (const rows of [1, 2, 3, 4, 5, 12, 40]) {
+      const lines = hudLines({ ...fixture, rows });
+      assert.equal(lines.length, Math.min(4, rows), `rows=${rows}`);
+      for (const line of lines) {
+        assert.notEqual(strip(line).trim(), '', `rows=${rows}: empty slot`);
+        assert.ok(!line.includes('\n'), `rows=${rows}: newline inside a slot`);
+        assert.ok(width(line) <= BUDGET, `rows=${rows}: ${width(line)} > ${BUDGET} in ${JSON.stringify(strip(line))}`);
+      }
+      if (rows >= 2) assert.ok(strip(lines[0]).includes('(autonomy-c6c847 +9)'), `rows=${rows}`);
+    }
+  }
+});

@@ -9,8 +9,9 @@
 //
 // IT IS ALSO THE FILE TO WATCH FOR LATENCY. With refreshInterval set, the docs say an update
 // arriving while the script is still running CANCELS the in-flight script -- so a slow status
-// line does not merely lag, it can be killed repeatedly and never paint. The git call below
-// is the only subprocess on this path, it is BOUNDED, and it stays that way.
+// line does not merely lag, it can be killed repeatedly and never paint. The git call and the
+// claim lookup below are the only subprocesses on this path, each is BOUNDED, and they stay
+// that way.
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
 
@@ -53,7 +54,66 @@ export function gitBranch(cwd, { env } = {}) {
   }
 }
 
-export function readFields(payload, { git = gitBranch } = {}) {
+// The claim lookup's own deadline, beside BRANCH_TIMEOUT_MS rather than borrowing it: the two
+// commands differ, and so may their deadlines. `tasks claims` measured 4-6ms on a warm host, so
+// this is a hang guard, not a budget. Worst case with both git attempts: 750ms of a 2s interval.
+export const CLAIMS_TIMEOUT_MS = 250;
+
+// THE TASK THIS SESSION HAS CLAIMED, as { id, others } or null. A Claude Code claim's `session`
+// IS the session_id on stdin, so a live claim with that session is this session's task. One
+// session may hold several: the latest started is shown and the rest are counted.
+//
+// `--json` EXPLICITLY: TASKS_FORMAT=pretty overrides the JSON default, and a pretty table is
+// unparseable JSON here.
+//
+// NO `tasks` ON PATH IS A FACT ABOUT THE HOST, answered with no segment, like no claim. Anything
+// else that leaves the segment off -- a timeout, a non-zero exit, JSON that does not parse or
+// is not the shape below -- is a FAULT, and is said once through `warn` rather than painted.
+export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
+  if (!sessionId) return null;
+  let stdout;
+  try {
+    stdout = execFileSync('tasks', ['claims', '--json'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: CLAIMS_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      ...(env ? { env } : {}),
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    warn(error.code === 'ETIMEDOUT'
+      ? `tasks claims: timed out after ${CLAIMS_TIMEOUT_MS}ms`
+      : `tasks claims: exited ${error.status ?? error.signal ?? error.code}`);
+    return null;
+  }
+
+  let claims;
+  try {
+    ({ claims } = JSON.parse(stdout));
+  } catch (error) {
+    warn(`tasks claims: unparseable JSON: ${error.message}`);
+    return null;
+  }
+  if (!Array.isArray(claims)
+    || !claims.every((c) => typeof c?.id === 'string' && typeof c.started === 'string')) {
+    warn('tasks claims: unexpected JSON shape: want {claims: [{id, started, ...}]}');
+    return null;
+  }
+
+  // `started` is RFC 3339 UTC from one writer, so string order is time order.
+  const mine = claims
+    .filter((c) => c.live === true && c.session === sessionId)
+    .sort((a, b) => (a.started < b.started ? 1 : a.started > b.started ? -1 : 0));
+  return mine.length ? { id: mine[0].id, others: mine.length - 1 } : null;
+}
+
+// The same shape bin/familiar.js gives a visual fault: one line, prefixed, newlines flattened.
+function statuslineWarn(message) {
+  process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
+}
+
+export function readFields(payload, { git = gitBranch, claim = claimedTask } = {}) {
   const data = payload ?? {};
   const cwd = data.workspace?.current_dir ?? data.cwd ?? process.cwd();
   const pct = data.context_window?.used_percentage;
@@ -61,6 +121,7 @@ export function readFields(payload, { git = gitBranch } = {}) {
   return {
     project: basename(cwd),
     branch: git(cwd),
+    claim: claim(data.session_id),
     model: data.model?.display_name ?? null,
     // ABSENT AND null ARE ONE CASE, and this is the line that makes them one. The docs state
     // used_percentage "may be null early in the session"; an existence check alone lets null
