@@ -80,9 +80,9 @@ parent compositor for unattended work. Run the following in a terminal **inside 
 nested session**, in a dedicated Bash shell, from the checkout being evaluated:
 
 ```sh
-repo="$PWD"
-qs_bin=$(command -v qs)
-demo=$(mktemp -d)
+export repo="$PWD"
+export qs_bin=$(command -v qs)
+export demo=$(mktemp -d)
 export HOME="$demo/home" XDG_CONFIG_HOME="$demo/config"
 export XDG_DATA_HOME="$demo/data" XDG_STATE_HOME="$demo/state" XDG_CACHE_HOME="$demo/cache"
 export FAMILIAR_CONFIG_DIR="$demo/familiar-config" FAMILIAR_STATE_DIR="$demo/familiar-state"
@@ -141,11 +141,15 @@ publish SessionStart                 # establish the initial, quiet observation
 Start `noctalia`, `"$repo/bin/familiar-niri" watch` and the popup in this private
 environment. Run them under a harness that records their pids and reaps them on EXIT,
 TERM and INT, including the coordinator's event-stream child; do not daemonize them.
-For the popup failure check, remove only the private link **before** its first start:
+For the popup failure check, launch a second Bash directly from the driver shell
+(for example `kitty --config NONE /bin/bash --noprofile --norc`) so it inherits these
+exported variables and the nested session's environment. A terminal opened from the
+desktop menu will not inherit the driver's private environment. Remove only the
+private link **before** the popup's first start:
 
 ```sh
 rm "$demo/bin/familiar"
-# Foreground, in a second shell with the same private environment; keep it running.
+# Foreground in that child Bash; keep it running while the driver publishes events.
 PATH="$demo/bin" "$qs_bin" --no-color --log-times -p "$repo/integrations/niri-desktop" \
   > "$demo/popup.log" 2>&1
 ```
