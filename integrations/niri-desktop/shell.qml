@@ -10,12 +10,12 @@ ShellRoot {
     // The same directory the `familiar` CLI it drives uses: FAMILIAR_STATE_DIR when set,
     // otherwise the default. A set but non-absolute value is refused, never replaced by
     // the default: this popup then stays idle and says why.
-    // An empty value counts as unset (Quickshell may report an unset variable either way).
+    // Quickshell.env reports an unset variable as null, so an empty value is set and refused.
     readonly property var stateOverride: Quickshell.env("FAMILIAR_STATE_DIR")
-    readonly property string stateDirError: !stateOverride || String(stateOverride).startsWith("/")
+    readonly property string stateDirError: stateOverride === null || String(stateOverride).startsWith("/")
         ? "" : "FAMILIAR_STATE_DIR must be an absolute path"
     readonly property string stateDir: stateDirError !== "" ? ""
-        : stateOverride ? String(stateOverride) : Quickshell.env("HOME") + "/.local/state/familiar"
+        : stateOverride !== null ? String(stateOverride) : Quickshell.env("HOME") + "/.local/state/familiar"
     Component.onCompleted: if (stateDirError !== "") console.warn("[familiar-desktop] " + stateDirError)
     // One consumer identity per shell start; its reservations are its own.
     readonly property string consumerId: "popup-" + Date.now() + "-" + Math.floor(Math.random() * 1e9)

@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -9,7 +9,13 @@ const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export function paths(env = process.env) {
   const home = env.HOME ?? homedir();
   const configDir = env.FAMILIAR_CONFIG_DIR ?? join(home, '.config', 'familiar');
-  const stateDir = env.FAMILIAR_STATE_DIR ?? join(home, '.local', 'state', 'familiar');
+  // A state override must be absolute: an empty or relative one would resolve against the
+  // cwd, where the bar plugin and the popup, which refuse it, would never look.
+  const stateOverride = env.FAMILIAR_STATE_DIR;
+  if (stateOverride !== undefined && !isAbsolute(stateOverride)) {
+    throw new Error('FAMILIAR_STATE_DIR must be an absolute path');
+  }
+  const stateDir = stateOverride ?? join(home, '.local', 'state', 'familiar');
 
   return {
     configDir,
