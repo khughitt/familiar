@@ -304,6 +304,9 @@ test('the shell reads the same state directory as the CLI it drives, refusing a 
   const qml = readFileSync(fileURLToPath(new URL('./shell.qml', import.meta.url)), 'utf8');
   assert.match(qml, /Quickshell\.env\("FAMILIAR_STATE_DIR"\)/);
   assert.match(qml, /FAMILIAR_STATE_DIR must be an absolute path/);
+  // Quickshell.env reports an unset variable as null and an empty one as "": only null is
+  // unset, so an empty override is refused like the CLI and the bar plugin refuse it.
+  assert.match(qml, /stateOverride === null \|\| String\(stateOverride\)\.startsWith\("\/"\)/);
   const evaluate = qml.slice(qml.indexOf('function evaluate()'), qml.indexOf('function attach('));
   assert.match(evaluate, /if \(stateDirError !== ""\) return;/);
 });

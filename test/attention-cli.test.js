@@ -78,6 +78,21 @@ const json = (result) => {
   return JSON.parse(result.stdout);
 };
 
+test('an empty or relative FAMILIAR_STATE_DIR fails before any state is written', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-attention-cli-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const value of ['', 'state']) {
+    const env = {
+      PATH: process.env.PATH, HOME: join(root, 'home'), USER: 'tester', FAMILIAR_STATE_DIR: value,
+      FAMILIAR_CONFIG_DIR: join(root, 'config'), NIRI_SOCKET: SOCKET,
+    };
+    const result = spawnSync(process.execPath, [BIN, 'attention', 'dismiss', 'e1'], { cwd: root, encoding: 'utf8', env });
+    assert.equal(result.status, 1, JSON.stringify(value));
+    assert.equal(result.stderr, 'familiar: FAMILIAR_STATE_DIR must be an absolute path\n');
+    assert.deepEqual(readdirSync(root), []);
+  }
+});
+
 test('status prints the whole view in every output mode and changes nothing', { skip: requiresLinuxBoot }, async (t) => {
   const f = fixture(t);
   const { saved } = await seed(f.paths);

@@ -19,7 +19,8 @@ rollback: `docs/runbooks/desktop-attention-rollout.md`.
 
 All files live in familiar's state directory (`FAMILIAR_STATE_DIR`, default
 `~/.local/state/familiar`): `attention.json`, `attention-health.json`,
-`attention-coordinator.lock` and `niri-workspaces.json`.
+`attention-coordinator.lock` and `niri-workspaces.json`. An override must be an absolute
+path: the CLI, the popup and the bar plugin each refuse an empty or relative one.
 
 ## Episodes
 

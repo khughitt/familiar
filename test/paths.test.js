@@ -42,3 +42,16 @@ test('attention state, its heartbeat and the coordinator lock live under the sta
   assert.equal(p.attentionHealthPath, '/s/attention-health.json');
   assert.equal(p.attentionCoordinatorLockPath, '/s/attention-coordinator.lock');
 });
+
+test('an unset FAMILIAR_STATE_DIR resolves under HOME', () => {
+  assert.equal(paths({ HOME: '/h' }).stateDir, '/h/.local/state/familiar');
+});
+
+// An empty value under `??` became a cwd-relative state directory, so the CLI wrote one
+// attention.json while the plugin and the popup, which refuse such an override, read another.
+test('an empty or relative FAMILIAR_STATE_DIR is refused, never resolved against the cwd', () => {
+  for (const value of ['', 'state', './state', '~/state']) {
+    assert.throws(() => paths({ HOME: '/h', FAMILIAR_STATE_DIR: value }),
+      { message: 'FAMILIAR_STATE_DIR must be an absolute path' }, JSON.stringify(value));
+  }
+});
