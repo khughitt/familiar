@@ -26,7 +26,14 @@ const usage = () => {
 };
 if (rest.length > 0 || !['sync', 'watch'].includes(command)) usage();
 
-const paths = resolvePaths();
+// A configuration error is one line for the journal, like usage(), not an import-time stack.
+let paths;
+try {
+  paths = resolvePaths();
+} catch (error) {
+  process.stderr.write(`familiar-niri: ${error.message}\n`);
+  process.exit(1);
+}
 const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not name niri
 const processOps = createProcessOps();
 

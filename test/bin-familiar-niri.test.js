@@ -20,6 +20,19 @@ test('familiar-niri rejects trailing arguments', () => {
   assert.equal(result.stderr, 'usage: familiar-niri <sync | watch>\n');
 });
 
+test('familiar-niri names a relative state override in one line, without a stack', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'familiar-niri-state-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const value of ['', 'state']) {
+    const result = spawnSync(process.execPath, [bin, 'sync'], {
+      cwd: dir, encoding: 'utf8', env: { PATH: '', HOME: dir, FAMILIAR_STATE_DIR: value },
+    });
+    assert.equal(result.status, 1, JSON.stringify(value));
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, 'familiar-niri: FAMILIAR_STATE_DIR must be an absolute path\n');
+  }
+});
+
 test('the bridge resyncs on a sessions.json rename', { timeout: 10_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'familiar-niri-watch-'));
   const state = join(dir, 'state');
