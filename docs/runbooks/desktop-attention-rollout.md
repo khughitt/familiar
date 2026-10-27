@@ -14,7 +14,7 @@ On this host the live desktop runs familiar from the main checkout, not from a r
 - `familiar` on `PATH` is an npm link into the main checkout;
 - relay's observer entries (`familiar setup relay`) call that same `bin/familiar`.
 
-Merging the branch into main therefore changes what the next hook, the next watcher
+Merging runtime changes into main therefore changes what the next hook, the next watcher
 start and the next popup start run. Treat the merge as the first activation step, with
 its own approval, not as ordinary local integration.
 
@@ -67,30 +67,127 @@ coordinator and popup keep their old code until restarted (steps 4 and 6).
 
 ## 3. Headless check (no live desktop)
 
-In a nested Niri session (or another nested compositor) with a throwaway
-`FAMILIAR_STATE_DIR`, `HOME` and `NIRI_SOCKET`: link the plugin into that session's
-Noctalia plugin directory, place `khughitt/familiar:workspaces`, start
-`familiar-niri watch` and the popup, then drive one fake event per kind with
-`familiar observe` envelopes. Record: left click focuses the clicked output's workspace;
-the popup, started once with `familiar` missing from its `PATH`, makes at most one
-`familiar attention popup` attempt every 2 s and recovers once `familiar` is back (its
-backoff and never-started-request release are only checked statically in the suite);
-right click dismisses (or, if it is intercepted, the Alerts panel does); middle click
-opens settings; the popup takes no keyboard focus and is click-through; pills render in
-both bar orientations. This proves layout and gestures only in the nested session.
+First run `just test` in the checkout being evaluated. In particular,
+`test/attention-e2e.slow.test.js` exercises real relay publication, observer capture,
+coordinator attribution, popup protocol and plugin presentation without a compositor.
+It does not prove native layout or gestures.
+
+For those checks, use an isolated nested Niri session with its own `NIRI_SOCKET`,
+Wayland display, D-Bus session and throwaway HOME/XDG directories. Do not use Niri's
+`--session` flag: it imports the nested environment into the host's services. A nested
+window on the live desktop still needs approval to use the desktop; use a headless
+parent compositor for unattended work. Run the following in a terminal **inside that
+nested session**, in a dedicated Bash shell, from the checkout being evaluated:
+
+```sh
+repo="$PWD"
+qs_bin=$(command -v qs)
+demo=$(mktemp -d)
+export HOME="$demo/home" XDG_CONFIG_HOME="$demo/config"
+export XDG_DATA_HOME="$demo/data" XDG_STATE_HOME="$demo/state" XDG_CACHE_HOME="$demo/cache"
+export FAMILIAR_CONFIG_DIR="$demo/familiar-config" FAMILIAR_STATE_DIR="$demo/familiar-state"
+export FAMILIAR_THEMES_DIR="$demo/themes" RELAY_STATE_DIR="$demo/relay"
+export DEMO_PID=$$                      # this nested terminal's long-lived shell
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME/noctalia/plugins" \
+  "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$FAMILIAR_CONFIG_DIR" "$FAMILIAR_THEMES_DIR" "$demo/bin"
+cp -R "$repo/test/fixtures/theme-pack" "$FAMILIAR_THEMES_DIR/cats"
+printf 'theme: cats\nmotion: full\n' > "$FAMILIAR_CONFIG_DIR/config.yaml"
+printf '{"mode":"dark","satScale":1}\n' > "$FAMILIAR_CONFIG_DIR/scheme.json"
+ln -s "$repo/integrations/noctalia-plugin" "$XDG_DATA_HOME/noctalia/plugins/familiar"
+# Only the popup uses this restricted PATH; no other familiar can mask its removal.
+for tool in node niri; do ln -s "$(command -v "$tool")" "$demo/bin/$tool"; done
+ln -s "$repo/bin/familiar" "$demo/bin/familiar"
+```
+
+Prepare a Noctalia config in this private `XDG_CONFIG_HOME`: enable
+`khughitt/familiar` and put `khughitt/familiar:workspaces` in `[bar.default] start`,
+as in step 5. Validate it before starting this session's Noctalia. Keep DND off for
+popup/toast checks; confirm the coordinator reports `healthy / known / off` using
+step 4's status command with `"$repo/bin/familiar"`.
+
+Publish before observing: an envelope alone does not create a relay registry row.
+This function follows the end-to-end fixture, using the terminal shell as the live
+stand-in agent and suppressing terminal graphics. It uses real process handles,
+theme loading and observer capture; native harness ownership remains a step 8 check.
+
+```sh
+publish() {
+  NATIVE_EVENT="$1" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import { applyEvent, normalizeEvent, readSnapshot, createProcessOps } from 'relay';
+import { observe } from './src/observe/run.js';
+import { paths } from './src/bus/paths.js';
+const pid = Number(process.env.DEMO_PID);
+const processOps = createProcessOps();
+assert.ok(processOps.handleOf(pid), 'nested terminal must still be alive');
+const event = normalizeEvent('claude-code', process.env.NATIVE_EVENT,
+  JSON.stringify({ session_id: 'nested-demo', cwd: process.env.HOME }));
+const result = await applyEvent(event, { resolveSessionPid: () => pid,
+  gitContext: async () => ({ remote: null, repoRoot: null }) });
+const envelope = { schema: 1, type: 'event', subscriber: 'familiar', event,
+  registry: { generation: result.snapshot.generation, revision: result.snapshot.revision },
+  changed: result.changed, reaped: result.reaped };
+const captured = await observe({ text: JSON.stringify(envelope), deps: {
+  paths: paths(), relay: { readSnapshot }, relayProcess: processOps,
+  adapterFor: () => ({ resolveSessionPid: () => pid, resolveTerminalPid: () => pid }),
+  emitTransition: async () => ({ kind: 'unchanged' }),
+} });
+assert.equal(captured.exitCode, 0, captured.lines.join('\n'));
+JS
+}
+publish SessionStart                 # establish the initial, quiet observation
+```
+
+Start `noctalia`, `"$repo/bin/familiar-niri" watch` and the popup in this private
+environment. Run them under a harness that records their pids and reaps them on EXIT,
+TERM and INT, including the coordinator's event-stream child; do not daemonize them.
+For the popup failure check, remove only the private link **before** its first start:
+
+```sh
+rm "$demo/bin/familiar"
+# Foreground, in a second shell with the same private environment; keep it running.
+PATH="$demo/bin" "$qs_bin" --no-color --log-times -p "$repo/integrations/niri-desktop" \
+  > "$demo/popup.log" 2>&1
+```
+
+Back in the driver shell, publish `Notification:permission_prompt` and wait until the
+state has an eligible popup. Count only lines matching
+`\[familiar-desktop\] (initialise|claim) (did not start|exited)` in `popup.log`, using
+their timestamps: each failed request must be separated by at least 2 s of backoff.
+A process that never starts takes a 2 s timeout **plus** that backoff (about 4 s per
+failure), and must keep retrying rather than wedge. To inspect actual launch attempts,
+start the popup under `strace -f -ttt -e trace=process,file -o "$demo/popup.trace"`;
+include failed executable lookups, since a missing binary may never reach `execve`.
+Do not count the per-PATH lookup syscalls as separate control requests.
+
+Restore with `ln -s "$repo/bin/familiar" "$demo/bin/familiar"`, without restarting
+the popup. Confirm failures stop and the queue resumes. Attachment may suppress the
+episode already present; publish `UserPromptSubmit`, then a fresh
+`Notification:permission_prompt` and require its popup to play once. For each remaining
+kind, publish `UserPromptSubmit` before `Notification:idle_prompt` (input),
+`StopFailure` (error), or `Stop` (completion). Move focus to another workspace before
+publishing to check unseen markers and completion toasts.
+
+Record: left click focuses the clicked output's workspace; right click dismisses (or,
+if intercepted, the Alerts panel does); middle click opens settings; the popup takes
+no keyboard focus and is click-through; pills render in both bar orientations. Keep
+logs and results with the rollout task before deleting the private directories. These
+checks prove layout and gestures only in the nested session.
 
 ## 4. Supervised coordinator (approval: "start the attention coordinator")
 
 Stop the unsupervised watcher started by Niri, then start one transient user service:
 
 ```sh
-pkill -f '[f]amiliar-niri watch'
+stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
 systemd-run --user --unit=familiar-attention --service-type=exec \
   --property=Restart=on-failure --property=RestartSec=2 \
   --property=StartLimitIntervalSec=60 --property=StartLimitBurst=5 \
   --working-directory="$HOME" -E HOME="$HOME" -E NIRI_SOCKET="$NIRI_SOCKET" -E PATH="$PATH" \
   "$(command -v familiar-niri)" watch
 ```
+
+Use the `stop_and_wait` helper defined in Upgrade below.
 
 Readiness, within 10 s, read from what the unit itself published (a DND check from this
 shell would not prove the unit's environment can reach Noctalia):
@@ -147,9 +244,11 @@ Middle click keeps opening the widget's settings; do not free it in the manifest
 Restart the popup so it runs the shared-attention consumer:
 
 ```sh
-pkill -f '[q]s -d -p .*/integrations/niri-desktop'
-qs -d -p ~/d/familiar/integrations/niri-desktop
+stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
+niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
 ```
+
+Use the `stop_and_wait` helper defined in Upgrade below.
 
 ## 7. Native toasts (approval: hq-d6e13a's change)
 
@@ -168,21 +267,32 @@ one toast:
 - OpenCode: approval (closed by the reply), error, completion through `done → idle`.
 - Seen: visiting stops motion; requests stay static; errors and completions clear.
 - Dismissal: right click and the Alerts panel; a request arriving meanwhile survives.
+- Clicks during the 16 ms arrival and 200 ms pulse re-renders: repeat left and right
+  clicks across those updates. The host drops superseded handlers; record any lost
+  focus or dismissal, and verify a dismissal never targets a newer request.
 - DND on and unknown: nothing pops or toasts; markers stay; turning DND off replays
   nothing.
 - Kill the coordinator, then freeze it (`kill -STOP`). Kill only the main process with
   SIGKILL: `systemctl --user kill --kill-whom=main --signal=SIGKILL familiar-attention`.
   A plain `systemctl --user kill` sends SIGTERM to the whole control group, which is a
   clean stop: the coordinator exits 0, `Restart=on-failure` does not restart it, and
-  it is not counted as a crash. Within 10 s the bar shows "Agent alerts disconnected —
+  it is not counted as a crash. Wait for a new healthy MainPID after SIGKILL, then
+  obtain it with `systemctl --user show -p MainPID --value familiar-attention` and
+  send SIGSTOP to that new pid (require it to be greater than zero). Within 10 s of
+  its last heartbeat, plus the plugin's next 250 ms poll, the bar shows "Agent alerts disconnected —
   toasts unavailable" and one notice (DND off); navigation keeps working; restart and
-  `kill -CONT` recover without a backlog. The SIGKILL is also a counted crash: two
+  `kill -CONT <that new pid>` recover without a backlog. SIGKILL alone normally
+  restarts within the health window, so need not show disconnected.
+  The SIGKILL is also a counted crash: two
   within ten minutes show "Agent alerts unstable".
 - Two outputs: the visible workspace on the other monitor stays unseen; output B's
   pill focuses output B's workspace while output A is focused.
 - Latency: over 100 workspace switches, event to pill update p95 <= 100 ms and
   maximum <= 200 ms before the familiar widget replaces the built-in one for good;
-  click-to-focus is measured separately.
+  click-to-focus is measured separately, from click to the compositor's focus event.
+  Record its p95 and maximum too: `familiar niri focus` cold start was measured at
+  about 120 ms before socket work, so the feed-update budget does not establish
+  click latency.
 
 Record each result on fam-9c8dd1 and ops-e40874. A duplicate native and familiar toast,
 a missed request marker, or an undetected dead coordinator fails acceptance.
@@ -204,8 +314,9 @@ define it once in the shell you run these in:
 ```sh
 stop_and_wait() {  # stop_and_wait <pid>
   case "$1" in
-    ''|*[!0-9]*) echo "stop_and_wait: need exactly one pid, got: '$1'" >&2; return 1 ;;
+    ''|*[!0-9]*) echo "stop_and_wait: need exactly one positive pid, got: '$1'" >&2; return 1 ;;
   esac
+  [ "$1" -gt 0 ] || { echo "stop_and_wait: pid must be positive" >&2; return 1; }
   kill "$1" || { echo "could not stop pid $1" >&2; return 1; }
   for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
   echo "pid $1 still running after 10 s" >&2; return 1
@@ -222,7 +333,7 @@ stop_and_wait() {  # stop_and_wait <pid>
    restarts), stop it and relaunch it through Niri:
 
    ```sh
-   stop_and_wait "$(pgrep -f '[f]amiliar-niri watch')" &&
+   stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
    niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
    ```
 
@@ -241,7 +352,7 @@ stop_and_wait() {  # stop_and_wait <pid>
 3. Restart the popup, as in step 6, the same way:
 
    ```sh
-   stop_and_wait "$(pgrep -f '[q]s -d -p .*/integrations/niri-desktop')" &&
+   stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
    niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
    ```
 
@@ -253,12 +364,34 @@ coordinator restart until the plugin and popup restart, each old consumer reads 
 2 as invalid: the plugin shows disconnected and sends its one notice, the old popup
 shows nothing, and popup-eligible episodes from that window are suppressed when the
 restarted popup starts, not replayed. Doing the three restarts together keeps both
-windows to seconds. Confirm:
+windows to seconds. The anchored process patterns above match only the command's
+argv, so they cannot match a `bash -c` script containing these instructions. They
+assume Niri's documented startup arguments; if a lookup is empty or ambiguous,
+inspect `ps -eo pid,args` and select the one verified process instead of widening
+the pattern. Confirm readiness within 10 s after the three restarts:
 
 ```sh
 familiar attention status | jq -r '.health.status, .health.crashes'
 # healthy / 0
 ```
+
+On the first schema-1 upgrade, expect one coordinator log line containing
+`health record unusable; crash history reset`. A missing record starts empty without
+that line; a restart after an unclean exit may legitimately report a nonzero crash
+count. Reverting the crash-history merge crosses the same schema boundary in reverse
+and requires the same three restarts immediately after the revert.
+
+## Recovery: corrupt attention state
+
+The observer and coordinator report a corrupt `attention.json` and leave its bytes
+alone; the independent heartbeat may still look healthy. Preserve that file with the
+rollout task if needed for diagnosis, then remove only
+`"${FAMILIAR_STATE_DIR:-$HOME/.local/state/familiar}/attention.json"`. Leave the other
+state files and the relay registry intact. The next relay observation or reconcile
+restores current requests as static markers, without popups, toasts or historical
+completions. Confirm that observation succeeded and the requests appear; if none is
+expected soon, trigger relay's normal reconcile with `relay reap` (requires the
+familiar reconcile observer entry from `familiar setup relay` to be installed).
 
 ## Rollback
 
@@ -267,9 +400,12 @@ systemctl --user stop familiar-attention
 rm ~/.local/share/noctalia/plugins/familiar
 cp "$pre/noctalia-config.toml" "$(readlink -f ~/.config/noctalia/config.toml)"
 cp "$pre/niri-config.kdl" "$(readlink -f ~/.config/niri/config.kdl)"
-git -C ~/d/familiar revert -m 1 <merge commit>     # or check out "$pre/familiar-main.txt"
-~/d/familiar/bin/familiar-niri watch </dev/null >/dev/null 2>&1 &   # as Niri started it before
-pkill -f '[q]s -d -p .*/integrations/niri-desktop'; qs -d -p ~/d/familiar/integrations/niri-desktop
+: "${merge_commit:?set merge_commit to the rollout merge being reverted}"
+git -C ~/d/familiar revert -m 1 "$merge_commit"
+niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
+stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
+niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
+stop_and_wait "$(pgrep -xo noctalia)" && niri msg action spawn -- noctalia
 ```
 
 Restore native notification settings with hq-d6e13a's restore commands. The attention
