@@ -7,10 +7,12 @@ Coordination task: ops-e40874; code: fam-9c8dd1.
 
 ## Why integration is activation
 
-On this host the live desktop runs familiar from the main checkout, not from a release:
+On this host the live desktop runs familiar from the main checkout, not from a release.
+Below, `$familiar_main` is that checkout; set it in each shell that runs these steps with
+`familiar_main=$(tasks root fam-9c8dd1 --pretty)`.
 
-- Niri starts `~/d/familiar/bin/familiar-niri watch` and
-  `qs -d -p ~/d/familiar/integrations/niri-desktop` (dotfiles `niri/config.kdl`);
+- Niri starts `$familiar_main/bin/familiar-niri watch` and
+  `qs -d -p $familiar_main/integrations/niri-desktop` (dotfiles `niri/config.kdl`);
 - `familiar` on `PATH` is an npm link into the main checkout;
 - relay's observer entries (`familiar setup relay`) call that same `bin/familiar`.
 
@@ -36,7 +38,7 @@ mkdir -p "$pre"
 cp -L ~/.config/noctalia/config.toml "$pre/noctalia-config.toml"
 cp -L ~/.config/niri/config.kdl "$pre/niri-config.kdl"
 ls -la ~/.local/share/noctalia/plugins > "$pre/noctalia-plugins.txt"
-git -C ~/d/familiar rev-parse HEAD > "$pre/familiar-main.txt"
+git -C "$familiar_main" rev-parse HEAD > "$pre/familiar-main.txt"
 pgrep -af 'familiar-niri watch|niri-desktop' > "$pre/processes.txt"
 systemctl --user list-units 'familiar*' --all > "$pre/units.txt"
 sha256sum "$pre"/* > "$pre/SHA256SUMS"
@@ -59,7 +61,7 @@ point a shared launcher at a worktree.
 ## 2. Integrate (approval: "merge desktop attention")
 
 ```sh
-git -C ~/d/familiar merge --no-ff feat/desktop-attention
+git -C "$familiar_main" merge --no-ff feat/desktop-attention
 ```
 
 From the next hook on, the observer also writes `attention.json`. The running
@@ -229,7 +231,7 @@ the desktop (and removing the old `spawn-sh-at-startup` line) is the dotfiles ch
 ## 5. Plugin and bar (approval: "enable the familiar bar plugin")
 
 ```sh
-ln -s ~/d/familiar/integrations/noctalia-plugin ~/.local/share/noctalia/plugins/familiar
+ln -s "$familiar_main/integrations/noctalia-plugin" ~/.local/share/noctalia/plugins/familiar
 ```
 
 Enable `khughitt/familiar` the way `khughitt/prism` and `khughitt/wali-panel` are
@@ -249,7 +251,7 @@ Restart the popup so it runs the shared-attention consumer:
 
 ```sh
 stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
-niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
+niri msg action spawn-sh -- "qs -d -p $familiar_main/integrations/niri-desktop"
 ```
 
 Use the `stop_and_wait` helper defined in Upgrade below.
@@ -338,7 +340,7 @@ stop_and_wait() {  # stop_and_wait <pid>
 
    ```sh
    stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
-   niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
+   niri msg action spawn-sh -- "$familiar_main/bin/familiar-niri watch"
    ```
 
 2. Reload the plugin. Noctalia 5.3 has no plugin reload command: `noctalia msg` offers
@@ -357,7 +359,7 @@ stop_and_wait() {  # stop_and_wait <pid>
 
    ```sh
    stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
-   niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
+   niri msg action spawn-sh -- "qs -d -p $familiar_main/integrations/niri-desktop"
    ```
 
 Two windows are transient. From the merge until the coordinator restarts, the old
@@ -405,10 +407,10 @@ rm ~/.local/share/noctalia/plugins/familiar
 cp "$pre/noctalia-config.toml" "$(readlink -f ~/.config/noctalia/config.toml)"
 cp "$pre/niri-config.kdl" "$(readlink -f ~/.config/niri/config.kdl)"
 : "${merge_commit:?set merge_commit to the rollout merge being reverted}"
-git -C ~/d/familiar revert -m 1 "$merge_commit"
-niri msg action spawn-sh -- '~/d/familiar/bin/familiar-niri watch'
+git -C "$familiar_main" revert -m 1 "$merge_commit"
+niri msg action spawn-sh -- "$familiar_main/bin/familiar-niri watch"
 stop_and_wait "$(pgrep -f '^([^ ]*/)?qs -d -p .*/integrations/niri-desktop$')" &&
-niri msg action spawn-sh -- 'qs -d -p ~/d/familiar/integrations/niri-desktop'
+niri msg action spawn-sh -- "qs -d -p $familiar_main/integrations/niri-desktop"
 stop_and_wait "$(pgrep -xo noctalia)" && niri msg action spawn -- noctalia
 ```
 

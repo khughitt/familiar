@@ -1,0 +1,5 @@
+# Files that may carry this machine's layout. Keep each entry an exact file.
+layout_allowed = [
+    # Historical spec: §6.2 quotes the live pin/slot resolution observed on the host as evidence.
+    "docs/specs/2026-09-05-codex-identity-parity-design.md",
+]

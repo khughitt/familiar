@@ -275,7 +275,7 @@ Members: fam-60d716, fam-a877b3, plus the related fam-053b0d (unparented).
   to read; its one remaining consumer need, the project colour, is fam-053b0d.
 - fam-a877b3 — question to the user. The storage result above stands: the
   catalog is authored, read-only to the engine, and the live one pins only
-  `~/d/...` paths, which the dotfiles convention makes portable. Lean: one
+  home-relative checkout paths, which the dotfiles convention makes portable. Lean: one
   catalog tracked by dotfiles (drop its ignore and Dropbox mark), which
   needs no engine work. Alternative: per-host catalogs via the
   `FAMILIAR_IDENTITIES_FILE` contract above.

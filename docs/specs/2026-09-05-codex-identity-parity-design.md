@@ -29,7 +29,7 @@ pinned projects, independent of Codex (§6.2).
 
 ## 1. The report
 
-`~/d/beliefs` drew a teal Spectral Cat in Codex and an orange Tortoiseshell in
+The beliefs checkout drew a teal Spectral Cat in Codex and an orange Tortoiseshell in
 Claude Code, at the same commit, in the same repository, on the same machine.
 
 Both are "correct" for their own inputs:
