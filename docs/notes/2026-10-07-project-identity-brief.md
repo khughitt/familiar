@@ -88,8 +88,8 @@ Reuse `ops-b31634` before designing a new shared visual format.
   rerun above avoids assuming that it also reopens this idea.
 
 All three members remain ideas. The local follow-ups add a finding note to their
-waiting idea before the result's branch merges as their result; this handoff is a brief, not an
-approved design.
+waiting idea before the result's branch merges; this handoff is a brief, not an approved
+design.
 
 ## Storage investigation result — fam-090b35
 
