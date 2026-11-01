@@ -5,7 +5,7 @@ import { loadContext } from '../src/observe/context.js';
 import { readSessions } from '../src/bus/sessions.js';
 import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
-import { registerHooks } from 'node:module';
+import * as nodeModule from 'node:module';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
@@ -491,9 +491,11 @@ test('reap reports removed ended evidence in pretty output', async (t) => {
 // default outer timeout), and most of a cold `familiar observe` was module loading. A
 // teardown drops presentation state and resets the terminal: it never resolves a theme,
 // reads config or draws, so it must not load the theme contract, the YAML parser, or the
-// CLI's other commands. module.registerHooks arrived in Node 22.15.
+// CLI's other commands. module.registerHooks arrived in Node 22.15, and the admitted
+// session's terminal owner is this test process, which only Linux can target without a tty.
 const traceHook = fileURLToPath(new URL('fixtures/trace-imports.mjs', import.meta.url));
-const traceSkip = typeof registerHooks === 'function' ? false : 'module.registerHooks needs Node 22.15 or later';
+const traceSkip = typeof nodeModule.registerHooks !== 'function' ? 'module.registerHooks needs Node 22.15 or later'
+  : process.platform !== 'linux' ? 'the traced teardown targets a /proc terminal owner' : false;
 const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml)\//.test(url)
   || url.endsWith('/bin/familiar-commands.js');
 
@@ -525,6 +527,9 @@ const envelopeFor = (event, snapshot) => ({
 
 test('a SessionEnd ends an admitted session without loading the theme contract, YAML or the other commands', { skip: traceSkip }, async (t) => {
   const f = reapFixture(t);
+  // The owner is this process with a starttime it never had: dead on every host.
+  f.deps.adapterFor = () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid });
+  f.deps.renderProcess.startTimeOf = () => startTimeOf(process.pid) + 1;
   await f.admit();
   const end = f.event('session-end');
   const { snapshot } = await f.publish(end);
@@ -532,8 +537,8 @@ test('a SessionEnd ends an admitted session without loading the theme contract, 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
   // The emission section ran: the drop leaves ended evidence that only an emission's
-  // outcome (here owner-dead, for the fixture's pid 84) acknowledges, and the cleanup after
-  // it prunes the dead owner's ledger.
+  // outcome acknowledges (owner-dead here; the fake admission wrote no ledger, so nothing
+  // supersedes it), and the cleanup after it prunes the dead owner's ledger.
   const after = await readSessions(f.p.sessionsPath);
   assert.equal(Object.hasOwn(after.sessions, 'reap-session'), false);
   assert.deepEqual(after.ended, {});
