@@ -13,19 +13,26 @@ test('Claude setup contains only the status line', () => {
     type: 'command', command: `${shellQuote(bin)} statusline`, refreshInterval: 2,
   } });
 });
-test('relay setup declares all three observers and fits every mapped event budget', () => {
+test('relay setup declares its observers and fits every mapped event budget', () => {
   const document = setupDocument('relay', bin);
   const nonEnd = ['session-start', 'prompt', 'before-tool', 'activity', 'idle', 'needs-input', 'needs-approval', 'turn-end', 'turn-error', 'reconcile'];
   assert.deepEqual(document, { schema: 1, subscribers: [
     { name: 'familiar', role: 'observer', harnesses: ['claude-code', 'codex'], kinds: nonEnd, argv: [bin, 'observe'], timeoutMs: 2000 },
     { name: 'familiar-opencode', role: 'observer', harnesses: ['opencode'], kinds: ['session-start', 'activity', 'idle', 'needs-approval', 'turn-error', 'session-end'], argv: [bin, 'observe'], timeoutMs: 1000 },
-    { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code', 'codex'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 200 },
+    { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 400 },
+    { name: 'familiar-teardown-codex', role: 'observer', harnesses: ['codex'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 267 },
   ] });
   const config = validateSubscribers(document);
   for (const harness of ['claude-code', 'codex', 'opencode']) {
     for (const [nativeEvent, { kind }] of Object.entries(adapterFor(harness).events)) {
       assert.doesNotThrow(() => checkBudget(config, budgetFor({ harness, nativeEvent }), { harness, kind }));
     }
+  }
+  // A cold `familiar observe` takes about 200 ms, so each teardown takes every
+  // millisecond relay admits for SessionEnd at that harness's default outer timeout.
+  for (const harness of ['claude-code', 'codex']) {
+    const [teardown] = checkBudget(config, budgetFor({ harness, nativeEvent: 'SessionEnd' }), { harness, kind: 'session-end' });
+    assert.equal(teardown.timeoutMs, budgetFor({ harness, nativeEvent: 'SessionEnd' }).subscribersMs, harness);
   }
   assert.doesNotThrow(() => checkBudget(config, budgetFor({ outerMs: 60000 }), { kind: 'reconcile' }));
 });
