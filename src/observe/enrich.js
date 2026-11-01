@@ -5,6 +5,17 @@ import { noTerminalMessage } from '../render/harness.js';
 
 const PROCESS_READ_FAILURES = ['PROCESS_UNREADABLE', 'PROCESS_UNAVAILABLE'];
 
+// The process that keeps the terminal once the agent exits: the agent's parent when it
+// has a terminal too (the shell). Recorded so the tint can still be reset through it
+// after an owner that sent no session-end is gone; null when there is none to prove.
+function terminalHolder({ chain, pid, renderProcess }) {
+  const at = chain.findIndex((row) => row.pid === pid);
+  const parent = at >= 0 ? chain[at + 1] : undefined;
+  if (!parent || parent.tty === null) return null;
+  const starttime = renderProcess.startTimeOf(parent.pid);
+  return Number.isInteger(starttime) ? { pid: parent.pid, starttime } : null;
+}
+
 export async function prepareEnrichment({
   envelope, snapshot, prior, relayProcess, renderProcess, adapterFor,
   gitContext = defaultGitContext, lookupProjectColor = defaultLookupProjectColor,
@@ -49,6 +60,7 @@ export async function prepareEnrichment({
   if (pid === null) return refused(1, noTerminalMessage(event.harness, relayProcess.ancestors(startPid)));
   const starttime = renderProcess.startTimeOf(pid);
   if (!Number.isInteger(starttime)) return refused(1, `could not read the start time of agent pid ${pid} — it is gone`);
+  const holder = terminalHolder({ chain: relayProcess.ancestors(startPid), pid, renderProcess });
 
   const context = await gitContext(row.cwd);
   const old = prior.sessions[sessionId];
@@ -56,7 +68,7 @@ export async function prepareEnrichment({
   const color = context.repoRoot === null ? NO_PROJECT : carried
     ? { color: old.projectColor, warnings: [] } : await lookupProjectColor(context.repoRoot);
   return {
-    ok: true, sessionId, basis, terminal: { pid, starttime },
+    ok: true, sessionId, basis, terminal: { pid, starttime }, holder,
     context: {
       cwd: row.cwd, projectKey: projectKeyFor({ ...context, cwd: row.cwd }),
       project: displayProject({ ...context, cwd: row.cwd }),

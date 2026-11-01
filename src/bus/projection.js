@@ -4,6 +4,7 @@ const sameTerminal = (a, b) => a.pid === b.pid && a.starttime === b.starttime;
 const endedRecord = (record, seq) => ({
   sessionId: record.sessionId, harness: record.harness, project: record.project,
   pid: record.pid, starttime: record.starttime, seq,
+  ...(record.holder ? { holder: record.holder } : {}),
 });
 
 export async function projectSnapshot({
@@ -57,7 +58,7 @@ export async function projectSnapshot({
       const old = previous.get(sid);
       let context;
       if (prepared && event?.sessionId === sid && !stale) {
-        context = { ...prepared.context, ...prepared.terminal };
+        context = { ...prepared.context, ...prepared.terminal, ...(prepared.holder ? { holder: prepared.holder } : {}) };
       } else if (old && sameBasis(old.basis, basis)) {
         context = old;
       } else {
