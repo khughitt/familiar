@@ -208,6 +208,19 @@ test('OpenCode working → done → idle → idle keeps one completed turn throu
   assert.equal(Object.hasOwn(t.state.turns, rootKey), false);
 });
 
+test('an agy start → tool → stop turn is one completion for its conversation', () => {
+  const { t, send } = scenario();
+  send('agy', 'SessionStart', { session: 'g' });
+  assert.equal(t.episodesOf('agy:g').length, 0);
+  send('agy', 'PreToolUse', { session: 'g' });
+  send('agy', 'Stop', { session: 'g' });
+  const completed = only(t.episodesOf('agy:g'));
+  assert.equal(completed.kind, 'completion');
+  assert.equal(t.state.sources[t.sourceKeyOf('agy:g')].harness, 'agy');
+  t.restart();
+  assert.equal(only(t.episodesOf('agy:g')).id, completed.id);
+});
+
 test('OpenCode init → idle and error → idle are not completions', () => {
   const { t, send } = scenario();
   send('opencode', 'init', { session: 'oc' });

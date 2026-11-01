@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EMPTY_SESSIONS, readSessions, writeSessions, sameBasis, sessionIdOf } from '../src/bus/sessions.js';
+import { HARNESSES } from '../src/bus/harnesses.js';
 
 const processHandle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 42, start: '123' };
 const basis = { generation: 'generation', agentId: 'codex:a', process: processHandle, cwd: '/repo' };
@@ -40,6 +41,19 @@ test('sessions round trip with numeric terminal starttime', async (t) => {
   const path = await fixture(t);
   await writeSessions(path, valid());
   assert.deepEqual(await readSessions(path), valid());
+});
+
+test('every accepted harness round trips, agy included', async (t) => {
+  const path = await fixture(t);
+  assert.ok(HARNESSES.includes('agy'));
+  for (const harness of HARNESSES) {
+    const value = valid();
+    const a = value.sessions.a;
+    a.harness = harness; a.agentId = `${harness}:a`; a.basis.agentId = a.agentId;
+    value.ended.b.harness = harness;
+    await writeSessions(path, value);
+    assert.deepEqual(await readSessions(path), value, harness);
+  }
 });
 
 test('wrong schema and malformed sessions or ended records fail closed', async (t) => {

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { STATES } from 'relay';
 import { writeJsonAtomic } from './store.js';
+import { HARNESSES } from './harnesses.js';
 
 export const EMPTY_SESSIONS = { schema: 1, registry: null, sessions: {}, ended: {} };
 
@@ -9,7 +10,7 @@ const text = (value) => typeof value === 'string' && value.length > 0;
 const nullableText = (value) => value === null || text(value);
 const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const pid = (value) => integer(value) && value > 0 && value <= 0xffffffff;
-const harness = (value) => ['claude-code', 'codex', 'opencode'].includes(value);
+const harness = (value) => HARNESSES.includes(value);
 
 function validHandle(value) {
   return object(value) && ['linux', 'darwin'].includes(value.platform)

@@ -5,6 +5,7 @@
 // Spec: docs/specs/2026-10-24-desktop-attention-design.md.
 import { createHash } from 'node:crypto';
 import { adapterFor } from 'relay';
+import { HARNESSES } from '../bus/harnesses.js';
 
 export class AttentionSchemaError extends Error {
   constructor(message) {
@@ -67,7 +68,7 @@ function validDelivery(value, where) {
 function validSource(value, key) {
   const where = `source ${key}`;
   exactKeys(value, ['agentId', 'harness', 'scope', 'rootKey', 'generation', 'process', 'state', 'observedAt', 'frontier'], [], where);
-  check(text(value.agentId) && ['claude-code', 'codex', 'opencode'].includes(value.harness), `${where} identity is invalid`);
+  check(text(value.agentId) && HARNESSES.includes(value.harness), `${where} identity is invalid`);
   check(['root', 'worker'].includes(value.scope), `${where}.scope is invalid`);
   check(value.scope === 'root' ? value.rootKey === key : nullable(text)(value.rootKey), `${where}.rootKey is invalid`);
   check(text(value.generation) && (value.process === null || validHandle(value.process)), `${where} incarnation is invalid`);
@@ -277,7 +278,7 @@ function settleDiagnostics(ctx, current) {
 }
 
 function validRow(row) {
-  check(object(row) && text(row.id) && ['claude-code', 'codex', 'opencode'].includes(row.harness)
+  check(object(row) && text(row.id) && HARNESSES.includes(row.harness)
     && ['session', 'process', 'worker'].includes(row.scope) && STATES.includes(row.state) && integer(row.updatedAt)
     && (row.process === null || validHandle(row.process)) && (row.scope !== 'worker' || text(row.root)), 'invalid registry row');
 }

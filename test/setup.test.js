@@ -36,6 +36,26 @@ test('relay setup declares its observers and fits every mapped event budget', ()
   }
   assert.doesNotThrow(() => checkBudget(config, budgetFor({ outerMs: 60000 }), { kind: 'reconcile' }));
 });
+test('relay setup adds an agy observer only when asked, and it fits every agy event budget', () => {
+  const plain = setupDocument('relay', bin);
+  assert.ok(plain.subscribers.every(({ harnesses }) => !harnesses.includes('agy')));
+  assert.deepEqual(setupDocument('relay', bin, { agy: false }), plain);
+  const document = setupDocument('relay', bin, { agy: true });
+  assert.deepEqual(document.subscribers.slice(0, -1), plain.subscribers);
+  assert.deepEqual(document.subscribers.at(-1), {
+    name: 'familiar-agy', role: 'observer', harnesses: ['agy'],
+    kinds: ['session-start', 'before-tool', 'turn-end'], argv: [bin, 'observe'], timeoutMs: 2000,
+  });
+  // Every agy event relay maps reaches familiar, and nothing familiar asks for is unmapped.
+  const mapped = Object.values(adapterFor('agy').events).map(({ kind }) => kind);
+  assert.deepEqual([...document.subscribers.at(-1).kinds].sort(), [...mapped].sort());
+  const config = validateSubscribers(document);
+  for (const [nativeEvent, { kind }] of Object.entries(adapterFor('agy').events)) {
+    const harness = 'agy';
+    assert.deepEqual(checkBudget(config, budgetFor({ harness, nativeEvent }), { harness, kind }).map(({ name }) => name), ['familiar-agy'], nativeEvent);
+  }
+});
+
 test('codex and unknown setup targets are rejected', () => {
   for (const target of ['codex', 'cursor']) assert.throws(() => setupDocument(target, bin), /unknown setup target/);
 });

@@ -6,6 +6,7 @@ import { EMPTY_SESSIONS } from '../src/bus/sessions.js';
 import { NO_PROJECT } from '../src/bus/project-color.js';
 import { prepareEnrichment } from '../src/observe/enrich.js';
 import { printsPlaceholderCells, noTerminalMessage } from '../src/render/harness.js';
+import { HARNESSES } from '../src/bus/harnesses.js';
 
 const { chains } = JSON.parse(readFileSync(new URL(import.meta.resolve('relay/fixtures/ancestry.json')), 'utf8'));
 const handle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 7, start: '123' };
@@ -53,7 +54,7 @@ test('proven event returns context and root basis for a worker', async () => {
 
 test('relay ancestry fixtures keep session proof separate from the rendered terminal', async () => {
   for (const name of ['background-daemon-under-interactive', 'nested-headless-claude', 'version-binary-interactive',
-    'version-session-under-interactive', 'darwin-codex', 'darwin-opencode']) {
+    'version-session-under-interactive', 'darwin-codex', 'darwin-opencode', 'interactive-agy']) {
     const { args, calls } = fixture(name);
     const chain = chains.find((entry) => entry.name === name);
     const result = await prepareEnrichment(args);
@@ -191,7 +192,10 @@ test('git and project color faults remain explicit', async () => {
 });
 
 test('harness presentation policy is explicit and terminal messages show ancestry', () => {
-  for (const [harness, prints] of [['claude-code', true], ['codex', false], ['opencode', false]]) {
+  const policy = [['claude-code', true], ['codex', false], ['opencode', false], ['agy', false]];
+  // Every accepted harness has a presentation policy, or emission would throw for it.
+  assert.deepEqual(policy.map(([harness]) => harness).sort(), [...HARNESSES].sort());
+  for (const [harness, prints] of policy) {
     assert.equal(printsPlaceholderCells(harness), prints);
     assert.equal(noTerminalMessage(harness, [{ pid: 1, comm: 'node', tty: null }]), `could not find the ${harness} process with a terminal among the ancestors: 1(node)`);
   }
