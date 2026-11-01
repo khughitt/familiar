@@ -3,6 +3,8 @@ import { gitContext as defaultGitContext, projectKeyFor, displayProject } from '
 import { NO_PROJECT, lookupProjectColor as defaultLookupProjectColor } from '../bus/project-color.js';
 import { noTerminalMessage } from '../render/harness.js';
 
+const PROCESS_READ_FAILURES = ['PROCESS_UNREADABLE', 'PROCESS_UNAVAILABLE'];
+
 export async function prepareEnrichment({
   envelope, snapshot, prior, relayProcess, renderProcess, adapterFor,
   gitContext = defaultGitContext, lookupProjectColor = defaultLookupProjectColor,
@@ -33,7 +35,17 @@ export async function prepareEnrichment({
   if (own === null || row.process === null) return refused(1, 'ownership unproven');
   if (!sameBasis(basis, { ...basis, process: own })) return refused(0, 'a newer process owns this session');
 
-  const pid = adapter.resolveTerminalPid({ startPid, ancestors: relayProcess.ancestors });
+  let pid;
+  try {
+    pid = adapter.resolveTerminalPid({
+      startPid, ancestors: relayProcess.ancestors,
+      executableOf: relayProcess.executableOf, argvOf: relayProcess.argvOf,
+    });
+  } catch (error) {
+    // A terminal-owning ancestor that cannot be read is a state of the host, not a defect.
+    if (!PROCESS_READ_FAILURES.includes(error?.code)) throw error;
+    return refused(1, `could not read the agent terminal process: ${error.code}: ${error.message}`);
+  }
   if (pid === null) return refused(1, noTerminalMessage(event.harness, relayProcess.ancestors(startPid)));
   const starttime = renderProcess.startTimeOf(pid);
   if (!Number.isInteger(starttime)) return refused(1, `could not read the start time of agent pid ${pid} — it is gone`);
