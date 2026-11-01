@@ -371,3 +371,29 @@ test('a teardown drops its session before capturing attention', async (t) => {
   assert.equal(Object.hasOwn((await readSessions(f.paths.sessionsPath)).sessions, 's'), false);
   assert.equal(Object.hasOwn((await readJson(f.paths.intentPath)) ?? {}, 's'), false);
 });
+
+test('a session whose owner dies without a session-end has its terminal reset through the surviving holder', async (t) => {
+  const f = await fixture(t);
+  f.deps.relayProcess.ancestors = () => [{ pid: 42, tty: true }, { pid: 84, tty: true }, { pid: 7, tty: true }];
+  await f.publish(event()); await f.run();
+  assert.deepEqual((await readSessions(f.paths.sessionsPath)).sessions.s.holder, { pid: 7, starttime: 20 });
+  f.emitted.length = 0;
+  // agy exits: relay reaps the row with no SessionEnd, and the owner (84) is gone.
+  await f.publish(event('session-end'));
+  f.deps.renderProcess.ownerAlive = (pid) => pid !== 84;
+  assert.equal((await f.run(null)).exitCode, 0);
+  assert.equal(f.emitted.length, 1);
+  assert.equal(f.emitted[0].next, null);
+  assert.equal(f.emitted[0].prev.pid, 7, 'the reset goes through the holder, not the dead owner');
+  assert.deepEqual((await readSessions(f.paths.sessionsPath)).ended, {});
+});
+
+test('an ended session whose holder is also gone, or still serves a live session, is not reset', async (t) => {
+  const f = await fixture(t);
+  f.deps.relayProcess.ancestors = () => [{ pid: 42, tty: true }, { pid: 84, tty: true }, { pid: 7, tty: true }];
+  await f.publish(event()); await f.run(); f.emitted.length = 0;
+  await f.publish(event('session-end'));
+  f.deps.renderProcess.ownerAlive = (pid) => pid !== 84 && pid !== 7;
+  await f.run(null);
+  assert.equal(f.emitted.length, 0);
+});

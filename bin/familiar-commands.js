@@ -21,6 +21,8 @@ import { identityColors } from '../src/theme/ramp.js';
 import { BOLD, RESET, sanitize } from '../src/render/term/sgr.js';
 import { reapRegistry, readSnapshot } from 'relay';
 import { reconcile } from '../src/observe/run.js';
+import { emitTransition } from '../src/observe/emission.js';
+import { resetOrphanedTerminals } from '../src/observe/orphan-reset.js';
 import { runAttentionCommand } from '../src/attention/commands.js';
 import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
@@ -187,6 +189,12 @@ export async function reap({ deps: given }) {
   const { awaiting, lines } = await reconcile({ deps });
   const ended = [];
   const ownerAlive = (pid, stamp) => renderProcess.ownerAlive(pid, stamp);
+  const before = await readSessions(paths.sessionsPath);
+  await resetOrphanedTerminals({
+    ended: before.ended, sessions: before.sessions,
+    emitTransition: deps.emitTransition ?? emitTransition,
+    paths, renderProcess, hookEnv: deps.env ?? process.env, lockWith: deps.lockWith,
+  });
   const sessions = await deps.lockWith(paths.presentationLockPath, async () => {
     const current = await readSessions(paths.sessionsPath);
     for (const [sid, record] of Object.entries(current.ended)) {

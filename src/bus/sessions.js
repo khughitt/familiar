@@ -23,7 +23,8 @@ function validHandle(value) {
 function validEnded(value, key) {
   return object(value) && text(value.sessionId) && value.sessionId === key
     && harness(value.harness) && text(value.project) && pid(value.pid)
-    && integer(value.starttime) && integer(value.seq);
+    && integer(value.starttime) && integer(value.seq)
+    && (value.holder === undefined || (object(value.holder) && pid(value.holder.pid) && integer(value.holder.starttime)));
 }
 
 function validSession(value, key) {
