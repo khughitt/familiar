@@ -72,8 +72,9 @@ The available lifecycle coverage is narrower than the visual state vocabulary:
 | Claude Code | `Notification:idle_prompt` only | `Notification:permission_prompt` | `StopFailure` | Root `Stop` normally reduces to `done`; in-flight background agents reduce it to `working` |
 | Codex | No mapped event | `PermissionRequest`, including identified workers | No mapped event | Root `Stop` reduces to `done`; `SubagentStop` is a separate worker's `done` |
 | OpenCode | No mapped event | Aggregate `permission.pending` | `session.error` | `session.idle` has kind `idle`, but `reduceState` converts prior working/input/approval to `done`; prior error stays error |
+| agy | No mapped event | No mapped event | No mapped event | `Stop` maps to `done`; with no mapped prompt or activity, a turn answered without a tool is `done → done`, so its first fire (`executionNum` 0) counts as a new turn and a re-fire after a Stop hook's block (`executionNum` > 0) does not |
 
-Sources: `node_modules/relay/src/adapters/{claude-code,codex,opencode}.js`,
+Sources: `node_modules/relay/src/adapters/{claude-code,codex,opencode,agy}.js`,
 `src/bus/transaction.js` inside that dependency, and
 `integrations/opencode/{binding,window}.js` inside it. OpenCode represents an
 aggregate process/window here, not independently identified worker rows.
@@ -210,7 +211,9 @@ do not claim this reconstructs what the user was looking at when a hook fired.
 The completion marker clears on source focus, dismissal, new activity from its
 root, or root end. Genuine new activity is that root's mapped prompt/before-tool/
 activity or a transition back to working, not an idle observation, a worker update
-or reconcile. OpenCode can publish `working → done → idle → idle` because repeated
+or reconcile. agy reports no prompt or activity, so its turn-end envelope with
+`stopHookActive` false is itself the evidence of a new turn: it closes the previous
+completion and opens the next one even though the source was already `done`. OpenCode can publish `working → done → idle → idle` because repeated
 `session.idle` reduces done to idle. Such passive idle keeps the completion episode
 ID, disposition and delivery decisions across reconciliation and restart; it
 neither closes it nor creates another arrival/reservation. A new actionable root

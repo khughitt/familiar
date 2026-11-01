@@ -31,6 +31,10 @@ const PRIORITY = { error: 0, 'needs-approval': 1, 'needs-input': 2, completion: 
 const CLOSED_KEPT = 8;
 const MAX_TEXT = 128;
 const MAX_IDS = 512;
+// Harnesses whose turns relay sees start only through a tool call: relay maps no prompt or
+// activity event for agy (its adapter spec's non-goals), so a turn answered without a tool
+// goes done → done in the registry. Their turn-end is what marks the new turn.
+const TURN_START_UNREPORTED = new Set(['agy']);
 
 // --- validation --------------------------------------------------------------------
 
@@ -225,10 +229,10 @@ function withhold(ctx, rootKey, blockers) {
 
 // One state change of one source. Only that source's attention is affected, except that
 // a root's turn history and completion gate also consult its workers.
-function transition(ctx, key, to, current) {
+function transition(ctx, key, to, current, { newTurn = false } = {}) {
   const { state } = ctx;
   const source = state.sources[key];
-  if (source.state === to) return;
+  if (source.state === to && !newTurn) return;
   source.state = to;
   for (const episode of episodesOf(state, key)) {
     if (!episode.closed && episode.kind !== 'completion') closeEpisode(ctx, episode);
@@ -338,7 +342,10 @@ function observe(state, input) {
       const level = adapter.stateForEvent(event.nativeEvent);
       if (level !== null) {
         const background = event.background === undefined ? current.get(key).row.background : event.background ?? undefined;
-        transition(ctx, key, adapter.reduceState(level, source.state, { background }), current);
+        // A Stop's first fire (stop_hook_active false) ends a turn of its own; a re-fire
+        // after a Stop hook's block continues the same one.
+        const newTurn = TURN_START_UNREPORTED.has(event.harness) && event.kind === 'turn-end' && event.stopHookActive === false;
+        transition(ctx, key, adapter.reduceState(level, source.state, { background }), current, { newTurn });
       }
       source.frontier = revision;
     }
