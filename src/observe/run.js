@@ -17,7 +17,7 @@ import { mutateAttention } from '../attention/store.js';
 // A SessionEnd drops presentation state under relay's tightest observer budget, and it never
 // enriches, resolves visuals or converges a codex project. The modules for those (and the
 // theme contract and YAML behind them) load only on the paths that use them, so a teardown
-// pays for none of them: test/observe-imports.test.js traces what it loads.
+// pays for none of them: test/bin-familiar.test.js traces what it loads.
 const loadContext = async (args) => (await import('./context.js')).loadContext(args);
 
 const line = (message) => `familiar: observe: ${message}`;
@@ -55,13 +55,16 @@ async function captured(deps, envelope) {
 }
 
 async function project({ deps, event = null, prepared = null, mode = 'full' }) {
+  // Loaded before the lock, not under it: cold, the theme contract and YAML take tens of
+  // milliseconds, and a SessionEnd waiting on this lock runs under relay's tightest budget.
+  const visuals = mode === 'full' ? await import('./context.js') : null;
   return deps.lockWith(deps.paths.presentationLockPath, async () => {
     const seq = await nextSeq(deps.paths);
     const snapshot = await deps.relay.readSnapshot();
     const prior = await readSessions(deps.paths.sessionsPath);
     const priorIntent = await readJson(deps.paths.intentPath) ?? {};
     const ctx = mode === 'full' ? await deps.loadContext({ paths: deps.paths }) : null;
-    const resolveVisuals = ctx ? (await import('./context.js')).visualResolver(ctx) : undefined;
+    const resolveVisuals = ctx ? visuals.visualResolver(ctx) : undefined;
     const result = await projectSnapshot({
       snapshot, prior, priorIntent, seq, mode, event, prepared, resolveVisuals,
     });

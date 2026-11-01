@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// A launcher, not the CLI: bin/familiar.js is the CLI. It and the command modules
-// it loads import bare specifiers, so with node_modules absent it dies at
-// resolution time with a raw ERR_MODULE_NOT_FOUND that names neither familiar nor
-// the fix -- once per hook, for every hook. Check first, then load the CLI.
+// A launcher, not the CLI: bin/familiar.js is the CLI. The modules it loads for
+// each command import bare specifiers, so with node_modules absent every command
+// fails on an ERR_MODULE_NOT_FOUND that names neither familiar nor the fix -- once
+// per hook, for every hook. Check first, then load the CLI.
 import { requireDependencies } from '../src/deps.js';
 
 requireDependencies();

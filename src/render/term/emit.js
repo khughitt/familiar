@@ -9,7 +9,7 @@ import { stamp, inherit } from './ledger.js';
 // Everything that draws (the pose, the animation program, and the theme contract and YAML
 // behind them) is in transition.js, loaded only once an emission has something to draw. A
 // SessionEnd writes its tombstone and an OSC reset under relay's tightest observer budget,
-// and loads none of it: test/observe-imports.test.js traces what a teardown loads.
+// and loads none of it: test/bin-familiar.test.js traces what a teardown loads.
 const loadTransition = () => import('./transition.js');
 
 // The fields of an intent that decide whether the terminal must be redrawn. This is what

@@ -19,8 +19,8 @@
   runs `observe` (every hook event, and SessionEnd under relay's tightest teardown budget)
   by loading `src/observe/run.js` alone, and loads `bin/familiar-commands.js` for every
   other command. Add command code there, not to the front door, and keep the theme
-  contract, YAML and the visual modules out of a SessionEnd's static graph:
-  `test/observe-imports.test.js` traces what a teardown loads.
+  contract, YAML and the visual modules off a SessionEnd's path:
+  `test/bin-familiar.test.js` traces what a teardown loads.
 - The theme contract lives in the `familiar-theme` package (git dependency);
   do not deep-import beyond its package export.
 - Pre-split history and design docs: https://github.com/khughitt/familiar-archive (private archive)

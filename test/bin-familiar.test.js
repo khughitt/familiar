@@ -5,6 +5,7 @@ import { loadContext } from '../src/observe/context.js';
 import { readSessions } from '../src/bus/sessions.js';
 import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
+import { registerHooks } from 'node:module';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
@@ -484,6 +485,70 @@ test('reap reports removed ended evidence in pretty output', async (t) => {
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, 'ended reap-session\n');
   assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+});
+
+// A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
+// default outer timeout), and most of a cold `familiar observe` was module loading. A
+// teardown drops presentation state and resets the terminal: it never resolves a theme,
+// reads config or draws, so it must not load the theme contract, the YAML parser, or the
+// CLI's other commands. module.registerHooks arrived in Node 22.15.
+const traceHook = fileURLToPath(new URL('fixtures/trace-imports.mjs', import.meta.url));
+const traceSkip = typeof registerHooks === 'function' ? false : 'module.registerHooks needs Node 22.15 or later';
+const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml)\//.test(url)
+  || url.endsWith('/bin/familiar-commands.js');
+
+function tracedObserve(t, e, envelope) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-imports-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const trace = join(dir, 'trace.txt');
+  writeFileSync(trace, '');
+  const result = spawnSync(process.execPath, ['--import', traceHook, bin, 'observe'], {
+    input: JSON.stringify(envelope),
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      HOME: dir,
+      FAMILIAR_CONFIG_DIR: e.FAMILIAR_CONFIG_DIR,
+      FAMILIAR_STATE_DIR: e.FAMILIAR_STATE_DIR,
+      FAMILIAR_THEMES_DIR: e.FAMILIAR_THEMES_DIR,
+      RELAY_STATE_DIR: e.RELAY_STATE_DIR,
+      FAMILIAR_TRACE_IMPORTS: trace,
+    },
+  });
+  return { result, loaded: readFileSync(trace, 'utf8').split('\n').filter(Boolean) };
+}
+
+const envelopeFor = (event, snapshot) => ({
+  schema: 1, type: 'event', subscriber: 'familiar', event,
+  registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+});
+
+test('a SessionEnd ends an admitted session without loading the theme contract, YAML or the other commands', { skip: traceSkip }, async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const end = f.event('session-end');
+  const { snapshot } = await f.publish(end);
+  const { result, loaded } = tracedObserve(t, f.e, envelopeFor(end, snapshot));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  // The emission section ran: the drop leaves ended evidence that only an emission's
+  // outcome (here owner-dead, for the fixture's pid 84) acknowledges, and the cleanup after
+  // it prunes the dead owner's ledger.
+  const after = await readSessions(f.p.sessionsPath);
+  assert.equal(Object.hasOwn(after.sessions, 'reap-session'), false);
+  assert.deepEqual(after.ended, {});
+  assert.ok(loaded.some((url) => url.endsWith('/src/render/term/emit.js')), 'the trace saw the emission section');
+  assert.deepEqual(loaded.filter(heavyModule), []);
+});
+
+test('the import trace sees the theme contract and YAML on an event that resolves visuals', { skip: traceSkip }, async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const prompt = f.event('prompt');
+  const { snapshot } = await f.publish(prompt);
+  const { loaded } = tracedObserve(t, f.e, envelopeFor(prompt, snapshot));
+  const heavy = loaded.filter(heavyModule).map((url) => url.replace(/^.*\/node_modules\/([^/]+)\/.*$/, '$1'));
+  assert.ok(heavy.includes('familiar-theme') && heavy.includes('yaml'), `loaded: ${[...new Set(heavy)].join(', ')}`);
 });
 
 test('reap never emits and never touches familiar old agents or lock files', async (t) => {
