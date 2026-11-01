@@ -16,6 +16,7 @@ export const handle = (pid = 4242, start = '9000') => ({ platform: 'linux', host
 export function nativeEvent(harness, native, { session, worker, background } = {}) {
   // agy reports camelCase fields and has no workers or background tasks.
   if (harness === 'agy') {
+    if (worker !== undefined || background !== undefined) throw new Error('trace: agy reports no workers or background tasks');
     const data = { conversationId: session, workspacePaths: [CWD] };
     if (native === 'PreToolUse') data.toolCall = { name: 'view_file', args: { AbsolutePath: '/work/repo/a' } };
     return normalizeEvent(harness, native, JSON.stringify(data));

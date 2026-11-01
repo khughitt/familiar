@@ -24,7 +24,9 @@ export function setupDocument(target, binPath, { agy = false } = {}) {
         kinds: ['session-end'], argv, timeoutMs: 400 },
       { name: 'familiar-teardown-codex', role: 'observer', harnesses: ['codex'],
         kinds: ['session-end'], argv, timeoutMs: 267 },
-      // agy maps only these three events and has no session end.
+      // agy maps only these three events and has no session end. At agy's 30 s default
+      // relay leaves subscribers 11 s; a shorter --outer-ms, or a slow before-tool guard
+      // beside this entry, overruns that budget and refuses every agy tool call.
       ...(agy ? [{ name: 'familiar-agy', role: 'observer', harnesses: ['agy'],
         kinds: ['session-start', 'before-tool', 'turn-end'], argv, timeoutMs: 2000 }] : []),
     ] };
