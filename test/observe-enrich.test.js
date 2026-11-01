@@ -192,7 +192,7 @@ test('git and project color faults remain explicit', async () => {
 });
 
 test('harness presentation policy is explicit and terminal messages show ancestry', () => {
-  const policy = [['claude-code', true], ['codex', false], ['opencode', false], ['agy', false]];
+  const policy = [['claude-code', true], ['codex', false], ['opencode', false], ['agy', true]];
   // Every accepted harness has a presentation policy, or emission would throw for it.
   assert.deepEqual(policy.map(([harness]) => harness).sort(), [...HARNESSES].sort());
   for (const [harness, prints] of policy) {

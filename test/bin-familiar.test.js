@@ -26,7 +26,7 @@ import { ledgerPaths } from '../src/render/term/ledger.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
-import { PLACEHOLDER } from '../src/render/term/placeholder.js';
+import { PLACEHOLDER, imageIdFor } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
@@ -1382,6 +1382,7 @@ const statusline = (e, args, payload) => spawnSync(process.execPath, [bin, 'stat
 // Publish through relay and admit through the observer without touching the live terminal.
 async function seedBus(e, sessionId, {
   state = 'working', cwd = process.cwd(), projectColor = null, repository = true,
+  harness = 'claude-code',
 } = {}) {
   const p = paths(e);
   const registryPaths = relayPaths(e);
@@ -1390,8 +1391,8 @@ async function seedBus(e, sessionId, {
     repositoryRoot: repository ? cwd : null });
   const kind = { working: 'prompt', idle: 'session-start', done: 'turn-end', error: 'turn-error' }[state];
   const nativeEvent = { working: 'UserPromptSubmit', idle: 'SessionStart', done: 'Stop', error: 'StopFailure' }[state];
-  const event = { schema: 1, kind, harness: 'claude-code', nativeEvent,
-    sessionId, agentId: `claude-code:${sessionId}`, cwd, tool: null };
+  const event = { schema: 1, kind, harness, nativeEvent,
+    sessionId, agentId: `${harness}:${sessionId}`, cwd, tool: null };
   const { snapshot } = await applyEvent(event, { paths: registryPaths, processOps,
     resolveSessionPid: () => process.pid, gitContext });
   const result = await observe({ text: JSON.stringify({
@@ -1531,6 +1532,63 @@ test('statusline names the task its session has claimed, on and off the bus', as
   assert.match(render('claimed'), /\(fam-ff5351 \+1\)/);
   assert.match(render('not-on-the-bus'), /\(fam-bbbbbb\)/);
   assert.doesNotMatch(render('nobody'), /\(fam-/);
+});
+
+// agy 1.4.12's status line, as recorded by fam-93c939: Claude Code's shape, with the
+// conversation UUID in both session_id and conversation_id once a conversation exists, and
+// both empty before. Relay publishes that conversation as `agy:<uuid>`, so the bus keys it by
+// the bare UUID, and the hook transmits under imageIdFor(<uuid>).
+const agyStdin = (overrides = {}) => {
+  const recorded = readFileSync(new URL('fixtures/agy/statusline-stdin.json', import.meta.url), 'utf8');
+  return { ...JSON.parse(recorded.replaceAll('<cwd>', JSON.stringify(process.cwd()).slice(1, -1))), ...overrides };
+};
+
+test('agy\'s recorded status-line stdin prints the cells of the image its hook transmits', async () => {
+  const e = statuslineEnv();
+  const payload = agyStdin();
+  const seeded = await seedBus(e, payload.conversation_id, { harness: 'agy', state: 'idle' });
+  assert.equal(seeded.harness, 'agy');
+  const result = statusline(e, [], payload);
+  assert.equal(result.status, 0, result.stderr);
+  const lines = result.stdout.split('\n').filter((l) => l.length > 0);
+  assert.equal(lines.length, 4, `expected four composed rows, got:\n${result.stdout}`);
+  const id = imageIdFor(seeded.sessionId);
+  const idSgr = `\x1b[38;2;${(id >> 16) & 0xff};${(id >> 8) & 0xff};${id & 0xff}m${PLACEHOLDER}`;
+  for (const line of lines) {
+    assert.ok(line.startsWith(idSgr), `a row does not open with the hook's image id:\n${JSON.stringify(line)}`);
+  }
+  assert.match(strip(result.stdout), /Gemini 4 Argon/);
+});
+
+test('agy\'s status line before a conversation exists prints the HUD without cells, and does not fail', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, agyStdin().conversation_id, { harness: 'agy', state: 'idle' });
+  const result = statusline(e, [], agyStdin({ session_id: '', conversation_id: '', agent_state: 'authenticating' }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.doesNotMatch(result.stdout, /\u{10EEEE}/u);
+  assert.equal(result.stdout.trimEnd().split('\n').length, 4);
+});
+
+// tasks records an agy session's claim under relay's agent id, `agy:<uuid>`, while agy's
+// status line passes the bare UUID; a Claude Code claim is the bare session_id.
+test('agy\'s status line names the task its conversation has claimed', async () => {
+  const e = statuslineEnv();
+  const payload = agyStdin();
+  e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
+    { id: 'fam-de2ffc', session: `agy:${payload.session_id}`, started: '2026-11-01T00:00:00Z', live: true },
+    { id: 'fam-aaaaaa', session: payload.session_id, started: '2026-11-01T00:00:00Z', live: true },
+  ] });
+  const render = (input) => {
+    const result = statusline(e, [], input);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+    return strip(result.stdout);
+  };
+  assert.match(render(payload), /\(fam-de2ffc\)/);
+  // The same UUID from Claude Code (no product) is a different session's claim.
+  assert.match(render({ session_id: payload.session_id, cwd: process.cwd() }), /\(fam-aaaaaa\)/);
+  assert.doesNotMatch(render(agyStdin({ session_id: '', conversation_id: '' })), /\(fam-/);
 });
 
 test('statusline still honours --with, unchanged', () => {
