@@ -2,7 +2,10 @@ import { realpathSync } from 'node:fs';
 
 export const shellQuote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
 
-export function setupDocument(target, binPath) {
+// agy is opt-in and `familiar setup relay` leaves it out: relay before 0.3.0 refuses a
+// subscribers file that names agy, and that refusal fails every guarded event for every
+// harness. The CLI includes it once the host's pinned relay accepts agy.
+export function setupDocument(target, binPath, { agy = false } = {}) {
   if (target === 'claude-code') return { statusLine: {
     type: 'command', command: `${shellQuote(binPath)} statusline`, refreshInterval: 2,
   } };
@@ -21,6 +24,9 @@ export function setupDocument(target, binPath) {
         kinds: ['session-end'], argv, timeoutMs: 400 },
       { name: 'familiar-teardown-codex', role: 'observer', harnesses: ['codex'],
         kinds: ['session-end'], argv, timeoutMs: 267 },
+      // agy maps only these three events and has no session end.
+      ...(agy ? [{ name: 'familiar-agy', role: 'observer', harnesses: ['agy'],
+        kinds: ['session-start', 'before-tool', 'turn-end'], argv, timeoutMs: 2000 }] : []),
     ] };
   }
   throw new Error(`unknown setup target ${JSON.stringify(target)}`);

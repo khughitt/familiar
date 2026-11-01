@@ -53,7 +53,7 @@ test('proven event returns context and root basis for a worker', async () => {
 
 test('relay ancestry fixtures keep session proof separate from the rendered terminal', async () => {
   for (const name of ['background-daemon-under-interactive', 'nested-headless-claude', 'version-binary-interactive',
-    'version-session-under-interactive', 'darwin-codex', 'darwin-opencode']) {
+    'version-session-under-interactive', 'darwin-codex', 'darwin-opencode', 'interactive-agy']) {
     const { args, calls } = fixture(name);
     const chain = chains.find((entry) => entry.name === name);
     const result = await prepareEnrichment(args);
@@ -191,7 +191,7 @@ test('git and project color faults remain explicit', async () => {
 });
 
 test('harness presentation policy is explicit and terminal messages show ancestry', () => {
-  for (const [harness, prints] of [['claude-code', true], ['codex', false], ['opencode', false]]) {
+  for (const [harness, prints] of [['claude-code', true], ['codex', false], ['opencode', false], ['agy', false]]) {
     assert.equal(printsPlaceholderCells(harness), prints);
     assert.equal(noTerminalMessage(harness, [{ pid: 1, comm: 'node', tty: null }]), `could not find the ${harness} process with a terminal among the ancestors: 1(node)`);
   }

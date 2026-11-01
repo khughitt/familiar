@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyEvent, readSnapshot } from 'relay';
+import { applyEvent, normalizeEvent, readSnapshot } from 'relay';
 import { loadThemePack } from 'familiar-theme';
 import { observe, reconcile, acknowledgeEnded } from '../src/observe/run.js';
 import { paths as familiarPaths } from '../src/bus/paths.js';
@@ -194,6 +194,20 @@ test('a worker event emits for its root session', async (t) => {
   const workerEvent = { ...event('prompt', 'worker'), harness: 'codex', agentId: worker.id, root: root.id };
   assert.equal((await f.run(workerEvent, snapshot)).exitCode, 0);
   assert.equal(f.emitted[0].next.sessionId, 'root'); assert.equal(f.emitted[0].intent.state, 'working');
+});
+
+test('agy start, tool and stop events admit and project its conversation', async (t) => {
+  const f = await fixture(t);
+  const agy = (native, extra = {}) => normalizeEvent('agy', native, JSON.stringify({ conversationId: 'g', workspacePaths: ['/repo'], ...extra }));
+  const tool = agy('PreToolUse', { toolCall: { name: 'run_command', args: { CommandLine: 'ls' } } });
+  for (const ev of [agy('SessionStart'), tool, agy('Stop', { executionNum: 0 })]) {
+    await f.publish(ev);
+    assert.deepEqual(await f.run(ev), { exitCode: 0, lines: [] }, ev.nativeEvent);
+  }
+  assert.deepEqual(f.emitted.map(({ next }) => next.state), ['idle', 'working', 'done']);
+  const { sessions } = await readSessions(f.paths.sessionsPath);
+  assert.equal(sessions.g.agentId, 'agy:g'); assert.equal(sessions.g.harness, 'agy');
+  assert.equal(sessions.g.state, 'done');
 });
 
 test('late session-end preserves a re-admitted live session and emits nothing', async (t) => {

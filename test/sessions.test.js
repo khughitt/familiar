@@ -42,6 +42,18 @@ test('sessions round trip with numeric terminal starttime', async (t) => {
   assert.deepEqual(await readSessions(path), valid());
 });
 
+test('every relay harness round trips, agy included', async (t) => {
+  const path = await fixture(t);
+  for (const harness of ['claude-code', 'codex', 'opencode', 'agy']) {
+    const value = valid();
+    const a = value.sessions.a;
+    a.harness = harness; a.agentId = `${harness}:a`; a.basis.agentId = a.agentId;
+    value.ended.b.harness = harness;
+    await writeSessions(path, value);
+    assert.deepEqual(await readSessions(path), value, harness);
+  }
+});
+
 test('wrong schema and malformed sessions or ended records fail closed', async (t) => {
   const path = await fixture(t);
   const mutations = [

@@ -1,6 +1,7 @@
 export function printsPlaceholderCells(harness) {
   if (harness === 'claude-code') return true;
-  if (harness === 'codex' || harness === 'opencode') return false;
+  // agy's placeholder-cell passthrough is unprobed, so it renders without them until shown.
+  if (harness === 'codex' || harness === 'opencode' || harness === 'agy') return false;
   throw new Error(`unknown harness: ${harness}`);
 }
 
