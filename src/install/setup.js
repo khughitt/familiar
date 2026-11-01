@@ -15,8 +15,12 @@ export function setupDocument(target, binPath) {
       { name: 'familiar-opencode', role: 'observer', harnesses: ['opencode'],
         kinds: ['session-start', 'activity', 'idle', 'needs-approval', 'turn-error', 'session-end'],
         argv, timeoutMs: 1000 },
-      { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code', 'codex'],
-        kinds: ['session-end'], argv, timeoutMs: 200 },
+      // A cold `familiar observe` takes about 200 ms, so each harness's teardown takes all
+      // relay admits for SessionEnd at that harness's default outer timeout.
+      { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code'],
+        kinds: ['session-end'], argv, timeoutMs: 400 },
+      { name: 'familiar-teardown-codex', role: 'observer', harnesses: ['codex'],
+        kinds: ['session-end'], argv, timeoutMs: 267 },
     ] };
   }
   throw new Error(`unknown setup target ${JSON.stringify(target)}`);
