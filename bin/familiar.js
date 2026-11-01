@@ -379,6 +379,8 @@ Reads one relay observer envelope on stdin. Faults exit 1; success or staleness 
 `,
   statusline: `Render the Claude Code status line.
 
+Also reads agy's status-line input (product: antigravity).
+
 Usage:
   familiar statusline [--with CMD]
 

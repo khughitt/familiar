@@ -1540,7 +1540,7 @@ test('statusline names the task its session has claimed, on and off the bus', as
 // the bare UUID, and the hook transmits under imageIdFor(<uuid>).
 const agyStdin = (overrides = {}) => {
   const recorded = readFileSync(new URL('fixtures/agy/statusline-stdin.json', import.meta.url), 'utf8');
-  return { ...JSON.parse(recorded.replaceAll('<cwd>', process.cwd())), ...overrides };
+  return { ...JSON.parse(recorded.replaceAll('<cwd>', JSON.stringify(process.cwd()).slice(1, -1))), ...overrides };
 };
 
 test('agy\'s recorded status-line stdin prints the cells of the image its hook transmits', async () => {

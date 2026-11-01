@@ -19,7 +19,7 @@ have since been fixed but not yet re-tested on hardware.
 | --- | --- | --- |
 | terminal | Relay lifecycle events through `familiar observe` | Kitty-graphics-capable terminals receive the current full-colour image. |
 | Claude Code | Relay lifecycle hooks and `familiar statusline` | The status line owns the cells; Familiar's observer replaces the image beneath them on state changes. |
-| agy | Relay lifecycle hooks and `familiar statusline` | As for Claude Code: agy's custom status line passes the cells to the terminal verbatim. agy's settings are hq's, so pointing its `statusLine` at `familiar statusline` is wired there, not by Familiar's installer. |
+| agy | Relay lifecycle hooks and `familiar statusline` | As for Claude Code: agy's custom status line passes the cells through intact (it rewrites `ESC[39m` as `ESC[m`, which does not touch them). agy's settings are hq's, so pointing its `statusLine` at `familiar statusline` is wired there, not by Familiar's installer. |
 | Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
 | OpenCode | Relay server plugin and Familiar TUI plugin | Relay supplies lifecycle events; Familiar's observer publishes presentation state and its TUI plugin draws the full-colour graphic. |
 | Niri desktop moments | `attention.json` | `integrations/niri-desktop` plays one click-through moment per reserved input, approval, error or finished-turn episode on the focused output. |
