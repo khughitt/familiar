@@ -29,10 +29,8 @@ import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
-import {
-  makePrepareSprites, settleStatusline, reportCommandError,
-  reportCosmeticError, sheetRowCaptions,
-} from '../bin/familiar.js';
+import { reportCommandError, reportCosmeticError } from '../bin/familiar.js';
+import { makePrepareSprites, settleStatusline, sheetRowCaptions } from '../bin/familiar-commands.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -115,7 +113,9 @@ test('setup resolves an npm-style link to a checkout path containing spaces', (t
   mkdirSync(join(checkout, 'bin'), { recursive: true });
   mkdirSync(prefix, { recursive: true });
   cpSync(bin, join(checkout, 'bin', 'familiar'));
-  cpSync(join(repoRoot, 'bin', 'familiar.js'), join(checkout, 'bin', 'familiar.js'));
+  for (const name of ['familiar.js', 'familiar-commands.js']) {
+    cpSync(join(repoRoot, 'bin', name), join(checkout, 'bin', name));
+  }
   for (const name of ['src', 'integrations', 'node_modules']) {
     symlinkSync(join(repoRoot, name), join(checkout, name), 'dir');
   }
@@ -417,7 +417,7 @@ function reapFixture(t) {
     assert.deepEqual(result, { exitCode: 0, lines: [] });
   };
   const run = async () => {
-    const { reap } = await import('../bin/familiar.js');
+    const { reap } = await import('../bin/familiar-commands.js');
     assert.equal(typeof reap, 'function', 'reap exposes the env-free presentation transaction');
     return reap({ deps });
   };

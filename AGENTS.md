@@ -15,6 +15,12 @@
   bare specifier fails at resolution, before any module runs, so a check inside those
   files could never report it. Keep the launchers importing nothing but `src/deps.js`,
   and add new CLI code to the `.js` implementations.
+- `bin/familiar.js` is the CLI's front door: parsing, help, completion and routing. It
+  runs `observe` (every hook event, and SessionEnd under relay's tightest teardown budget)
+  by loading `src/observe/run.js` alone, and loads `bin/familiar-commands.js` for every
+  other command. Add command code there, not to the front door, and keep the theme
+  contract, YAML and the visual modules out of a SessionEnd's static graph:
+  `test/observe-imports.test.js` traces what a teardown loads.
 - The theme contract lives in the `familiar-theme` package (git dependency);
   do not deep-import beyond its package export.
 - Pre-split history and design docs: https://github.com/khughitt/familiar-archive (private archive)

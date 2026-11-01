@@ -427,18 +427,18 @@ test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
 // FIX 4: `--rows` bounds must come from familiar-theme's ROW_MIN/ROW_MAX, not
 // a second hand-copied "1 and 40" — pack.js's own comment on ROW_MIN/ROW_MAX
 // names this exact defect: a second copy of the bound is free to drift from
-// the one the parser enforces. bin/familiar already imports from
+// the one the parser enforces. bin/familiar-commands.js already imports from
 // familiar-theme, so there is no reason for the CLI's own error message to
 // spell the numbers again. This is a source-level invariant (the numbers
 // happen to already agree, so no runtime input distinguishes a copy from the
 // real constants) — asserted the same way test/seam.test.js asserts its own
 // no-drift rules.
 test('--rows bounds are read from familiar-theme, not copied as literal numbers', () => {
-  const text = readFileSync(fileURLToPath(new URL('../bin/familiar.js', import.meta.url)), 'utf8');
+  const text = readFileSync(fileURLToPath(new URL('../bin/familiar-commands.js', import.meta.url)), 'utf8');
   assert.match(
     text,
     /import\s*\{[^}]*\bROW_MIN\b[^}]*\bROW_MAX\b[^}]*\}\s*from\s*['"]familiar-theme['"]/,
-    'bin/familiar does not import ROW_MIN/ROW_MAX from familiar-theme',
+    'bin/familiar-commands.js does not import ROW_MIN/ROW_MAX from familiar-theme',
   );
   const rowsCheck = text.slice(text.indexOf('viewRows'), text.indexOf('viewRows') + 400);
   assert.ok(rowsCheck.includes('ROW_MIN') && rowsCheck.includes('ROW_MAX'),
