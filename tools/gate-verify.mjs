@@ -6,8 +6,8 @@ import { readFileSync } from 'node:fs';
 // record: the emitter's own expectation travels with the bytes it produced, so this
 // never has to reconstruct intent from the byte stream or correlate two records.
 
-// The ringing states, taken from the DESIGN (§11.2), not from emit.js. If this list and
-// emit.js's RINGS ever disagree, the gate fails -- which is the entire point of not
+// The ringing states, taken from the DESIGN (§11.2), not from transition.js. If this list and
+// transition.js's RINGS ever disagree, the gate fails -- which is the entire point of not
 // letting the code under test tell us what it was supposed to do.
 const RINGING = new Set(['needs-input', 'needs-approval', 'error']);
 
@@ -280,7 +280,7 @@ export function verifyTrace(records, {
 
     // --- tint and bell ---
     // `presented: false` says the writer produced NO presentation bytes for this write --
-    // a same-state transition, where emit.js's renderTransition returns '' and only
+    // a same-state transition, where transition.js's renderTransition returns '' and only
     // graphics go out (and every opencode-sprite write, which never tints or rings). The
     // recorded state and colours still describe the session, so checking them against the
     // bytes would report a missing colour and a missing bell that were never sent. What

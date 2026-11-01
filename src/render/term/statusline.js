@@ -10,7 +10,7 @@
 // escape stream -- a garbled screen, intermittently, under load. ONE WRITER. The hook transmits;
 // this prints. That is also why this file imports nothing that can write to a terminal.
 //
-// One exception, and it lives in bin/familiar.js, not here: a SessionStart hook can transmit
+// One exception, and it lives in bin/familiar-commands.js, not here: a SessionStart hook can transmit
 // before a fullscreen TUI switches to the alternate screen, which has its own image store, so
 // the status line settles that one provisional image -- inside the per-session transmit lock
 // the hooks take (settle() in emit.js), so it is never a second, concurrent writer.

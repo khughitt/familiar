@@ -118,7 +118,7 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
 // Checked BEFORE Date.parse, which also takes `Oct 26 2026` and reads a zoneless time as local.
 const RFC3339 = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/;
 
-// The same shape bin/familiar.js gives a visual fault: one line, prefixed, newlines flattened.
+// The same shape bin/familiar-commands.js gives a visual fault: one line, prefixed, newlines flattened.
 function statuslineWarn(message) {
   process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
 }

@@ -1,8 +1,6 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseEnvelope } from './envelope.js';
-import { prepareEnrichment } from './enrich.js';
-import { loadContext, visualResolver } from './context.js';
 import { emitTransition } from './emission.js';
 import { readSessions, writeSessions, sessionIdOf } from '../bus/sessions.js';
 import { projectSnapshot } from '../bus/projection.js';
@@ -13,9 +11,14 @@ import { defaultProcessOps } from '../bus/proc.js';
 import { pruneLedgers } from '../render/term/ledger-prune.js';
 import { pruneTerminalOwners } from '../render/term/terminal-owner.js';
 import { sweepTemps } from '../bus/temp-sweep.js';
-import { convergeCodexProject } from '../install/codex-converge.js';
 import { reduceAttention } from '../attention/model.js';
 import { mutateAttention } from '../attention/store.js';
+
+// A SessionEnd drops presentation state under relay's tightest observer budget, and it never
+// enriches, resolves visuals or converges a codex project. The modules for those (and the
+// theme contract and YAML behind them) load only on the paths that use them, so a teardown
+// pays for none of them: test/bin-familiar.test.js traces what it loads.
+const loadContext = async (args) => (await import('./context.js')).loadContext(args);
 
 const line = (message) => `familiar: observe: ${message}`;
 const faultLine = (error) => line(`${error.code ? `${error.code}: ` : ''}${error.message.replace(/^observe: /, '')}`);
@@ -52,15 +55,18 @@ async function captured(deps, envelope) {
 }
 
 async function project({ deps, event = null, prepared = null, mode = 'full' }) {
+  // Loaded before the lock, not under it: cold, the theme contract and YAML take tens of
+  // milliseconds, and a SessionEnd waiting on this lock runs under relay's tightest budget.
+  const visuals = mode === 'full' ? await import('./context.js') : null;
   return deps.lockWith(deps.paths.presentationLockPath, async () => {
     const seq = await nextSeq(deps.paths);
     const snapshot = await deps.relay.readSnapshot();
     const prior = await readSessions(deps.paths.sessionsPath);
     const priorIntent = await readJson(deps.paths.intentPath) ?? {};
     const ctx = mode === 'full' ? await deps.loadContext({ paths: deps.paths }) : null;
+    const resolveVisuals = ctx ? visuals.visualResolver(ctx) : undefined;
     const result = await projectSnapshot({
-      snapshot, prior, priorIntent, seq, mode, event, prepared,
-      resolveVisuals: ctx ? visualResolver(ctx) : undefined,
+      snapshot, prior, priorIntent, seq, mode, event, prepared, resolveVisuals,
     });
     await writeSessions(deps.paths.sessionsPath, result.sessions);
     await writeJsonAtomic(deps.paths.intentPath, result.intent);
@@ -127,6 +133,7 @@ export async function observe({ text, deps: given }) {
     if (!teardown) {
       const snapshot = await deps.relay.readSnapshot();
       const prior = await readSessions(deps.paths.sessionsPath);
+      const { prepareEnrichment } = await import('./enrich.js');
       const enrichment = await prepareEnrichment({
         envelope, snapshot, prior, relayProcess: deps.relayProcess,
         renderProcess: deps.renderProcess, adapterFor: deps.adapterFor,
@@ -163,6 +170,7 @@ export async function observe({ text, deps: given }) {
       }
       if (event.harness === 'codex' && event.kind === 'session-start' && next && result.intent[next.sessionId]) {
         const ctx = result.ctx;
+        const { convergeCodexProject } = await import('../install/codex-converge.js');
         const convergence = await convergeCodexProject({
           repoRoot: next.repoRoot, member: result.intent[next.sessionId].current.identity.member,
           catalog: ctx.catalog, pack: ctx.pack, themeId: ctx.themeId,
