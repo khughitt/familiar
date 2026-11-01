@@ -59,8 +59,8 @@ export function gitBranch(cwd, { env } = {}) {
 // this is a hang guard, not a budget. Worst case with both git attempts: 750ms of a 2s interval.
 export const CLAIMS_TIMEOUT_MS = 250;
 
-// THE TASK THIS SESSION HAS CLAIMED, as { id, others } or null. A Claude Code claim's `session`
-// IS the session_id on stdin, so a live claim with that session is this session's task. One
+// THE TASK THIS SESSION HAS CLAIMED, as { id, others } or null. `sessionId` is the claim's
+// `session` (claimSession below), so a live claim with that session is this session's task. One
 // session may hold several: the latest started is shown and the rest are counted.
 //
 // `--json` EXPLICITLY: TASKS_FORMAT=pretty overrides the JSON default, and a pretty table is
@@ -123,6 +123,15 @@ function statuslineWarn(message) {
   process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
 }
 
+// THE SESSION A CLAIM NAMES. A Claude Code claim's `session` is the session_id on stdin. agy
+// sends the same shape with `product: "antigravity"` and its conversation UUID as session_id,
+// but tasks records an agy claim under relay's agent id, `agy:<uuid>`. An empty session_id
+// (agy before its first conversation) names no session at all.
+export function claimSession(data) {
+  if (!data.session_id) return null;
+  return data.product === 'antigravity' ? `agy:${data.session_id}` : data.session_id;
+}
+
 export function readFields(payload, { git = gitBranch, claim = claimedTask } = {}) {
   const data = payload ?? {};
   const cwd = data.workspace?.current_dir ?? data.cwd ?? process.cwd();
@@ -131,7 +140,7 @@ export function readFields(payload, { git = gitBranch, claim = claimedTask } = {
   return {
     project: basename(cwd),
     branch: git(cwd),
-    claim: claim(data.session_id),
+    claim: claim(claimSession(data)),
     model: data.model?.display_name ?? null,
     // ABSENT AND null ARE ONE CASE, and this is the line that makes them one. The docs state
     // used_percentage "may be null early in the session"; an existence check alone lets null

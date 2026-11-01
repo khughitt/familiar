@@ -1,7 +1,8 @@
 export function printsPlaceholderCells(harness) {
-  if (harness === 'claude-code') return true;
-  // agy's placeholder-cell passthrough is unprobed, so it renders without them until shown.
-  if (harness === 'codex' || harness === 'opencode' || harness === 'agy') return false;
+  // agy 1.4.12's status line passes the placeholder rows to the terminal verbatim (fam-93c939),
+  // so `familiar statusline` can own the cells there as it does in Claude Code.
+  if (harness === 'claude-code' || harness === 'agy') return true;
+  if (harness === 'codex' || harness === 'opencode') return false;
   throw new Error(`unknown harness: ${harness}`);
 }
 
