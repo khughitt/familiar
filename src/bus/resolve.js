@@ -89,10 +89,9 @@ export function resolveIdentity({
   };
 }
 
-// SHIM for the single-theme callers (context.js, identityResolver, install pets), which
-// still load one pack from `theme:`: a `packFor` over that one theme that refuses any
-// other id by name. Tasks C5, C7 and C9 replace those callers; the last of them deletes
-// this.
+// SHIM for the single-theme callers (identityResolver, install pets), which still load
+// one pack from `theme:`: a `packFor` over that one theme that refuses any other id by
+// name. Tasks C7 and C9 replace those callers; the last of them deletes this.
 export function oneThemePackFor(themeId, pack) {
   return (wanted) => {
     if (wanted !== themeId) throw new Error(`theme "${wanted}" is not loaded (only "${themeId}" is)`);
@@ -116,7 +115,7 @@ export function resolveIntent({
     );
   }
   const color = identityColors(identity, tone);
-  const animation = animationFor(identity.member);
+  const animation = animationFor(identity.theme, identity.member);
 
   const intentFor = (state) => ({
     sessionId: record.sessionId,
@@ -126,7 +125,7 @@ export function resolveIntent({
     ...presentationFor(state),
     motionPolicy,
     color,
-    sprite: spriteFor(identity.member, state),
+    sprite: spriteFor(identity.theme, identity.member, state),
     animation,
   });
 

@@ -44,14 +44,18 @@ export function motionFor(intent) {
 // itself. The decay contract of src/protocol/intent.js (displayedIntent) is carried
 // across rather than re-implemented on a timer: a record that has not expired yet
 // hands niri its successor and the time left, and niri swaps it itself.
-export function sessionSlot(record, { themeId, now }) {
+//
+// The tag is the record's own `<theme>/<member>`: several themes are live at once and
+// their member ids may collide, so neither half alone names the face, and the theme is
+// the one the record resolved, never one read from config.
+export function sessionSlot(record, { now }) {
   const expired = record.expiresAt !== null && now >= record.expiresAt;
   const shown = expired ? record.after : record.current;
   const slot = {
     accent: shown.color.base,
     level: levelFor(shown),
     motion: motionFor(shown),
-    tag: `${themeId}/${shown.identity.member}`,
+    tag: `${shown.identity.theme}/${shown.identity.member}`,
     expiresAt: null,
     afterLevel: null,
     afterMotion: null,
@@ -99,7 +103,7 @@ function setArgs(windowId, slot, now) {
 // fresh process, which is what makes a restart safe: every window gets its slot
 // again, and no stale transition is pulsed.
 export function planWindowSignals({
-  intent, sessions, sessionWindows, windows, sent, states, themeId, now,
+  intent, sessions, sessionWindows, windows, sent, states, now,
 }) {
   // Several sessions in one terminal share one slot. The one that most needs the
   // user wins it — highest level, ties to the latest on the bus — and its accent,
@@ -118,7 +122,7 @@ export function planWindowSignals({
       continue;
     }
 
-    const slot = sessionSlot(record, { themeId, now });
+    const slot = sessionSlot(record, { now });
     const seq = sessions[sessionId]?.seq ?? -1;
     const rank = LEVELS.indexOf(slot.level);
     const held = winners.get(windowId);

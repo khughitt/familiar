@@ -2,6 +2,7 @@ import { prepareEnrichment } from '../src/observe/enrich.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, chmod } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyEvent, readSnapshot } from 'relay';
@@ -12,10 +13,18 @@ import { readSessions } from '../src/bus/sessions.js';
 import { readJson } from '../src/bus/store.js';
 import { withLock } from '../src/bus/lock.js';
 import { readAttention } from '../src/attention/store.js';
+import { loadContext, makePrepareSprites, themeSet } from '../src/observe/context.js';
+import { loadConfig } from '../src/config.js';
+import { preloadedThemes, writeTheme } from './helpers/themes.js';
 
 const handle = { platform: 'linux', host: 'test', bootId: '11111111-1111-4111-8111-111111111111', pid: 42, start: '10' };
 const git = { remote: null, repoRoot: null, repositoryRoot: null };
 const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
+// The context loadContext returns, over the one preloaded fixture pack as the default theme.
+const fakeContext = (paths, fixturePack) => ({
+  paths, config: { themeId: 'fixture', families: {}, motionPolicy: 'full' }, motionPolicy: 'full',
+  tone: { mode: 'dark', satScale: 1 }, catalog: { identities: [] }, themes: preloadedThemes({ fixture: fixturePack }),
+});
 const event = (kind = 'session-start', sid = 's') => ({ schema: 1, kind, harness: 'claude-code', nativeEvent: { 'session-start': 'SessionStart', prompt: 'UserPromptSubmit', 'session-end': 'SessionEnd', 'needs-approval': 'Notification:permission_prompt' }[kind], sessionId: sid, agentId: `claude-code:${sid}`, cwd: '/repo', tool: null });
 const text = (ev, snapshot) => JSON.stringify({ schema: 1, type: ev ? 'event' : 'reconcile', subscriber: 'familiar', event: ev, registry: { generation: snapshot?.generation ?? null, revision: snapshot?.revision ?? null }, changed: true, reaped: [] });
 async function fixture(t) {
@@ -31,7 +40,7 @@ async function fixture(t) {
     renderProcess: { startTimeOf: () => 20, ownerAlive: () => true, lockHolderAlive: () => true, pidExists: () => true },
     adapterFor: () => ({ resolveSessionPid: () => 42, resolveTerminalPid: () => 84 }),
     gitContext: async () => git, lookupProjectColor: async () => ({ color: null, warnings: [] }),
-    loadContext: async () => ({ paths, pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+    loadContext: async () => fakeContext(paths, pack),
     emitTransition: async (args) => { emitted.push(args); return { kind: args.next ? 'unchanged' : 'ended' }; },
     lockWith: withLock, now: () => 1000, env: { RELAY_STATE_DIR: relayDir },
   };
@@ -128,7 +137,7 @@ test('absent relay projects empty; unsafe relay faults before any presentation w
 test('visual faults withdraw incoming visuals and return one error', async (t) => {
   const f = await fixture(t); await f.publish(event()); await f.run();
   const load = f.deps.loadContext;
-  f.deps.loadContext = async () => ({ ...await load(), pack: { ...pack, members: [] } });
+  f.deps.loadContext = async () => ({ ...await load(), themes: preloadedThemes({ fixture: { ...pack, members: [] } }) });
   const result = await f.run(event('prompt')); assert.equal(result.exitCode, 1); assert.equal(result.lines.length, 1);
   assert.deepEqual(await readJson(f.paths.intentPath), {}); assert.equal(f.emitted.at(-1).intent, null);
   assert.ok((await readSessions(f.paths.sessionsPath)).sessions.s);
@@ -328,7 +337,7 @@ for (const [name, breakIt] of [
   ['a thrown theme load', (f) => { f.deps.loadContext = async () => { throw new Error('theme exploded'); }; }],
   ['a missing sprite', (f) => {
     const load = f.deps.loadContext;
-    f.deps.loadContext = async () => ({ ...await load(), pack: { ...pack, members: [] } });
+    f.deps.loadContext = async () => ({ ...await load(), themes: preloadedThemes({ fixture: { ...pack, members: [] } }) });
   }],
   ['an enrichment failure', (f) => { f.deps.adapterFor = () => { throw new Error('enrichment exploded'); }; }],
   ['a terminal emission failure', (f) => { f.deps.emitTransition = async () => { throw new Error('emission exploded'); }; }],
@@ -391,4 +400,97 @@ test('a teardown drops its session before capturing attention', async (t) => {
   await f.run(event('session-end'));
   assert.equal(Object.hasOwn((await readSessions(f.paths.sessionsPath)).sessions, 's'), false);
   assert.equal(Object.hasOwn((await readJson(f.paths.intentPath)) ?? {}, 's'), false);
+});
+
+// --- per-theme context ------------------------------------------------------------------
+
+// A config naming two families' themes beside the default, each installed as its own pack
+// whose one member is `ginger`: the member ids collide across themes on purpose.
+async function themedContext(t, { families = 'verifiably: forest', extra = () => {} } = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'familiar-themes-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const paths = familiarPaths({
+    FAMILIAR_STATE_DIR: join(dir, 'state'), FAMILIAR_CONFIG_DIR: join(dir, 'config'),
+    FAMILIAR_THEMES_DIR: join(dir, 'shipped'),
+  });
+  await mkdir(paths.userThemesDir, { recursive: true });
+  await mkdir(paths.themesDir, { recursive: true });
+  await writeFile(paths.configPath, `theme: cats\nfamilies:\n  ${families.replace(/\n/g, '\n  ')}\n`);
+  await writeFile(paths.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeTheme(paths.userThemesDir, 'cats', { member: 'ginger' });
+  writeTheme(paths.userThemesDir, 'forest', { member: 'ginger' });
+  extra(paths);
+  return { paths, ctx: await loadContext({ paths }) };
+}
+
+const familyRecord = (sessionId, family) => ({
+  sessionId, projectKey: `project:${sessionId}`, project: sessionId, remote: null,
+  repoRoot: `/repos/${sessionId}`, repositoryRoot: `/repos/${sessionId}`, projectColor: null,
+  family, role: null, cwd: `/repos/${sessionId}`, pid: 100, state: 'working', updatedAt: 1_000,
+});
+
+test('records in two families load two packs, and assets key on (theme, member)', async (t) => {
+  const { paths, ctx } = await themedContext(t);
+  assert.deepEqual(Object.keys(ctx).sort(), ['catalog', 'config', 'motionPolicy', 'paths', 'themes', 'tone']);
+  const prepared = await makePrepareSprites(ctx)({
+    a: familyRecord('a', null), b: familyRecord('b', 'verifiably'), c: familyRecord('c', 'verifiably'),
+  });
+  assert.deepEqual(prepared.faults, new Map());
+  assert.deepEqual(['a', 'b', 'c'].map((sid) => {
+    const { theme, themeSource, member } = prepared.identities.get(sid);
+    return [theme, themeSource, member];
+  }), [['cats', 'default', 'ginger'], ['forest', 'family', 'ginger'], ['forest', 'family', 'ginger']]);
+  assert.equal(prepared.spriteFor('cats', 'ginger', 'idle').terminal, join(paths.userThemesDir, 'cats', 'sprites', 'ginger', 'idle.png'));
+  assert.equal(prepared.spriteFor('forest', 'ginger', 'idle').terminal, join(paths.userThemesDir, 'forest', 'sprites', 'ginger', 'idle.png'));
+  assert.deepEqual(prepared.animationFor('forest', 'ginger'), { kind: 'static' });
+  assert.equal(prepared.animationSetFor('forest', 'ginger').kind, 'static');
+  assert.throws(() => prepared.spriteFor('plants', 'ginger', 'idle'), /no assets for member "plants\/ginger"/);
+  assert.equal(ctx.themes.packFor('forest').id, 'forest');
+});
+
+test('the context loads each theme once, and refuses a theme it was never asked for', async (t) => {
+  const { paths } = await themedContext(t);
+  const config = await loadConfig({ paths });
+  const loaded = [];
+  const themes = themeSet({ paths, config, loadPack: async (dir) => { loaded.push(dir); return loadThemePack(dir); } });
+  await Promise.all([themes.load(['cats', 'forest', 'cats']), themes.load(['forest'])]);
+  await themes.load(['cats']);
+  assert.deepEqual(loaded.sort(), [join(paths.userThemesDir, 'cats'), join(paths.userThemesDir, 'forest')]);
+  assert.throws(() => themes.packFor('plants'), /^Error: theme "plants" was not loaded$/);
+});
+
+test('a family whose theme fails to parse faults only its own records, with the parse error', async (t) => {
+  const { ctx } = await themedContext(t, {
+    families: 'verifiably: forest\nguild: broken',
+    extra: (paths) => {
+      writeTheme(paths.userThemesDir, 'broken', { member: 'ginger' });
+      writeFileSync(join(paths.userThemesDir, 'broken', 'theme.yaml'), 'spec-version: 2\nid: broken\nmembers: [unterminated\n');
+    },
+  });
+  const prepared = await makePrepareSprites(ctx)({
+    a: familyRecord('a', 'guild'), b: familyRecord('b', 'verifiably'), c: familyRecord('c', null), d: familyRecord('d', 'guild'),
+  });
+  assert.deepEqual([...prepared.identities.keys()].sort(), ['b', 'c']);
+  assert.deepEqual([...prepared.faults.keys()].sort(), ['a', 'd']);
+  for (const sid of ['a', 'd']) assert.match(prepared.faults.get(sid), /^theme "broken": .+/);
+  assert.equal(prepared.faults.get('a'), prepared.faults.get('d'));
+  assert.throws(() => ctx.themes.packFor('broken'), { message: prepared.faults.get('a') });
+});
+
+test('a family not in families: draws from the default theme', async (t) => {
+  const { ctx } = await themedContext(t);
+  const prepared = await makePrepareSprites(ctx)({ a: familyRecord('a', 'unlisted') });
+  const { theme, themeSource } = prepared.identities.get('a');
+  assert.deepEqual([theme, themeSource], ['cats', 'default']);
+  assert.throws(() => ctx.themes.packFor('forest'), /theme "forest" was not loaded/);
+});
+
+test('a pack whose own id differs from its directory faults that theme', async (t) => {
+  const { ctx } = await themedContext(t, {
+    families: 'verifiably: forest\nguild: odd',
+    extra: (paths) => writeTheme(paths.userThemesDir, 'odd', { member: 'ginger', packId: 'other' }),
+  });
+  const prepared = await makePrepareSprites(ctx)({ a: familyRecord('a', 'guild'), b: familyRecord('b', 'verifiably') });
+  assert.equal(prepared.faults.get('a'), 'theme "odd": pack id "other" does not match its directory');
+  assert.deepEqual([...prepared.identities.keys()], ['b']);
 });

@@ -9,22 +9,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { applyEvent, createProcessOps, normalizeEvent, readSnapshot } from 'relay';
-import { loadThemePack } from 'familiar-theme';
 import { observe } from '../src/observe/run.js';
 import { paths as familiarPaths } from '../src/bus/paths.js';
 import { writeJsonAtomic } from '../src/bus/store.js';
 import { runLuau } from './helpers/luau.mjs';
+import { writeTheme } from './helpers/themes.js';
+import { loadContext } from '../src/observe/context.js';
 
 const skip = process.platform !== 'linux' ? 'requires Linux /proc ancestry' : false;
 const FAMILIAR = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const NIRI_BIN = fileURLToPath(new URL('../bin/familiar-niri', import.meta.url));
-const THEME = fileURLToPath(new URL('fixtures/theme-pack', import.meta.url));
 const LOGIC = fileURLToPath(new URL('../integrations/niri-desktop/logic.js', import.meta.url));
 const SOCKET = '/run/user/1000/niri-e2e.sock';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,7 +67,7 @@ async function world(t) {
   const themes = join(root, 'themes');
   const config = join(root, 'config');
   for (const dir of [relayDir, fakeBin, themes, config]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  cpSync(THEME, join(themes, 'cats'), { recursive: true });
+  writeTheme(themes, 'cats');
   writeFileSync(join(config, 'config.yaml'), 'theme: cats\nmotion: full\n');
   writeFileSync(join(config, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   writeFileSync(join(fakeBin, 'niri'), FAKE_NIRI, { mode: 0o755 });
@@ -112,14 +112,13 @@ async function world(t) {
   ] };
   const setDesktop = (change) => writeFileSync(fakePath, JSON.stringify(Object.assign(desktop, change)));
   setDesktop({});
-  const pack = await loadThemePack(join(themes, 'cats'));
   const deps = {
     paths, relay: { readSnapshot: () => readSnapshot({ paths: relayPaths }) }, relayProcess: processOps,
     renderProcess: { startTimeOf: () => 20, ownerAlive: () => true, lockHolderAlive: () => true, pidExists: () => true },
     adapterFor: () => ({ resolveSessionPid: () => t1.agent, resolveTerminalPid: () => t1.terminal }),
     gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
     lookupProjectColor: async () => ({ color: null, root: null, warnings: [] }),
-    loadContext: async () => ({ paths, pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+    loadContext: () => loadContext({ paths }),
     emitTransition: async (args) => ({ kind: args.next ? 'unchanged' : 'ended' }),
   };
   // A harness hook: relay publishes the row, then familiar's observer runs.

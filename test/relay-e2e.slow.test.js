@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import {
-  closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync,
+  closeSync, existsSync, mkdirSync, mkdtempSync, openSync,
   readFileSync, rmSync, statSync, writeFileSync, writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { shellQuote } from '../src/install/setup.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
 import { oscReset } from '../src/render/term/osc.js';
+import { writeTheme } from './helpers/themes.js';
 
 const has = (binary) => spawnSync('sh', ['-c', `command -v ${binary}`], { stdio: 'ignore' }).status === 0;
 const missing = ['script', 'mkfifo'].filter((binary) => !has(binary));
@@ -51,7 +52,7 @@ test('real relay hooks project lifecycle states and reset the controlling termin
   try {
     mkdirSync(relayState, { mode: 0o700 });
     mkdirSync(config);
-    cpSync(fileURLToPath(new URL('fixtures/theme-pack', import.meta.url)), join(themes, 'cats'), { recursive: true });
+    writeTheme(themes, 'cats');
     const setup = spawnSync(process.execPath, [bin, 'setup', 'relay'], { env, encoding: 'utf8' });
     assert.equal(setup.status, 0, setup.stderr);
     writeFileSync(subscribers, setup.stdout, { mode: 0o600 });

@@ -171,10 +171,13 @@ export async function observe({ text, deps: given }) {
       }
       if (event.harness === 'codex' && event.kind === 'session-start' && next && result.intent[next.sessionId]) {
         const ctx = result.ctx;
+        // The session's own theme, which the visual pass has already loaded: several
+        // themes are live at once, and the pet gate checks the art of this one.
+        const { theme, member } = result.intent[next.sessionId].current.identity;
         const { convergeCodexProject } = await import('../install/codex-converge.js');
         const convergence = await convergeCodexProject({
-          repoRoot: next.repoRoot, member: result.intent[next.sessionId].current.identity.member,
-          catalog: ctx.catalog, pack: ctx.pack, themeId: ctx.themeId,
+          repoRoot: next.repoRoot, member,
+          catalog: ctx.catalog, pack: ctx.themes.packFor(theme), themeId: theme,
           petsDir: join(deps.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
         });
         if (convergence.outcome === 'error') throw new Error(convergence.reason);

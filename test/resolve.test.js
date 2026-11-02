@@ -81,8 +81,8 @@ const THEMES = { themeId: 'cats', families: { verifiably: 'plants' }, packFor };
 
 const NO_PINS = parseIdentities('identities: []');
 const DARK = { mode: 'dark', satScale: 1 };
-const spriteFor = (member, state) => ({
-  terminal: `/c/${member}/${state}.png`,
+const spriteFor = (theme, member, state) => ({
+  terminal: `/${theme}/${member}/${state}.png`,
   rows: 12,
 });
 const CLIPS_REF = Object.freeze({
@@ -90,7 +90,7 @@ const CLIPS_REF = Object.freeze({
   manifest: '/theme/sprites/ginger-tabby/animation.yaml',
   sha256: 'abc123',
 });
-const animationFor = (member) => member === 'ginger-tabby' ? CLIPS_REF : { kind: 'static' };
+const animationFor = (theme, member) => theme === 'cats' && member === 'ginger-tabby' ? CLIPS_REF : { kind: 'static' };
 const motionPolicy = 'full';
 
 const record = (over = {}) => ({
@@ -323,7 +323,22 @@ test('a role of "default" is refused, not resolved as a role', () => {
   );
 });
 
-const identity = { projectKey: 'k', project: 'api', slot: 0, projectColor: null, source: 'auto', member: 'ginger-tabby', label: 'Ginger Tabby' };
+const identity = { projectKey: 'k', project: 'api', slot: 0, projectColor: null, source: 'auto', theme: 'cats', member: 'ginger-tabby', label: 'Ginger Tabby' };
+
+// Two live themes may share a member id, so the asset callbacks are asked for the pair.
+test('resolveIntent asks spriteFor and animationFor for its identity\'s theme and member', () => {
+  const calls = [];
+  const intent = resolveIntent({
+    record: record({ state: 'done' }), identity: { ...identity, theme: 'forest', member: 'ginger' }, tone: DARK,
+    spriteFor: (...args) => { calls.push(['sprite', ...args]); return spriteFor(...args); },
+    animationFor: (...args) => { calls.push(['animation', ...args]); return animationFor(...args); },
+    motionPolicy,
+  });
+  assert.deepEqual(calls, [
+    ['animation', 'forest', 'ginger'], ['sprite', 'forest', 'ginger', 'done'], ['sprite', 'forest', 'ginger', 'idle'],
+  ]);
+  assert.equal(intent.current.sprite.terminal, '/forest/ginger/done.png');
+});
 
 test('a persistent state has no expiry and no successor', () => {
   const intent = resolveIntent({
@@ -363,7 +378,7 @@ test('a transient state carries its expiry AND its fully-resolved successor', ()
   assert.equal(done.after.motion, 'breathe');
   assert.equal(done.after.urgency, 'none');
   assert.deepEqual(done.after.sprite, {
-    terminal: '/c/ginger-tabby/idle.png',
+    terminal: '/cats/ginger-tabby/idle.png',
     rows: 12,
   });
   assert.equal(done.current.motionPolicy, 'full');

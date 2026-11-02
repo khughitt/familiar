@@ -29,6 +29,7 @@ import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
+import { preloadedThemes, writeTheme } from './helpers/themes.js';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import { reportCommandError, reportCosmeticError } from '../bin/familiar.js';
 import { makePrepareSprites, settleStatusline, sheetRowCaptions } from '../bin/familiar-commands.js';
@@ -53,7 +54,7 @@ const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 // installed under the "cats" id — the config default every test here relies
 // on unless it says otherwise. Built once and reused; the pack is read-only.
 const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-shipped-themes-'));
-cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
+writeTheme(shippedThemesFixture, 'cats');
 
 function env(over = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'familiar-state-'));
@@ -922,7 +923,7 @@ ${poses}
   const namedFault = 'animation: member "broken-cat" manifest has unknown role "wobble"';
   let preflights = 0;
   const prepareSprites = makePrepareSprites({
-    pack,
+    themes: preloadedThemes({ cats: pack }),
     catalog: parseIdentities('identities: []'),
     tone: { mode: 'dark', satScale: 1 },
   }, {
@@ -1446,7 +1447,7 @@ for (const wrapped of [false, true]) {
     const e = statuslineEnv();
     await seedBus(e, 'faulted');
     writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
-      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { cats: missing-cat }\n`);
     const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
     const payload = { session_id: 'faulted', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } };
     const ledger = ledgerPaths(paths(e).transmitDir, 'faulted').entryPath;

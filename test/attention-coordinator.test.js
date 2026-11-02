@@ -19,6 +19,7 @@ import { runCoordinator, syncOnce } from '../integrations/niri/coordinator.js';
 const test = (name, fn) => nodeTest(name, { timeout: 30_000 }, fn);
 import { niriWorkspacesPath } from '../integrations/niri/topology.js';
 import { createRegistry, handle, nativeEvent, snapshotOf } from './helpers/attention.js';
+import { preloadedThemes } from './helpers/themes.js';
 
 const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
 const EPOCH = { bootId: '11111111-1111-4111-8111-111111111111', desktopSession: '/run/niri-test.sock' };
@@ -182,7 +183,7 @@ async function harness(t, { dnd = () => 'off', send = async () => {}, windows = 
       calls.eventStreams += 1;
       return h.stream;
     },
-    loadContext: async () => ({ pack, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+    loadContext: async () => ({ themes: preloadedThemes({ [pack.id]: pack }), tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     liveEpoch: () => EPOCH, instanceId: 'coordinator-1', owner: { pid: 77, start: '123' },
   };
   const registry = createRegistry({ now: () => clock.now() });

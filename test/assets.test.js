@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIdentities } from '../src/bus/pins.js';
+import { preloadedThemes } from './helpers/themes.js';
 import { makePrepareSprites } from '../bin/familiar-commands.js';
 import { assetsFor, parseThemePack, STATES } from 'familiar-theme';
 
@@ -261,7 +262,7 @@ identities:
     slot: 0
     members: { cats: static-cat }
 `);
-  return { dir, pack, catalog, tone: { mode: 'dark', satScale: 1 } };
+  return { dir, catalog, tone: { mode: 'dark', satScale: 1 }, themes: preloadedThemes({ cats: pack }) };
 }
 
 function admissionRecord(sessionId, project) {
@@ -312,8 +313,8 @@ test('animation admission validates and preflights one clips member once for eve
   assert.equal(preflighted.length, 1);
   assert.strictEqual(preflighted[0].animationSet, set);
   assert.deepEqual(Object.keys(preflighted[0].options.roots), STATES);
-  assert.strictEqual(prepared.animationFor('healthy-cat'), ref);
-  assert.strictEqual(prepared.animationSetFor('healthy-cat'), set);
+  assert.strictEqual(prepared.animationFor('cats', 'healthy-cat'), ref);
+  assert.strictEqual(prepared.animationSetFor('cats', 'healthy-cat'), set);
   assert.equal(prepared.faults.size, 0);
 });
 
@@ -350,9 +351,9 @@ test('a malformed animation faults only its member even for Ghostty; static is e
   assert.deepEqual(loaded.sort(), ['broken-cat', 'healthy-cat', 'static-cat']);
   assert.deepEqual([...prepared.identities.keys()].sort(), ['good', 'still']);
   assert.match(prepared.faults.get('bad'), /unknown role "wobble"/);
-  assert.deepEqual(prepared.animationFor('static-cat'), { kind: 'static' });
+  assert.deepEqual(prepared.animationFor('cats', 'static-cat'), { kind: 'static' });
   assert.throws(
-    () => prepared.animationFor('broken-cat'),
-    /no animation for member "broken-cat"/,
+    () => prepared.animationFor('cats', 'broken-cat'),
+    /no animation for member "cats\/broken-cat"/,
   );
 });

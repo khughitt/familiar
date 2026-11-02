@@ -83,23 +83,15 @@ export function attentionByWorkspace(state) {
 // only identity and colour come from the root's current presentation, whose state may
 // be folded or expired. Missing art leaves the episode neutral and diagnosed: it never
 // selects another state's image, and it never blocks attribution or a text toast.
+//
+// Several themes are live at once, so the art comes from each episode's own
+// `identity.theme`: every theme the open episodes name is loaded in one call, and the
+// asset cache keys on (theme, member), since two themes may share a member id. A theme
+// that does not load costs only its own episodes their art, with its load error.
 export async function resolvePresentations({ state, intent, loadContext }) {
   const presentations = {};
   const diagnostics = [];
-  let context = null;
-  let contextError = null;
-  const assets = new Map();
-  const loaded = async () => {
-    if (context === null && contextError === null) {
-      try {
-        context = await loadContext();
-      } catch (error) {
-        contextError = error;
-        diagnostics.push(`attention: theme unavailable: ${error.message}`);
-      }
-    }
-    return context;
-  };
+  const wanted = [];
   for (const episode of Object.values(state.episodes).sort((a, b) => a.order - b.order)) {
     if (episode.closed) continue;
     const pose = episode.kind === 'completion' ? 'done' : episode.kind;
@@ -113,18 +105,44 @@ export async function resolvePresentations({ state, intent, loadContext }) {
       motionPolicy: current?.motionPolicy ?? 'full',
     };
     presentations[episode.id] = presentation;
+    const theme = current?.identity?.theme;
     const member = current?.identity?.member;
-    if (typeof member !== 'string') {
+    if (typeof theme !== 'string' || typeof member !== 'string') {
       diagnostics.push(`attention: identity unavailable for episode ${episode.id}`);
       continue;
     }
-    const ctx = await loaded();
-    if (ctx === null) continue;
+    wanted.push({ episode, presentation, pose, theme, member });
+  }
+  if (wanted.length === 0) return { presentations, diagnostics };
+
+  let ctx;
+  try {
+    ctx = await loadContext();
+    await ctx.themes.load([...new Set(wanted.map(({ theme }) => theme))]);
+  } catch (error) {
+    diagnostics.push(`attention: theme unavailable: ${error.message}`);
+    return { presentations, diagnostics };
+  }
+
+  const assets = new Map();
+  const assetsOf = (theme, member) => {
+    const key = `${theme}/${member}`;
+    if (!assets.has(key)) {
+      try {
+        assets.set(key, { assets: assetsFor(ctx.themes.packFor(theme), member, ctx.tone.mode) });
+      } catch (error) {
+        assets.set(key, { error });
+      }
+    }
+    const entry = assets.get(key);
+    if (entry.error) throw entry.error;
+    return entry.assets;
+  };
+  for (const { episode, presentation, pose, theme, member } of wanted) {
     presentation.motionPolicy = ctx.motionPolicy;
     try {
-      if (!assets.has(member)) assets.set(member, assetsFor(ctx.pack, member, ctx.tone.mode));
-      const sprite = assets.get(member)[pose]?.terminal;
-      if (typeof sprite !== 'string') throw new Error(`member "${member}" has no ${pose} art`);
+      const sprite = assetsOf(theme, member)[pose]?.terminal;
+      if (typeof sprite !== 'string') throw new Error(`member "${member}" of theme "${theme}" has no ${pose} art`);
       presentation.sprite = sprite;
     } catch (error) {
       diagnostics.push(`attention: art unavailable for episode ${episode.id}: ${error.message}`);

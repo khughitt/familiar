@@ -482,20 +482,25 @@ export async function main({ command, args: rest, color, mode }) {
       : join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets');
 
     const ctx = await context({ paths, config });
+    // SHIM (Task C9 replaces it): the default theme's pets only, until install pets
+    // compiles every live theme's members under `familiar-<theme>--<member>`.
+    const themeId = ctx.themes.themeId;
+    await ctx.themes.load([themeId]);
+    const pack = ctx.themes.packFor(themeId);
     const projectSync = values['sync-projects']
-      ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack, cwd: process.cwd() })
+      ? await planCodexProjectSync({ catalog: ctx.catalog, pack, cwd: process.cwd() })
       : null;
     if (projectSync) reportTasksWarnings(projectSync.warnings);
 
     let written = 0;
-    for (const [memberId, member] of ctx.pack.members) {
+    for (const [memberId, member] of pack.members) {
       // The SAME resolver every other surface uses — not a second path to the same PNGs. The
       // sprites codex renders are byte-for-byte the ones the terminal and the bar render.
-      const assets = assetsFor(ctx.pack, memberId, ctx.tone.mode);
+      const assets = assetsFor(pack, memberId, ctx.tone.mode);
       const poses = Object.fromEntries(
         STATES.map((state) => [state, decodeRgba(readFileSync(assets[state].terminal))]),
       );
-      const { set: animationSet } = await loadAnimationMember(ctx.pack, memberId);
+      const { set: animationSet } = await loadAnimationMember(pack, memberId);
 
       const id = `familiar-${memberId}`;
       const dir = join(out, id);
@@ -527,7 +532,7 @@ export async function main({ command, args: rest, color, mode }) {
       // PUBLISH LAST. The stamp is the only thing that says "this pet is
       // complete and belongs to this theme", so it is the last byte written.
       writeFileSync(join(dir, STAMP_FILE), JSON.stringify(stampFor({
-        themeId: ctx.themeId,
+        themeId,
         memberId,
         frame: FRAME,
         motionPolicy: ctx.motionPolicy,

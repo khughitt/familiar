@@ -11,11 +11,11 @@ import {
 const GINGER = '#e5a33c';
 const TUXEDO = '#c464bc';
 
-function intentFor(state, { urgency, motion, base = GINGER, member = 'ginger', motionPolicy = 'full' } = {}) {
+function intentFor(state, { urgency, motion, base = GINGER, theme = 'cats', member = 'ginger', motionPolicy = 'full' } = {}) {
   return {
     state, urgency, motion, motionPolicy,
     color: { base },
-    identity: { member },
+    identity: { theme, member },
   };
 }
 
@@ -32,7 +32,7 @@ const NOW = 1_000_000;
 const win = (id, sources = null) => ({ id, pid: id * 10, signal: sources && { sources } });
 
 function plan({ intent, sessions = {}, sessionWindows, windows, sent = new Map(), states = new Map(), now = NOW }) {
-  return planWindowSignals({ intent, sessions, sessionWindows, windows, sent, states, themeId: 'cats', now });
+  return planWindowSignals({ intent, sessions, sessionWindows, windows, sent, states, now });
 }
 
 const argsOf = (result) => result.commands.map((c) => c.args);
@@ -66,6 +66,18 @@ test('a persistent state is one slot in the identity hue, tagged theme/member', 
   ]]);
 });
 
+// Several themes are live at once and member ids collide across them: the tag is the
+// record's own identity pair, never a theme read from config.
+test('the tag is the intent record\'s own theme and member', () => {
+  const result = plan({
+    intent: { s1: persistent(needsInput({ theme: 'forest' })), s2: persistent(needsInput()) },
+    sessionWindows: { s1: { windowId: 7 }, s2: { windowId: 8 } },
+    windows: [win(7), win(8)],
+  });
+  assert.deepEqual(argsOf(result).map((args) => args.at(-1)), ['forest/ginger', 'cats/ginger']);
+  assert.equal(sessionSlot(persistent(idle({ theme: 'forest' })), { now: NOW }).tag, 'forest/ginger');
+});
+
 test('a transient state hands niri its successor and the time left, so niri decays it', () => {
   const result = plan({
     intent: { s1: transient(done(), idle(), NOW + 8000) },
@@ -78,7 +90,7 @@ test('a transient state hands niri its successor and the time left, so niri deca
 });
 
 test('an expired transient state is sent as its successor, with no ttl', () => {
-  const slot = sessionSlot(transient(done(), idle(), NOW - 1), { themeId: 'cats', now: NOW });
+  const slot = sessionSlot(transient(done(), idle(), NOW - 1), { now: NOW });
   assert.equal(slot.level, 'quiet');
   assert.equal(slot.motion, 'breathe');
   assert.equal(slot.expiresAt, null);

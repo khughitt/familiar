@@ -1,5 +1,6 @@
 import { parseIdentities } from '../src/bus/pins.js';
 import { visualResolver } from '../src/observe/context.js';
+import { preloadedThemes } from './helpers/themes.js';
 import { loadThemePack } from 'familiar-theme';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -104,7 +105,7 @@ test('projection preserves the Niri winner through reconcile and unrelated event
   const resolveVisuals = async (sessions) => ({
     intent: Object.fromEntries(Object.entries(sessions).map(([sid, record]) => [sid, {
       current: { state: record.state, urgency: record.state === 'done' ? 'notice' : 'none',
-        motion: 'static', motionPolicy: 'full', color: { base: '#123456' }, identity: { member: sid } },
+        motion: 'static', motionPolicy: 'full', color: { base: '#123456' }, identity: { theme: 'cats', member: sid } },
       expiresAt: null, after: null,
     }])), faults: new Map(),
   });
@@ -114,7 +115,7 @@ test('projection preserves the Niri winner through reconcile and unrelated event
     signals = planWindowSignals({ intent, sessions: sessions.sessions,
       sessionWindows: { a: { windowId: 7 }, b: { windowId: 7 } },
       windows: [{ id: 7, signal: { sources: ['familiar'] } }],
-      ...signals, themeId: 'cats', now: 1000,
+      ...signals, now: 1000,
     });
     return signals;
   };
@@ -358,7 +359,7 @@ test('projection keeps checkout labels and repository anchors for path and remot
     const ctx = { cwd: '/fixture/fix-api/src', repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
       remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null, family: null, role: null };
     const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a, { context: ctx }),
-      resolveVisuals: visualResolver({ pack, catalog: parseIdentities(JSON.stringify({ identities: pins })),
+      resolveVisuals: visualResolver({ themes: preloadedThemes({ fixture: pack }), catalog: parseIdentities(JSON.stringify({ identities: pins })),
         tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     });
     assert.deepEqual(result.faults, new Map());
@@ -409,7 +410,7 @@ for (const { name, steps } of [
     const { snapshot } = await applyEvent(event, options);
     const result = await project({ snapshot, prior: previous, event,
       prepared: { ...prepared(snapshot.agents[event.agentId]), basis: basis(snapshot.agents[event.agentId], snapshot.generation) },
-      resolveVisuals: visualResolver({ pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+      resolveVisuals: visualResolver({ themes: preloadedThemes({ fixture: pack }), catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     });
     assert.deepEqual(result.faults, new Map());
     assert.equal(result.intent.a.current.state, state, nativeEvent);
