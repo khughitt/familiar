@@ -85,6 +85,20 @@ try {
   assert.equal(cache.fault, null, `refresh: ${JSON.stringify(cache)}`);
   assert.equal(cache.parkStore, store);
 
+  // A refresher starts only when one of the two stamps moves, so the refresher's own reads
+  // must move neither: else every render would invalidate the cache it just read and start
+  // another refresher. Checked once after the refresh, and again after the two reads most
+  // likely to grow a write (a claim GC on `claims`, a park sweep on `list --parked`).
+  const unmoved = (when) => {
+    assert.equal(cache.tasksDirMtimeNs, mtimeStamp(cache.tasksDir), `${when} moved ${cache.tasksDir}`);
+    assert.equal(cache.parkStoreMtimeNs, mtimeStamp(store), `${when} moved ${store}`);
+  };
+  unmoved('the refresh');
+  await sleep(1100);
+  tasksJson('claims');
+  tasksJson('list', '--parked');
+  unmoved('tasks claims or list --parked');
+
   console.log(`host check: tasks ${version} park store at ${store}: ok`);
   code = 0;
 } catch (error) {
