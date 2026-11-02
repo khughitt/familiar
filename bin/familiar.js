@@ -396,7 +396,8 @@ Examples:
 Usage:
   familiar observe
 
-Reads one relay observer envelope on stdin. Faults exit 1; success or staleness exits 0.
+Reads one relay observer envelope on stdin. Faults exit 1; success, staleness or a refused
+event (an invalid FAMILIAR_ROLE) exits 0, a refusal after printing one error line.
 `,
   statusline: `Render the Claude Code status line.
 
@@ -523,7 +524,8 @@ export function readStdin() {
   });
 }
 
-// Faults exit 1; success or staleness exits 0. Its stderr lines are relay's diagnostics.
+// Faults exit 1; success, staleness or a refused event (an invalid FAMILIAR_ROLE, after one
+// error line) exits 0. Its stderr lines are relay's diagnostics.
 async function observeCommand(args) {
   parseLeaf(args, leafOptionsFor('observe'));
   const [{ observe }, { paths }, relay, { defaultProcessOps }] = await Promise.all([
