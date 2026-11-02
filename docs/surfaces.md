@@ -38,6 +38,18 @@ supported surface because it lays out and repaints those cells itself. Relay inv
 transcript content and lets a state change
 replace the image in place.
 
+Claude Code polls the status line every `refreshInterval` for every open session, so
+`familiar statusline` caches each session's rendered line under
+`$FAMILIAR_STATE_DIR/statusline-render/`. A poll whose inputs are unchanged (the HUD
+fields from the payload, git and the claimed task; the session's bus record; `config.yaml`,
+`scheme.json` and `identities.yaml`; the session's transmit ledger) prints the cached line
+without loading the renderer. An entry also expires when a `done` or `error` intent decays,
+and after 30 s in any case, which bounds how long an edit to the theme pack or to familiar
+itself takes to reach the line. `--with` output, a faulted line, and a payload with no
+`session_id` are never cached; `familiar reap` removes the entries of sessions no longer on
+the bus. Anything new the HUD shows must reach it through `readFields`
+(`src/render/term/statusfields.js`), which the key covers, or it stays stale for up to 30 s.
+
 agy's custom status line works the same way. Its stdin has Claude Code's shape, with
 `product: "antigravity"` and the conversation UUID as `session_id`, which is the id relay
 publishes as `agy:<uuid>`; the status line and the hook therefore derive the same image id.
