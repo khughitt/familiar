@@ -53,6 +53,7 @@ export function taskForSession({ stateDir, sessionId, claim, now, warn }) {
   }
   const valid = recorded !== null && typeof recorded === 'object'
     && typeof recorded.taskId === 'string' && typeof recorded.worktree === 'string';
+  if (recorded !== null && !valid) warn(`session file ${path}: not the { taskId, worktree, seenAt } shape`);
   if (!claim) return valid ? { id: recorded.taskId, others: 0, worktree: recorded.worktree } : null;
   if (!valid || recorded.taskId !== claim.id || recorded.worktree !== claim.worktree) {
     try {
@@ -70,12 +71,29 @@ function defaultSpawnRefresher({ taskId, worktree, cwd }) {
 
 const outOfWindow = (age, limit) => age < 0 || age > limit;
 
+// A cache the render cannot trust is a fault, never a throw: the refresher is what repairs it.
+function loadCache(file) {
+  let cache;
+  try {
+    cache = readJsonOrNull(file);
+  } catch (error) {
+    return { corrupt: `stage cache ${file}: ${error.message}` };
+  }
+  if (cache === null) return { cache: null };
+  const shaped = typeof cache === 'object' && typeof cache.stage === 'string'
+    && typeof cache.refreshedAt === 'string' && Number.isFinite(Date.parse(cache.refreshedAt));
+  return shaped ? { cache } : { corrupt: `stage cache ${file}: not the cache shape` };
+}
+
 export function readStage({ stateDir, task, cwd, now, spawnRefresher = defaultSpawnRefresher, pidAlive }) {
   const { file, lock } = cachePaths(stateDir, task.id, task.worktree);
-  const cache = readJsonOrNull(file);
+  const { cache, corrupt } = loadCache(file);
   let result;
   let stale;
-  if (cache === null || cache.worktree !== task.worktree) {
+  if (corrupt) {
+    result = { stage: ABSENT, fault: corrupt };
+    stale = true;
+  } else if (cache === null || cache.worktree !== task.worktree) {
     result = { stage: ABSENT, fault: null };
     stale = true;
   } else {
@@ -84,13 +102,24 @@ export function readStage({ stateDir, task, cwd, now, spawnRefresher = defaultSp
     if (cache.tasksDir === null) {
       stale = outOfWindow(age, FAILED_RETRY_MS);
     } else {
-      stale = outOfWindow(age, STAGE_CEILING_MS)
-        || mtimeStamp(cache.tasksDir) !== cache.tasksDirMtimeNs
-        || mtimeStamp(cache.parkStore) !== cache.parkStoreMtimeNs;
+      stale = outOfWindow(age, STAGE_CEILING_MS);
+      for (const [path, stamp] of [[cache.tasksDir, cache.tasksDirMtimeNs], [cache.parkStore, cache.parkStoreMtimeNs]]) {
+        try {
+          stale = mtimeStamp(path) !== stamp || stale;
+        } catch (error) {
+          result = { stage: cache.stage, fault: `stage cache stamp ${path}: ${error.message}` };
+          stale = true;
+        }
+      }
     }
   }
-  if (stale && !lockHeld(lock, now, pidAlive)) {
-    spawnRefresher({ taskId: task.id, worktree: task.worktree, cwd });
+  if (!stale) return result;
+  let held;
+  try {
+    held = lockHeld(lock, now, pidAlive);
+  } catch (error) {
+    return { ...result, fault: `stage cache lock ${lock}: ${error.message}` };
   }
+  if (!held) spawnRefresher({ taskId: task.id, worktree: task.worktree, cwd });
   return result;
 }

@@ -197,3 +197,61 @@ test('a held lock starts nothing; a lock past LOCK_STALE_MS or with a dead pid d
   read(f, { pidAlive: () => false });
   assert.equal(f.spawns.length, 2);
 }));
+
+const cacheFile = (f) => cachePaths(f.stateDir, ID, A).file;
+const putRaw = (f, text) => {
+  const file = cacheFile(f);
+  mkdirSync(join(file, '..'), { recursive: true });
+  writeFileSync(file, text);
+};
+
+test('a corrupt cache file renders — with a fault and starts a refresh', () => fixture((f) => {
+  putRaw(f, '{');
+  const out = read(f);
+  assert.equal(out.stage, '—');
+  assert.match(out.fault, /^stage cache .*: /);
+  assert.equal(f.spawns.length, 1);
+}));
+
+test('a cache with an unparsable refreshedAt is corrupt, not ageless', () => fixture((f) => {
+  writeCache(f.stateDir, ID, A, fresh(f, { refreshedAt: 'garbage' }));
+  const out = read(f);
+  assert.equal(out.stage, '—');
+  assert.match(out.fault, /stage cache/);
+  assert.equal(f.spawns.length, 1);
+}));
+
+test('a cache with a non-string stage is corrupt', () => fixture((f) => {
+  writeCache(f.stateDir, ID, A, fresh(f, { stage: 7 }));
+  const out = read(f);
+  assert.equal(out.stage, '—');
+  assert.match(out.fault, /stage cache/);
+  assert.equal(f.spawns.length, 1);
+}));
+
+test('a stamp that cannot be read is a fault and a refresh, not a throw', () => fixture((f) => {
+  // A source path under a regular file: stat answers ENOTDIR, not ENOENT.
+  writeCache(f.stateDir, ID, A, fresh(f, { tasksDir: join(f.parkStore, 'sub') }));
+  const out = read(f);
+  assert.equal(out.stage, 'review');
+  assert.match(out.fault, /sub/);
+  assert.equal(f.spawns.length, 1);
+}));
+
+test('a lock that cannot be read is a fault and starts nothing', () => fixture((f) => {
+  const { lock } = cachePaths(f.stateDir, ID, A);
+  mkdirSync(lock, { recursive: true });   // reading a directory: EISDIR
+  const out = read(f);
+  assert.match(out.fault, /lock/);
+  assert.equal(f.spawns.length, 0);
+}));
+
+test('a session file of the wrong shape warns and is no task', () => fixture((f) => {
+  const path = sessionFilePath(f.stateDir, SID);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, JSON.stringify({ taskId: 5, worktree: A }));
+  const warnings = [];
+  assert.equal(recall(f, null, warnings), null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /session file/);
+}));
