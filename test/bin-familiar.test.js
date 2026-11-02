@@ -1738,7 +1738,9 @@ test('a line whose image is still provisional is rendered again on every poll', 
   const ledger = JSON.stringify({ seq: 1, pid: record.pid, starttime: record.starttime, ended: false,
     presented: 'working', held: { provisional: true, transport: 'tmux:not-this-terminal' } });
   writeFileSync(entryPath, ledger);
-  // This session owns its terminal, so the settle reaches the transport check and stops there.
+  // This session owns its terminal, so the settle is not superseded; the made-up transport
+  // keeps it from writing to the runner's terminal. The requirement under test is only that a
+  // provisional ledger is never cached, whichever noop the settle answers.
   const owner = terminalOwnerPaths(paths(e).transmitDir, record);
   mkdirSync(dirname(owner.entryPath), { recursive: true });
   writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'provisional', seq: 1 }));
@@ -1789,6 +1791,8 @@ test('a session that joins the bus after its line was cached gets its cells next
   const e = statuslineEnv();
   const payload = { session_id: 'joins', cwd: process.cwd() };
   assert.ok(!statusline(e, [], payload).stdout.includes(PLACEHOLDER));
+  plantSentinel(e, 'joins');
+  assert.equal(statusline(e, [], payload).stdout, SENTINEL, 'the HUD-only line was cached');
   await seedBus(e, 'joins');
   assert.ok(statusline(e, [], payload).stdout.includes(PLACEHOLDER));
 });
