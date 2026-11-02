@@ -18,6 +18,7 @@ import { sanitize, width, fg, BOLD, RESET } from './sgr.js';
 
 export const RULE = '▎';    // ▎ the gutter
 export const ABSENT = '—';  // — this slot's data does not exist
+export const SEP = ' · ';   // between the state and the tokens after it
 const ELLIPSIS = '…';
 const BRANCH = '⎇';         // ⎇
 const BAR_FULL = '▰';       // ▰
@@ -149,9 +150,20 @@ function slotBuilders(pen, fields, state) {
       return `${pen.rule} ${bar}  ${pen.dim(`${Math.floor(clamped)}%`)}`;
     },
 
-    state: () => (state
-      ? `${pen.rule} ${pen.state(`${GLYPHS[state]} ${state}`)}`
-      : `${pen.rule} ${pen.dim(ABSENT)}`),
+    // `state · stage · N agents`. The state keeps its pen; the tokens are dim. The AGENT COUNT
+    // is never cut (a cut count names nothing); the stage takes what the line has left and is
+    // dropped only when fewer than two cells remain. With neither token the string is exactly
+    // the state-only line.
+    state: () => {
+      const headText = state ? `${GLYPHS[state]} ${state}` : ABSENT;
+      const head = state ? pen.state(headText) : pen.dim(ABSENT);
+      const n = fields.agents;
+      const agentText = Number.isInteger(n) && n > 0 ? `${SEP}${n} ${n === 1 ? 'agent' : 'agents'}` : '';
+      const stage = typeof fields.stage === 'string' ? sanitize(fields.stage) : '';
+      const cap = BUDGET - width(`${RULE} `) - width(headText) - width(agentText) - width(SEP);
+      const stagePart = stage && cap >= 2 ? pen.dim(SEP + truncEnd(stage, cap)) : '';
+      return `${pen.rule} ${head}${stagePart}${agentText ? pen.dim(agentText) : ''}`;
+    },
   };
 }
 
