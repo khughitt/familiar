@@ -523,9 +523,11 @@ async function observeCommand(args) {
 }
 
 // Claude Code polls this every refreshInterval for every open session, so its hit path loads
-// only the HUD fields (with the task stage's cache, src/render/term/stagecache.js) and the
-// render cache (src/render/term/render-cache.js says what the key covers). The renderer, and with it the theme contract and YAML, loads on a miss. --with
-// output belongs to an arbitrary command that nothing can key, so it is never cached.
+// only the HUD fields (with the session's task, src/render/term/stagesession.js, and for a task
+// its stage's cache, src/render/term/stagecache.js) and the render cache
+// (src/render/term/render-cache.js says what the key covers). The renderer, and with it the
+// theme contract and YAML, loads on a miss. --with output belongs to an arbitrary command that
+// nothing can key, so it is never cached.
 async function statuslineCommand(args) {
   const { values } = parseLeaf(args, leafOptionsFor('statusline'));
   const stdin = await readStdin();
@@ -548,20 +550,30 @@ async function statuslineCommand(args) {
   // hit or miss. A fault there is one warning line per poll and never blanks the line.
   // The agent count is not read here: it is on the session's record, which the key holds raw
   // and the miss path validates.
+  //
+  // Every poll pays for the stage path, so the stage reader loads only for a poll that shows
+  // a task: readFields asks for the stage of the task it shows (stageOf), and that stage is
+  // read here once the module has loaded, before the key is computed. A poll with no task
+  // loads stagesession.js alone (test/bin-familiar.test.js traces both).
   let fields = null;
   if (wrapped === null) {
     const { taskForSession } = await import('../src/render/term/stagesession.js');
-    const { readStage } = await import('../src/render/term/stagecache.js');
     const warn = (message) => process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
-    const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
+    let shown = null;
     fields = readFields(payload, {
       taskOf: (live) => taskForSession({ stateDir: p.stateDir, sessionId, claim: live, now: at, warn }),
       stageOf: (task) => {
-        const { stage, fault } = readStage({ stateDir: p.stateDir, task, cwd, now: at });
-        if (fault) warn(fault);
-        return stage;
+        shown = task;
+        return null;
       },
     });
+    if (shown !== null) {
+      const { readStage } = await import('../src/render/term/stagecache.js');
+      const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
+      const { stage, fault } = readStage({ stateDir: p.stateDir, task: shown, cwd, now: at });
+      if (fault) warn(fault);
+      fields = { ...fields, stage };
+    }
   }
   const keyed = wrapped === null && typeof sessionId === 'string' && sessionId !== '';
   const key = keyed ? cache.renderKey({ paths: p, sessionId, fields }) : null;
