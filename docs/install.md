@@ -339,13 +339,26 @@ selection is the repository's face: the member its family's theme gives it with 
 role. A Codex session started with `FAMILIAR_ROLE` set leaves the selection as it is
 and says so in one line, so a per-launch role is never written into the repository.
 
-**Upgrading from single-theme pet ids.** A managed `.codex/config.toml` written
-before this change names `custom:familiar-<member>`, and Familiar no longer treats
-it as its own: `install pets --sync-projects` refuses it by path, and convergence
-reports it, as for any unmanaged file. Remove each refused file once, then run
-`familiar install pets --sync-projects` again to write the new selection. The old
-`~/.codex/pets/familiar-<member>` directories are no longer selected and can be
-deleted.
+**Single-theme pet ids.** Familiar recognises a managed `.codex/config.toml` only
+when it names a per-theme id. A managed file that names a single-theme id
+`custom:familiar-<member>` is therefore not Familiar's: `install pets --sync-projects`
+refuses it by path, and convergence reports it, with the same
+`refusing unmanaged project config <path>` message it gives a config you wrote
+yourself. So check each refused file before removing it. Remove it only when it holds
+exactly these three lines, with a `pet` value that has no `--` after `familiar-`:
+
+```toml
+# Managed by Familiar. Run `familiar install pets --sync-projects` to update.
+[tui]
+pet = "custom:familiar-<member>"
+```
+
+Any other refused file is yours: leave it, and set its `pet` yourself if you want a
+Familiar pet there. After removing the managed ones, run
+`familiar install pets --sync-projects` again to write the per-theme selection.
+Pet directories under `~/.codex/pets/` named `familiar-<member>`, with no `--` in
+the name, are never selected and can be deleted. Keep every
+`familiar-<theme>--<member>` directory: those are the current pets.
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. In a Git worktree the config is written in that worktree

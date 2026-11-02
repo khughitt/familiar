@@ -71,8 +71,8 @@ one, so every pair has its own id (`forest-cats`/`ginger` and `forest`/`cats-gin
 differ); Codex 0.166.0 loads and draws a pet so named, probed on 2026-11-02 by the
 §6.1 rendering method. `familiar install pets` compiles that roster, stamping each
 pet with a hash of the sheet it compiled so a later session can tell whether the art
-belongs to the session's theme. The managed config is recognised by that v2 text
-only: a file naming a pre-upgrade `custom:familiar-<member>` id is refused like any
+belongs to the session's theme. The managed config is recognised by that per-theme text
+only: a file naming a single-theme `custom:familiar-<member>` id is refused like any
 unmanaged file (see [Codex pets](install.md#codex-pets) for the one-time removal).
 
 The project's selection is then **maintained automatically**, with
