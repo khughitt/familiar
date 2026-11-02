@@ -74,6 +74,39 @@ test('wrong schema and malformed sessions or ended records fail closed', async (
   }
 });
 
+// A record written before family, role and admission existed must still read: the file
+// validator checks those fields' shape only when present (spec §3, §5.6), or the first
+// hook after the upgrade would refuse the whole file and nothing would ever rewrite it.
+test('family, role and admitted are optional, and checked as ids and a seq when present', async (t) => {
+  const path = await fixture(t);
+  const without = valid();
+  for (const key of ['family', 'role', 'admitted']) assert.equal(Object.hasOwn(without.sessions.a, key), false);
+  await writeSessions(path, without);
+  assert.deepEqual(await readSessions(path), without);
+  for (const fields of [
+    { family: null, role: null, admitted: 0 },
+    { family: 'guild', role: 'reviewer', admitted: 7 },
+    { family: 'verifiably', role: 'lead-2' },
+  ]) {
+    const value = valid();
+    Object.assign(value.sessions.a, fields);
+    await writeSessions(path, value);
+    assert.deepEqual(await readSessions(path), value, JSON.stringify(fields));
+  }
+  for (const fields of [
+    { family: 'Guild' }, { family: '' }, { family: 'guild/x' }, { family: 3 },
+    { role: 'Reviewer' }, { role: 'reviewer/lead' }, { role: '' },
+    // `default` is reserved for an agent with no role: a record carries null instead.
+    { role: 'default' },
+    { admitted: -1 }, { admitted: 1.5 }, { admitted: '3' }, { admitted: null },
+  ]) {
+    const value = valid();
+    Object.assign(value.sessions.a, fields);
+    await writeFile(path, JSON.stringify(value));
+    await assert.rejects(readSessions(path), /invalid sessions file at .*: malformed sessions entry a/, JSON.stringify(fields));
+  }
+});
+
 test('sameBasis requires equal generation, agent, cwd and every non-null process field', () => {
   assert.equal(sameBasis(basis, structuredClone(basis)), true);
   assert.equal(sameBasis({ ...basis, process: null }, basis), false);

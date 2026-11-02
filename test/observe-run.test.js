@@ -234,24 +234,25 @@ test('enrichment carries only an own colour from the same session and checkout',
   const envelope = JSON.parse(text(event(), snapshot));
   const calls = [];
   const prepare = (old, repoRoot = '/repo') => prepareEnrichment({
-    ...f.deps, envelope, snapshot, prior: { sessions: { s: old, other: { repoRoot, projectColor: '#abcdef' } } },
+    ...f.deps, envelope, snapshot, prior: { sessions: { s: old, other: { repoRoot, projectColor: '#abcdef', family: null } } },
     gitContext: async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot }),
-    lookupProjectColor: async (dir) => { calls.push(dir); return { color: '#317d01', warnings: ['looked up'] }; },
+    lookupProjectColor: async (dir) => { calls.push(dir); return { color: '#317d01', root: null, warnings: ['looked up'] }; },
   });
-  for (const old of [undefined, { repoRoot: '/different', projectColor: '#123456' },
-    { repoRoot: '/repo' }, Object.assign(Object.create({ projectColor: '#123456' }), { repoRoot: '/repo' })]) {
+  for (const old of [undefined, { repoRoot: '/different', projectColor: '#123456', family: null },
+    { repoRoot: '/repo', family: null }, { repoRoot: '/repo', projectColor: '#123456' },
+    Object.assign(Object.create({ projectColor: '#123456' }), { repoRoot: '/repo', family: null })]) {
     const result = await prepare(old);
     assert.equal(result.context.projectColor, '#317d01');
     assert.deepEqual(result.warnings, ['looked up']);
   }
-  assert.deepEqual(calls, ['/repo', '/repo', '/repo', '/repo']);
+  assert.deepEqual(calls, ['/repo', '/repo', '/repo', '/repo', '/repo']);
   calls.length = 0;
   for (const projectColor of [null, '#123456']) {
-    const result = await prepare({ repoRoot: '/repo', projectColor });
+    const result = await prepare({ repoRoot: '/repo', projectColor, family: null });
     assert.equal(result.context.projectColor, projectColor);
     assert.deepEqual(result.warnings, []);
   }
-  assert.equal((await prepare({ repoRoot: '/repo', projectColor: '#123456' }, null)).context.projectColor, null);
+  assert.equal((await prepare({ repoRoot: '/repo', projectColor: '#123456', family: null }, null)).context.projectColor, null);
   assert.deepEqual(calls, []);
   await assert.rejects(prepareEnrichment({ ...f.deps, envelope, snapshot, prior: { sessions: {} },
     gitContext: async () => ({ remote: null, repoRoot: '/repo', repositoryRoot: '/repo' }),
@@ -271,13 +272,47 @@ test('enrichment looks again after a checkout move, carries across subdirectorie
   for (const repoRoot of ['/api', '/api', '/web', '/web']) {
     const result = await prepareEnrichment({ ...f.deps, envelope, snapshot, prior,
       gitContext: async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot }),
-      lookupProjectColor: async (dir) => { calls.push(dir); return { color: dir === '/api' ? '#317d01' : '#ff0000', warnings: ['looked up'] }; },
+      lookupProjectColor: async (dir) => { calls.push(dir); return { color: dir === '/api' ? '#317d01' : '#ff0000', root: null, warnings: ['looked up'] }; },
     });
     assert.deepEqual(result.warnings, prior.sessions.s?.repoRoot === repoRoot ? [] : ['looked up']);
     prior = { sessions: { s: result.context } };
   }
   assert.deepEqual(calls, ['/api', '/web']);
   assert.equal(prior.sessions.s.projectColor, '#ff0000');
+});
+
+// Review Focus 3: a misspelled role must not silently show the default, and must not
+// cost the session its record. The hook says why in one line and changes nothing.
+for (const value of ['Reviewer', 'reviewer/lead', 'default']) test(`FAMILIAR_ROLE ${JSON.stringify(value)} prints one line, exits 0, and leaves the previous record as it was`, async (t) => {
+  const f = await fixture(t);
+  await f.publish(event());
+  assert.deepEqual(await f.run(), { exitCode: 0, lines: [] });
+  const files = [f.paths.sessionsPath, f.paths.intentPath, f.paths.seqPath];
+  const before = await Promise.all(files.map((path) => readFile(path, 'utf8')));
+  assert.equal(JSON.parse(before[0]).sessions.s.role, null);
+  f.emitted.length = 0;
+  f.deps.env = { ...f.deps.env, FAMILIAR_ROLE: value };
+  await f.publish(event('prompt'));
+  const why = value === 'default'
+    ? 'FAMILIAR_ROLE "default" is reserved for an agent with no role — unset FAMILIAR_ROLE instead'
+    : `FAMILIAR_ROLE ${JSON.stringify(value)} is invalid — ids may only contain lowercase letters, digits, and hyphens (e.g. "reviewer")`;
+  assert.deepEqual(await f.run(event('prompt')), { exitCode: 0, lines: [`familiar: observe: ${why}`] });
+  assert.deepEqual(await Promise.all(files.map((path) => readFile(path, 'utf8'))), before);
+  assert.deepEqual(f.emitted, []);
+});
+
+test('the hook environment\'s FAMILIAR_ROLE reaches the record, and the record is admitted once', async (t) => {
+  const f = await fixture(t);
+  f.deps.env = { ...f.deps.env, FAMILIAR_ROLE: 'reviewer' };
+  await f.publish(event());
+  assert.deepEqual(await f.run(), { exitCode: 0, lines: [] });
+  const first = (await readSessions(f.paths.sessionsPath)).sessions.s;
+  assert.deepEqual([first.role, first.family, first.admitted], ['reviewer', null, first.seq]);
+  await f.publish(event('prompt'));
+  assert.equal((await f.run(event('prompt'))).exitCode, 0);
+  const second = (await readSessions(f.paths.sessionsPath)).sessions.s;
+  assert.ok(second.seq > first.seq);
+  assert.equal(second.admitted, first.admitted);
 });
 
 // --- attention capture ------------------------------------------------------------------

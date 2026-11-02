@@ -1410,7 +1410,7 @@ async function seedBus(e, sessionId, {
     paths: p, relay: { readSnapshot: () => readSnapshot({ paths: registryPaths }) },
     relayProcess: processOps,
     adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid }),
-    gitContext, lookupProjectColor: async () => ({ color: projectColor, warnings: [] }),
+    gitContext, lookupProjectColor: async () => ({ color: projectColor, root: null, warnings: [] }),
     loadContext: () => loadContext({ paths: p }),
     emitTransition: async () => ({ kind: 'unchanged' }), env: e,
   } });

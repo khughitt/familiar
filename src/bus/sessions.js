@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { STATES } from 'relay';
 import { writeJsonAtomic } from './store.js';
+import { ID_RE, RESERVED_ROLE } from './id.js';
 
 export const EMPTY_SESSIONS = { schema: 1, registry: null, sessions: {}, ended: {} };
 
@@ -10,6 +11,12 @@ const nullableText = (value) => value === null || text(value);
 const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const pid = (value) => integer(value) && value > 0 && value <= 0xffffffff;
 const harness = (value) => ['claude-code', 'codex', 'opencode'].includes(value);
+const nullableId = (value) => value === null || (typeof value === 'string' && ID_RE.test(value));
+const role = (value) => nullableId(value) && value !== RESERVED_ROLE;
+// Records written before family, role and admission existed lack them: the file still
+// reads, each such record faults in resolveIdentities until its next hook, and its next
+// projection assigns `admitted` (spec §3, §5.6). A field is checked only when present.
+const absentOr = (record, key, valid) => !Object.hasOwn(record, key) || valid(record[key]);
 
 function validHandle(value) {
   return object(value) && ['linux', 'darwin'].includes(value.platform)
@@ -33,6 +40,8 @@ function validSession(value, key) {
     && text(value.cwd) && value.cwd === value.basis.cwd && text(value.projectKey)
     && nullableText(value.remote) && nullableText(value.repoRoot)
     && nullableText(value.repositoryRoot) && nullableText(value.projectColor)
+    && absentOr(value, 'family', nullableId) && absentOr(value, 'role', role)
+    && absentOr(value, 'admitted', integer)
     && STATES.includes(value.state) && integer(value.updatedAt);
 }
 

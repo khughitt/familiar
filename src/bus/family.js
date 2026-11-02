@@ -6,12 +6,9 @@
 import { constants } from 'node:fs';
 import { lstat as fsLstat, open as fsOpen, realpath as fsRealpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
+import { ID_RE } from './id.js';
 
 export const FAMILY_FILE_MAX_BYTES = 65_536;
-
-// familiar-theme's ID_RE, copied rather than imported: the hook path must not load the
-// theme contract for one pattern (the same rule src/bus/sessions.js keeps).
-const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 // In order: the first that exists is the family file, and the rest are never read.
 const CANDIDATES = [['tools', 'family.toml'], ['family.toml']];

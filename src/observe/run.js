@@ -138,6 +138,7 @@ export async function observe({ text, deps: given }) {
         envelope, snapshot, prior, relayProcess: deps.relayProcess,
         renderProcess: deps.renderProcess, adapterFor: deps.adapterFor,
         gitContext: deps.gitContext, lookupProjectColor: deps.lookupProjectColor,
+        lookupFamily: deps.lookupFamily, env: deps.env,
       });
       absent = enrichment.absent === true;
       if (!enrichment.ok && !absent) return { exitCode: failed.length ? 1 : enrichment.exitCode, lines: [...lines, line(enrichment.reason)] };

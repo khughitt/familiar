@@ -118,7 +118,7 @@ async function world(t) {
     renderProcess: { startTimeOf: () => 20, ownerAlive: () => true, lockHolderAlive: () => true, pidExists: () => true },
     adapterFor: () => ({ resolveSessionPid: () => t1.agent, resolveTerminalPid: () => t1.terminal }),
     gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
-    lookupProjectColor: async () => ({ color: null, warnings: [] }),
+    lookupProjectColor: async () => ({ color: null, root: null, warnings: [] }),
     loadContext: async () => ({ paths, pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     emitTransition: async (args) => ({ kind: args.next ? 'unchanged' : 'ended' }),
   };

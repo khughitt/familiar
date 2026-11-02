@@ -25,7 +25,7 @@ const prepared = (agent, extra = {}) => ({ basis: basis(agent), terminal: { pid:
 const session = (agent, extra = {}) => ({
   sessionId: agent.sessionId, agentId: agent.id, harness: agent.harness,
   basis: basis(agent), ...context, pid: 100, starttime: 200,
-  seq: 1, state: agent.state, updatedAt: agent.updatedAt, ...extra,
+  seq: 1, admitted: 1, state: agent.state, updatedAt: agent.updatedAt, ...extra,
 });
 const prior = (...records) => ({ ...structuredClone(EMPTY_SESSIONS), sessions: Object.fromEntries(records.map((r) => [r.sessionId, r])) });
 const ended = (record, seq) => ({ sessionId: record.sessionId, harness: record.harness, project: record.project, pid: record.pid, starttime: record.starttime, seq });
@@ -35,11 +35,47 @@ const project = (options = {}) => projectSnapshot({ snapshot: snapshot(), prior:
 test('a fresh prepared event admits its session with every context and terminal field', async () => {
   const a = row('a');
   const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a) });
-  assert.deepEqual(result.sessions.sessions.a, session(a, { seq: 5 }));
+  assert.deepEqual(result.sessions.sessions.a, session(a, { seq: 5, admitted: 5 }));
   assert.deepEqual(result.sessions.registry, { generation, revision: 10 });
   assert.deepEqual(result.intent, { a: { visual: 'a' } });
   assert.deepEqual(result.capture, { prev: null, next: result.sessions.sessions.a });
   assert.equal(result.stale, false);
+});
+
+// `seq` moves on every event and state change, so it is no arrival order; `admitted` is
+// the seq at which a record entered sessions.json, kept while it stays (spec §5.6).
+test('a new record is admitted at its seq, keeps it while it stays, and is admitted again on return', async () => {
+  const a = row('a');
+  const admit = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a), seq: 5 });
+  assert.equal(admit.sessions.sessions.a.admitted, 5);
+  const done = row('a', { state: 'done', updatedAt: 2000 });
+  const changed = await project({ snapshot: snapshot(done), prior: admit.sessions, seq: 9 });
+  assert.deepEqual([changed.sessions.sessions.a.seq, changed.sessions.sessions.a.admitted], [9, 5]);
+  const event = await project({ snapshot: snapshot(done), prior: changed.sessions, seq: 10,
+    event: { sessionId: 'a' }, prepared: prepared(done) });
+  assert.deepEqual([event.sessions.sessions.a.seq, event.sessions.sessions.a.admitted], [10, 5]);
+  const dropped = await project({ snapshot: snapshot(row('b')), prior: event.sessions, seq: 11, mode: 'drop-only' });
+  assert.equal(Object.hasOwn(dropped.sessions.sessions, 'a'), false);
+  const back = await project({ snapshot: snapshot(a), prior: dropped.sessions, seq: 12,
+    event: { sessionId: 'a' }, prepared: prepared(a) });
+  assert.equal(back.sessions.sessions.a.admitted, 12);
+});
+
+// A record written before admission existed has no arrival order to recover: its next
+// projection, full or drop-only, gives it the current seq, which it then keeps.
+test('a pre-change record without admitted gets the current seq once', async () => {
+  const a = row('a');
+  const b = row('b');
+  const old = prior(session(a), session(b));
+  for (const record of Object.values(old.sessions)) delete record.admitted;
+  const reconciled = await project({ snapshot: snapshot(a, b), prior: old, seq: 7 });
+  assert.deepEqual([reconciled.sessions.sessions.a.admitted, reconciled.sessions.sessions.b.admitted], [7, 7]);
+  const later = await project({ snapshot: snapshot(row('a', { state: 'idle', updatedAt: 3000 }), b),
+    prior: reconciled.sessions, seq: 8 });
+  assert.deepEqual([later.sessions.sessions.a.seq, later.sessions.sessions.a.admitted], [8, 7]);
+  const teardown = await project({ snapshot: snapshot(a), prior: old, seq: 4, mode: 'drop-only' });
+  assert.deepEqual(Object.keys(teardown.sessions.sessions), ['a']);
+  assert.equal(teardown.sessions.sessions.a.admitted, 4);
 });
 
 test('an unadmitted registry agent without prepared enrichment is not projected', async () => {
@@ -277,7 +313,7 @@ test('session ids that name object properties stay ordinary session keys', async
   const a = row('__proto__');
   const result = await project({ snapshot: snapshot(a), event: { sessionId: '__proto__' }, prepared: prepared(a) });
   assert.deepEqual(result.capture.prev, null);
-  assert.deepEqual(result.sessions.sessions.__proto__, session(a, { seq: 5 }));
+  assert.deepEqual(result.sessions.sessions.__proto__, session(a, { seq: 5, admitted: 5 }));
   assert.deepEqual(Object.keys(result.intent), ['__proto__']);
 });
 

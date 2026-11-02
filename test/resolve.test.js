@@ -314,6 +314,15 @@ test('undefined family or role throws, as projectColor does', () => {
   );
 });
 
+// `default` is the one reserved role: it names the member an agent with no role gets,
+// so a record carries null for that agent, never the word (controller ruling 8).
+test('a role of "default" is refused, not resolved as a role', () => {
+  assert.throws(
+    () => resolveIdentity({ ...ctx, role: 'default', catalog: NO_PINS, themes: THEMES }),
+    { message: 'resolveIdentity: role "default" is reserved for an agent with no role; pass null' },
+  );
+});
+
 const identity = { projectKey: 'k', project: 'api', slot: 0, projectColor: null, source: 'auto', member: 'ginger-tabby', label: 'Ginger Tabby' };
 
 test('a persistent state has no expiry and no successor', () => {

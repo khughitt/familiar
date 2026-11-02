@@ -7,6 +7,7 @@ import { themeFor } from '../config.js';
 import { autoSlot } from './identity.js';
 import { matchPin, pinnedMember } from './pins.js';
 import { MOTION_POLICIES } from '../animation/program.js';
+import { RESERVED_ROLE } from './id.js';
 
 const nullableString = (value) => value === null || typeof value === 'string';
 
@@ -32,6 +33,9 @@ export function resolveIdentity({
   if (projectColor !== null) assertHexColor(projectColor);
   if (!nullableString(family)) throw new Error('resolveIdentity: family must be a string or null');
   if (!nullableString(role)) throw new Error('resolveIdentity: role must be a string or null');
+  if (role === RESERVED_ROLE) {
+    throw new Error(`resolveIdentity: role "${RESERVED_ROLE}" is reserved for an agent with no role; pass null`);
+  }
 
   // 1. Theme.
   const { theme, themeSource } = themeFor(themes, family);
