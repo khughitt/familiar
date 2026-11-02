@@ -229,6 +229,19 @@ test('a cache with a non-string stage is corrupt', () => fixture((f) => {
   assert.equal(f.spawns.length, 1);
 }));
 
+// Review M1: the render writes `fault` to stderr through a string replace, so a cache whose
+// fault is anything but null or a string must never reach it.
+test('a cache whose fault is neither null nor a string is corrupt', () => fixture((f) => {
+  for (const [i, fault] of [7, true, {}, ['x'], undefined].entries()) {
+    writeCache(f.stateDir, ID, A, fresh(f, { fault }));
+    const out = read(f);
+    assert.equal(out.stage, '—', String(fault));
+    assert.equal(typeof out.fault, 'string');
+    assert.match(out.fault, /^stage cache .*: not the cache shape$/);
+    assert.equal(f.spawns.length, i + 1, 'and it starts a refresh');
+  }
+}));
+
 test('a stamp that cannot be read is a fault and a refresh, not a throw', () => fixture((f) => {
   // A source path under a regular file: stat answers ENOTDIR, not ENOENT.
   writeCache(f.stateDir, ID, A, fresh(f, { tasksDir: join(f.parkStore, 'sub') }));

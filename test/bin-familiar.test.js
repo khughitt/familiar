@@ -1917,6 +1917,26 @@ test('a stale cache is refreshed in the background, on a render-cache miss and h
     `flow-state ${STAGE_ID} --json --no-git`]);
 });
 
+// Review M1, end to end: a cache whose fault is not a string paints the line with — and one
+// warning, never a blank line.
+test('a stage cache with a non-string fault still paints the claim and warns', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'odd-fault');
+  f.claim('odd-fault');
+  f.writeFreshCache('designed');
+  writeFileSync(f.cache.file, JSON.stringify({ ...JSON.parse(readFileSync(f.cache.file, 'utf8')), fault: { code: 1 } }));
+  const before = readFileSync(f.cache.file, 'utf8');
+  // A refresher lock this test holds keeps the render from starting one.
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`;
+  writeFileSync(f.cache.lock, held);
+  const { stdout, stateRow, stderr } = f.render('odd-fault');
+  assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.ok(stateRow.endsWith(' · —'), JSON.stringify(stateRow));
+  assert.match(stderr, /^familiar: statusline: stage cache .*: not the cache shape\n$/);
+  assert.equal(readFileSync(f.cache.file, 'utf8'), before);
+  assert.equal(readFileSync(f.cache.lock, 'utf8'), held, 'no refresher took the lock');
+});
+
 // Review Focus 2, end to end: the session file cannot be written, the line still paints.
 // A refresher lock this test process holds keeps the render from starting one, so nothing
 // can still be running when the fixture is torn down.

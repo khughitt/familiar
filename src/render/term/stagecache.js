@@ -84,7 +84,9 @@ function loadCache(file) {
     return { corrupt: `stage cache ${file}: ${error.message}` };
   }
   if (cache === null) return { cache: null };
+  // `fault` reaches stderr through a string replace, so anything but null or a string is corrupt.
   const shaped = typeof cache === 'object' && typeof cache.stage === 'string'
+    && (cache.fault === null || typeof cache.fault === 'string')
     && typeof cache.refreshedAt === 'string' && Number.isFinite(Date.parse(cache.refreshedAt));
   return shaped ? { cache } : { corrupt: `stage cache ${file}: not the cache shape` };
 }
