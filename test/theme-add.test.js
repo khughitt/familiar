@@ -50,7 +50,7 @@ test('an existing user theme id refuses, even an empty directory, leaving no sta
   const p = scratch();
   mkdirSync(join(p.userThemesDir, 'gate-fixture'), { recursive: true });
   await assert.rejects(addTheme({ paths: p, source: writePack() }),
-    /'gate-fixture' is already installed .* remove it first/);
+    /'gate-fixture' is already installed .* use `theme add --replace <source>` to replace it with a backup, or `theme remove gate-fixture` first/);
   assert.deepEqual(stagingEntries(p), []);
 });
 
@@ -496,7 +496,7 @@ test('replace refuses a .replace-backup that is not a directory, before moving a
 test('without --replace an installed theme still refuses, and nothing is backed up', async () => {
   const p = scratch();
   await installOld(p);
-  await assert.rejects(addTheme({ paths: p, source: writePack() }), /already installed .* remove it first/);
+  await assert.rejects(addTheme({ paths: p, source: writePack() }), /already installed .* use `theme add --replace <source>`/);
   assert.equal(oldPackIntact(p), true);
   assert.deepEqual(backupEntries(p), []);
 });
@@ -561,4 +561,32 @@ test('a restoration whose only failure is the backup directory says the theme is
   assert.equal(oldPackIntact(p), true);
   assert.deepEqual(receiptSource(p), OLD_RECEIPT.source);
   assert.deepEqual(readdirSync(backup), ['stray']);
+});
+
+test('a successful replace leaves no .replace-backup entry at all', async () => {
+  const p = scratch();
+  await installOld(p);
+  await addTheme({ paths: p, source: writePack(), replace: true, now: fixedNow });
+  assert.equal(existsSync(backupRoot(p)), false);
+});
+
+test('a successful restore leaves no .replace-backup entry at all', async () => {
+  const p = scratch();
+  await installOld(p);
+  await assert.rejects(addTheme({
+    paths: p, source: writePack(), replace: true, now: fixedNow,
+    writeReceiptFn: async () => { throw new Error('disk full'); },
+  }), /disk full/);
+  assert.equal(oldPackIntact(p), true);
+  assert.equal(existsSync(backupRoot(p)), false);
+});
+
+test('a surviving earlier backup keeps the .replace-backup root through a later replace', async () => {
+  const p = scratch();
+  await installOld(p);
+  const earlier = join(backupRoot(p), 'gate-fixture-earlier');
+  mkdirSync(earlier, { recursive: true });
+  writeFileSync(join(earlier, 'receipt.json'), '{}');
+  await addTheme({ paths: p, source: writePack(), replace: true, now: fixedNow });
+  assert.deepEqual(readdirSync(backupRoot(p)), ['gate-fixture-earlier']);
 });

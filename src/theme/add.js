@@ -106,17 +106,28 @@ function moveAside({ paths, id, target, receiptFile, rename, rm, now }) {
   } catch (cause) {
     // Restore exactly what moved: the pack if it did, never the receipt that did not.
     restore({ ...backup, pack: packMoved ? backup.pack : null, receipt: null },
-      { rename, rm, promoted: false, cause });
+      { paths, rename, rm, promoted: false, cause });
     throw cause;
   }
   return backup;
+}
+
+// Remove the backup root once its last backup is gone. A root that still holds a backup
+// (an earlier failure's) must stay, so ENOTEMPTY is expected; ENOENT means it is gone.
+// Any other failure surfaces.
+function removeBackupRoot(paths) {
+  try {
+    rmdirSync(join(paths.userThemesDir, BACKUP_DIR_NAME));
+  } catch (error) {
+    if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT') throw error;
+  }
 }
 
 // Put the backed-up pack and receipt back where they were, then remove the empty
 // backup directory. A failed move keeps the backup: it is the one copy of the user's
 // old theme, and only a person may restore or delete it. A failed removal of the
 // emptied directory leaves the theme restored and says so.
-function restore(backup, { rename, rm, promoted, cause }) {
+function restore(backup, { paths, rename, rm, promoted, cause }) {
   const message = (error) => (error instanceof Error ? error.message : String(error));
   // What is still in the backup, so a failure names exactly the moves left to make.
   const left = { pack: backup.pack, receipt: backup.receipt };
@@ -146,6 +157,7 @@ function restore(backup, { rename, rm, promoted, cause }) {
   }
   try {
     rmdirSync(backup.dir);
+    removeBackupRoot(paths);
   } catch (rmdirError) {
     throw new Error(
       `theme add: ${message(cause)} — theme '${backup.id}' is restored as it was, but its backup `
@@ -199,7 +211,7 @@ export async function addTheme({
       } else {
         if (lstatOrNull(target) !== null) {
           throw new Error(
-            `theme '${pack.id}' is already installed at ${target} — remove it first`
+            `theme '${pack.id}' is already installed at ${target} — use \`theme add --replace <source>\` to replace it with a backup, or \`theme remove ${pack.id}\` first`
           );
         }
         if (lstatOrNull(receiptFile) !== null) {
@@ -223,7 +235,7 @@ export async function addTheme({
         // Without a backup there is nothing to restore: a fresh install whose receipt
         // write fails stays installed and unreceipted, never falsely receipted.
         if (backup === null) throw cause;
-        restore(backup, { rename, rm, promoted, cause });
+        restore(backup, { paths, rename, rm, promoted, cause });
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`theme add: ${message} — theme '${pack.id}' is restored as it was`, { cause });
       }
@@ -232,6 +244,7 @@ export async function addTheme({
       if (backup !== null) {
         try {
           rm(backup.dir, { recursive: true });
+          removeBackupRoot(paths);
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : String(cause);
           throw new Error(

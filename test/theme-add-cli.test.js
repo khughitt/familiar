@@ -209,7 +209,7 @@ test('theme add --replace installs over an installed theme', () => {
   assert.equal(run(env, 'theme', 'add', first).status, 0);
   const again = run(env, 'theme', 'add', first);
   assert.equal(again.status, 1);
-  assert.match(again.stderr, /already installed .* remove it first/);
+  assert.match(again.stderr, /already installed .* use `theme add --replace <source>`/);
   const second = writePack({ descriptor: DESCRIPTOR.replace('label: Gate Fixture', 'label: Gate Fixture Two') });
   const r = run(env, 'theme', 'add', '--replace', second);
   assert.equal(r.status, 0, r.stderr);
