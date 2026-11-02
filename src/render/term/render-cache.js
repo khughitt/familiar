@@ -11,16 +11,22 @@
 // - `fields`: everything readFields took from the payload, git and the claim (and whatever it
 //   grows to read). Anything new the line shows must come through readFields, or it is cached.
 // - this session's record on the bus, raw: state, identity, project colour and timestamps.
-// - config.yaml, scheme.json and identities.yaml, by inode, size and mtime.
+// - config.yaml, scheme.json and identities.yaml, by inode, size and mtime. With the record's
+//   family and role, they decide which theme and member the session draws (`families:`).
+// - every installed theme's descriptor (theme.yaml, user and shipped roots), by the same stamp:
+//   which theme ids exist, so `theme add`, `theme add --replace` (a new pack renamed into
+//   place) and `theme remove` are each a miss, and an edit to a pack's roles, rows or world.
+//   The descriptors are stamped, never parsed: no YAML on the hit path.
 // - this session's transmit ledger, raw; a provisional one is never cached at all.
-// WHAT IT DOES NOT COVER is bounded by RENDER_TTL_MS: the theme pack's files, familiar's own
-// code, symlinks under a pinned or recorded path (pins match on realpaths), and the validity
-// of other sessions' entries in the sessions file. A change to any reaches the line within
-// that long.
+// WHAT IT DOES NOT COVER is bounded by RENDER_TTL_MS: a pack's other files (its sprites and
+// world images, so a world image deleted under a cached line faults within that long),
+// familiar's own code, symlinks under a pinned or recorded path (pins match on realpaths), and
+// the validity of other sessions' entries in the sessions file. A change to any reaches the
+// line within that long. A faulted line is never cached, so a fault is said on every poll.
 //
 // TIME IS PART OF THE ANSWER: a `done` or `error` intent decays to `idle` at its expiresAt.
 // The renderer knows that deadline, so an entry is valid until the earlier of it and the TTL.
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { readdir, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -30,7 +36,7 @@ import { writeJsonAtomic } from '../../bus/store.js';
 export const RENDER_TTL_MS = 30_000;
 
 // Bumped when the entry or key shape changes, so an old entry is a miss, not a misread.
-const SCHEMA = 1;
+const SCHEMA = 2;
 
 export const renderCacheDir = (stateDir) => join(stateDir, 'statusline-render');
 
@@ -53,9 +59,25 @@ function stamp(path) {
     const s = statSync(path, { bigint: true });
     return `${s.ino}:${s.size}:${s.mtimeNs}`;
   } catch (error) {
-    if (error.code === 'ENOENT') return null;
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
     throw error;
   }
+}
+
+// Each entry of a themes root that holds a theme.yaml, with that descriptor's stamp, in name
+// order; null for a root that does not exist. An entry with none (a stray file, a staging
+// directory) is left out, as the catalog skips it.
+function themeStamps(root) {
+  let names;
+  try {
+    names = readdirSync(root);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+    throw error;
+  }
+  return names.sort()
+    .map((name) => [name, stamp(join(root, name, 'theme.yaml'))])
+    .filter(([, descriptor]) => descriptor !== null);
 }
 
 // The key for one session's render, or null when this render cannot be keyed and must run
@@ -95,6 +117,8 @@ export function renderKey({ paths, sessionId, fields }) {
     config: stamp(paths.configPath),
     scheme: stamp(paths.schemePath),
     identities: stamp(paths.identitiesPath),
+    userThemes: themeStamps(paths.userThemesDir),
+    shippedThemes: themeStamps(paths.themesDir),
   };
   return createHash('sha256').update(JSON.stringify(key)).digest('hex');
 }

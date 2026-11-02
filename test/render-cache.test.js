@@ -52,6 +52,35 @@ test('the key moves with every input it covers, and only with them', (t) => {
   }
 });
 
+test('the key moves with each installed theme\'s descriptor, in both roots, and not with its other files', (t) => {
+  const { p, sessions } = fixture(t);
+  const roots = { user: p.userThemesDir, shipped: join(p.configDir, 'shipped') };
+  const q = { ...p, themesDir: roots.shipped };
+  sessions({ s: { state: 'idle', updatedAt: 1 } });
+  const key = () => renderKey({ paths: q, sessionId: 's', fields: FIELDS });
+  for (const root of Object.values(roots)) mkdirSync(root, { recursive: true });
+  const absent = key();
+  for (const root of Object.values(roots)) {
+    mkdirSync(join(root, 'forest', 'sprites'), { recursive: true });
+    writeFileSync(join(root, 'stray.txt'), 'not a theme');
+  }
+  assert.equal(key(), absent, 'an entry with no theme.yaml stamps as absent');
+  let last = absent;
+  for (const root of Object.values(roots)) {
+    writeFileSync(join(root, 'forest', 'theme.yaml'), 'id: forest\n');
+    const added = key();
+    assert.notEqual(added, last, `a descriptor written under ${root}`);
+    writeFileSync(join(root, 'forest', 'theme.yaml'), 'id: forest\nrows: 3\n');
+    const edited = key();
+    assert.notEqual(edited, added, `a descriptor edited under ${root}`);
+    writeFileSync(join(root, 'forest', 'sprites', 'idle.png'), 'png');
+    assert.equal(key(), edited, 'a pack\'s other files are bounded by the TTL, not keyed');
+    last = edited;
+  }
+  rmSync(join(roots.user, 'forest'), { recursive: true });
+  assert.notEqual(key(), last, 'a removed theme');
+});
+
 test('an unparseable sessions file leaves the render unkeyed, for the renderer to report', (t) => {
   const { p } = fixture(t);
   writeFileSync(p.sessionsPath, '{not json');

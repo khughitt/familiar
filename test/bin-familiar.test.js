@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
-  openSync, symlinkSync, utimesSync,
+  openSync, renameSync, symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2214,6 +2214,67 @@ test('an unchanged poll is served from the render cache, and a changed input ren
   const config = statusline(e, [], { ...payload, context_window: { used_percentage: 23 } });
   assert.notEqual(config.stdout, SENTINEL, 'config.yaml is part of the key');
   assert.ok(!config.stdout.includes(PLACEHOLDER), 'motion off drops the cells');
+});
+
+// Which pack a session draws from is keyed already: its family and role are on its record,
+// and `families:` is in config.yaml. The pack itself is keyed by each installed theme's
+// descriptor, so `theme add` (with or without --replace, which renames a new pack into place),
+// `theme remove` and an edit to a theme.yaml (its roles, rows or world) are each a miss, in the
+// user's themes and the shipped ones alike, without the hit path reading any YAML.
+test('a family, a role, a families: entry and a theme pack added, edited, replaced or removed are each a miss', async () => {
+  const shipped = mkdtempSync(join(tmpdir(), 'familiar-keyed-themes-'));
+  writeTheme(shipped, 'cats');
+  const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+  const userThemes = join(e.FAMILIAR_CONFIG_DIR, 'themes');
+  writeTheme(userThemes, 'forest');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\n');
+  await seedBus(e, 'keyed');
+  const payload = { session_id: 'keyed', cwd: process.cwd() };
+  const miss = (label) => {
+    const result = statusline(e, [], payload);
+    assert.equal(result.status, 0, result.stderr);
+    assert.notEqual(result.stdout, SENTINEL, label);
+  };
+  miss('first render');
+  plantSentinel(e, 'keyed');
+  assert.equal(statusline(e, [], payload).stdout, SENTINEL, 'an unchanged poll hits');
+
+  const setRecord = async (fields) => {
+    const store = await readSessions(paths(e).sessionsPath);
+    Object.assign(store.sessions.keyed, fields);
+    await writeSessions(paths(e).sessionsPath, store);
+  };
+  await setRecord({ family: 'guild' });
+  miss('the record\'s family is part of the key');
+  plantSentinel(e, 'keyed');
+  await setRecord({ role: 'reviewer' });
+  miss('the record\'s role is part of the key');
+  plantSentinel(e, 'keyed');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nfamilies:\n  guild: forest\n');
+  miss('families: is part of the key');
+
+  plantSentinel(e, 'keyed');
+  const descriptor = join(userThemes, 'forest', 'theme.yaml');
+  writeFileSync(descriptor, readFileSync(descriptor, 'utf8').replace('rows: 4', 'rows: 3'));
+  miss('an edit to the family theme\'s theme.yaml is part of the key');
+
+  plantSentinel(e, 'keyed');
+  renameSync(join(userThemes, 'forest'), join(userThemes, '.forest-backup'));
+  writeTheme(userThemes, 'forest');
+  miss('a pack renamed into place (theme add --replace) is part of the key');
+
+  plantSentinel(e, 'keyed');
+  writeTheme(userThemes, 'plants');
+  miss('a newly added theme is part of the key');
+
+  plantSentinel(e, 'keyed');
+  rmSync(join(userThemes, 'plants'), { recursive: true });
+  miss('a removed theme is part of the key');
+
+  plantSentinel(e, 'keyed');
+  const shippedDescriptor = join(shipped, 'cats', 'theme.yaml');
+  writeFileSync(shippedDescriptor, readFileSync(shippedDescriptor, 'utf8').replace('label: Fixture', 'label: Edited'));
+  miss('an edit to a shipped theme.yaml is part of the key');
 });
 
 test('a cached line outlives neither the TTL nor its intent\'s decay', async () => {

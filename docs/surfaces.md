@@ -47,13 +47,17 @@ Claude Code polls the status line every `refreshInterval` for every open session
 `familiar statusline` caches each session's rendered line under
 `$FAMILIAR_STATE_DIR/statusline-render/`. A poll whose inputs are unchanged (the HUD
 fields from the payload, git, the claimed or retained task and its stage; the session's
-bus record, which carries the agent count; `config.yaml`, `scheme.json` and
-`identities.yaml`; the session's transmit ledger) prints the cached line
+bus record, which carries the agent count, the family and the role; `config.yaml`, with its
+`families:`, `scheme.json` and `identities.yaml`; every installed theme's `theme.yaml`, in the
+user and shipped theme directories, so adding, replacing or removing a theme or editing a
+pack's roles, rows or world is a miss; the session's transmit ledger) prints the cached line
 without loading the renderer. An entry also expires when a `done` or `error` intent decays,
 and after 30 s in any case, which bounds how long the inputs the key does not cover take to
-reach the line: the theme pack's files, familiar's own code, symlinks under a pinned or
-recorded path, and another session's malformed entry in the sessions file. `--with` output, a
-faulted line, an image still awaiting its settle, and a payload with no `session_id` are
+reach the line: a pack's sprites and world images (a world image deleted under a cached line
+faults within 30 s), familiar's own code, symlinks under a pinned or recorded path, and
+another session's malformed entry in the sessions file. `--with` output, a
+faulted line (a world that fails proof included), an image still awaiting its settle, and a
+payload with no `session_id` are
 never cached; `familiar reap` removes the entries of sessions no longer on
 the bus. Anything new the HUD shows must reach it through `readFields`
 (`src/render/term/statusfields.js`), which the key covers, or it stays stale for up to 30 s.
