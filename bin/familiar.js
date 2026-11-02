@@ -543,7 +543,8 @@ async function statuslineCommand(args) {
   const fields = wrapped === null ? readFields(payload) : null;
   const p = paths();
   const sessionId = payload.session_id;
-  const key = wrapped === null && sessionId ? cache.renderKey({ paths: p, sessionId, fields }) : null;
+  const keyed = wrapped === null && typeof sessionId === 'string' && sessionId !== '';
+  const key = keyed ? cache.renderKey({ paths: p, sessionId, fields }) : null;
   const cachePath = key === null ? null : cache.renderCachePath(p.stateDir, sessionId);
   if (key !== null) {
     const hit = cache.readRender(cachePath, key, at);
@@ -557,10 +558,10 @@ async function statuslineCommand(args) {
   const { output, fault, expiresAt, settle } = await renderStatusline({ stdin, payload, wrapped, fields, at });
   process.stdout.write(output);
   if (fault !== null) process.stderr.write(`familiar: statusline: ${fault}\n`);
-  const settled = settle === null ? { kind: 'noop' } : await settle();
-  // Only a clean line is cached: a fault is said again on the next poll, and a line whose
-  // image still needed settling is rendered again until the settle is a noop.
-  if (key !== null && fault === null && settled.kind === 'noop') {
+  if (settle !== null) await settle();
+  // Only a clean line is cached: a fault is said again on the next poll. A line whose image is
+  // still provisional was never keyed (renderKey), so its settle is retried every poll.
+  if (key !== null && fault === null) {
     await cache.writeRender(cachePath, { key, output, renderedAt: at, until: cache.validUntil(at, expiresAt) });
   }
 }

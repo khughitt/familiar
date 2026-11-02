@@ -44,9 +44,11 @@ Claude Code polls the status line every `refreshInterval` for every open session
 fields from the payload, git and the claimed task; the session's bus record; `config.yaml`,
 `scheme.json` and `identities.yaml`; the session's transmit ledger) prints the cached line
 without loading the renderer. An entry also expires when a `done` or `error` intent decays,
-and after 30 s in any case, which bounds how long an edit to the theme pack or to familiar
-itself takes to reach the line. `--with` output, a faulted line, and a payload with no
-`session_id` are never cached; `familiar reap` removes the entries of sessions no longer on
+and after 30 s in any case, which bounds how long the inputs the key does not cover take to
+reach the line: the theme pack's files, familiar's own code, symlinks under a pinned or
+recorded path, and another session's malformed entry in the sessions file. `--with` output, a
+faulted line, an image still awaiting its settle, and a payload with no `session_id` are
+never cached; `familiar reap` removes the entries of sessions no longer on
 the bus. Anything new the HUD shows must reach it through `readFields`
 (`src/render/term/statusfields.js`), which the key covers, or it stays stale for up to 30 s.
 

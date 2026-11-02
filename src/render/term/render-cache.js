@@ -12,9 +12,11 @@
 //   grows to read). Anything new the line shows must come through readFields, or it is cached.
 // - this session's record on the bus, raw: state, identity, project colour and timestamps.
 // - config.yaml, scheme.json and identities.yaml, by inode, size and mtime.
-// - this session's transmit ledger, raw: a provisional image the line must settle.
-// WHAT IT DOES NOT COVER is bounded by RENDER_TTL_MS: the theme pack's files and familiar's
-// own code. An edit to either reaches the line within that long.
+// - this session's transmit ledger, raw; a provisional one is never cached at all.
+// WHAT IT DOES NOT COVER is bounded by RENDER_TTL_MS: the theme pack's files, familiar's own
+// code, symlinks under a pinned or recorded path (pins match on realpaths), and the validity
+// of other sessions' entries in the sessions file. A change to any reaches the line within
+// that long.
 //
 // TIME IS PART OF THE ANSWER: a `done` or `error` intent decays to `idle` at its expiresAt.
 // The renderer knows that deadline, so an entry is valid until the earlier of it and the TTL.
@@ -57,8 +59,12 @@ function stamp(path) {
 }
 
 // The key for one session's render, or null when this render cannot be keyed and must run
-// in full. Null is not a fault: an unreadable sessions file is reported by the renderer,
-// which validates it; the key only reads this session's record out of it.
+// in full. Null is not a fault: JSON that does not parse is reported by the renderer.
+//
+// Only this session's record is read out of the sessions file, unvalidated: keying on the
+// whole file would miss on every other session's hook event. So a file that parses but fails
+// the renderer's validation (another session's malformed entry, a newer schema) is reported
+// only once this session's entry expires, within RENDER_TTL_MS.
 export function renderKey({ paths, sessionId, fields }) {
   const sessionsText = readText(paths.sessionsPath);
   let record = null;
@@ -69,12 +75,23 @@ export function renderKey({ paths, sessionId, fields }) {
       return null;
     }
   }
+  // A PROVISIONAL IMAGE IS NEVER CACHED. settle() answers noop for evidence it cannot settle
+  // yet (tmux gone, another tmux client) and leaves it provisional; the next poll must try
+  // again, as every poll did before this cache existed.
+  const ledger = readText(ledgerPaths(paths.transmitDir, sessionId).entryPath);
+  if (ledger !== null) {
+    try {
+      if (JSON.parse(ledger)?.held?.provisional) return null;
+    } catch {
+      return null;
+    }
+  }
   const key = {
     schema: SCHEMA,
     sessionId,
     fields,
     record,
-    ledger: readText(ledgerPaths(paths.transmitDir, sessionId).entryPath),
+    ledger,
     config: stamp(paths.configPath),
     scheme: stamp(paths.schemePath),
     identities: stamp(paths.identitiesPath),

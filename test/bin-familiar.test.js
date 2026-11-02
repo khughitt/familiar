@@ -1728,6 +1728,71 @@ test('--with output, a faulted line and a session-less payload are never cached'
   assert.equal(existsSync(cacheDir), false);
 });
 
+// settle() answers noop for provisional evidence it cannot settle yet (another tmux client, tmux
+// gone): the next poll must try again, as it did before the cache.
+test('a line whose image is still provisional is rendered again on every poll', async () => {
+  const e = statuslineEnv();
+  const record = await seedBus(e, 'provisional');
+  const { entryPath } = ledgerPaths(paths(e).transmitDir, 'provisional');
+  mkdirSync(dirname(entryPath), { recursive: true });
+  const ledger = JSON.stringify({ seq: 1, pid: record.pid, starttime: record.starttime, ended: false,
+    presented: 'working', held: { provisional: true, transport: 'tmux:not-this-terminal' } });
+  writeFileSync(entryPath, ledger);
+  // This session owns its terminal, so the settle reaches the transport check and stops there.
+  const owner = terminalOwnerPaths(paths(e).transmitDir, record);
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'provisional', seq: 1 }));
+  const payload = { session_id: 'provisional', cwd: process.cwd() };
+  for (let i = 0; i < 2; i++) {
+    const result = statusline(e, [], payload);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+  }
+  assert.equal(readFileSync(entryPath, 'utf8'), ledger, 'the settle was a noop');
+  assert.equal(existsSync(renderCachePath(paths(e).stateDir, 'provisional')), false);
+});
+
+// THE POINT OF THE CACHE: a hit prints without the renderer, the theme contract or YAML.
+test('a cache hit loads neither the renderer nor the theme contract nor YAML', { skip: traceSkip }, async (t) => {
+  const e = statuslineEnv();
+  await seedBus(e, 'light');
+  const payload = { session_id: 'light', cwd: process.cwd() };
+  assert.equal(statusline(e, [], payload).status, 0);
+  plantSentinel(e, 'light');
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-imports-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const trace = join(dir, 'trace.txt');
+  writeFileSync(trace, '');
+  const result = spawnSync(process.execPath, ['--import', traceHook, bin, 'statusline'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      HOME: dir,
+      FAMILIAR_CONFIG_DIR: e.FAMILIAR_CONFIG_DIR,
+      FAMILIAR_STATE_DIR: e.FAMILIAR_STATE_DIR,
+      FAMILIAR_THEMES_DIR: e.FAMILIAR_THEMES_DIR,
+      RELAY_STATE_DIR: e.RELAY_STATE_DIR,
+      FAMILIAR_TRACE_IMPORTS: trace,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, SENTINEL);
+  const loaded = readFileSync(trace, 'utf8').split('\n').filter(Boolean);
+  assert.ok(loaded.some((url) => url.endsWith('/src/render/term/render-cache.js')), 'the trace saw the hit path');
+  assert.deepEqual(loaded.filter((url) => heavyModule(url)
+    || url.endsWith('/src/render/term/statusline.js') || /\/node_modules\/relay\//.test(url)), []);
+});
+
+// A session that joins the bus after a HUD-only line was cached gets its cat on the next poll.
+test('a session that joins the bus after its line was cached gets its cells next poll', async () => {
+  const e = statuslineEnv();
+  const payload = { session_id: 'joins', cwd: process.cwd() };
+  assert.ok(!statusline(e, [], payload).stdout.includes(PLACEHOLDER));
+  await seedBus(e, 'joins');
+  assert.ok(statusline(e, [], payload).stdout.includes(PLACEHOLDER));
+});
+
 test('reap prunes the cached line of a session no longer on the bus', async () => {
   const e = statuslineEnv();
   await seedBus(e, 'kept');

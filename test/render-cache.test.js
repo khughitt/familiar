@@ -40,7 +40,7 @@ test('the key moves with every input it covers, and only with them', (t) => {
   const ledger = ledgerPaths(p.transmitDir, 's').entryPath;
   mkdirSync(dirname(ledger), { recursive: true });
   for (const write of [
-    () => writeFileSync(ledger, JSON.stringify({ seq: 1, held: { provisional: true } })),
+    () => writeFileSync(ledger, JSON.stringify({ seq: 1, held: { transport: 'direct' } })),
     () => writeFileSync(p.configPath, 'motion: off\n'),
     () => writeFileSync(p.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 })),
     () => writeFileSync(p.identitiesPath, 'identities: []\n'),
@@ -55,6 +55,17 @@ test('the key moves with every input it covers, and only with them', (t) => {
 test('an unparseable sessions file leaves the render unkeyed, for the renderer to report', (t) => {
   const { p } = fixture(t);
   writeFileSync(p.sessionsPath, '{not json');
+  assert.equal(renderKey({ paths: p, sessionId: 's', fields: FIELDS }), null);
+});
+
+test('a provisional or unparseable ledger leaves the render unkeyed, so its settle is retried', (t) => {
+  const { p, sessions } = fixture(t);
+  sessions({ s: { state: 'idle', updatedAt: 1 } });
+  const ledger = ledgerPaths(p.transmitDir, 's').entryPath;
+  mkdirSync(dirname(ledger), { recursive: true });
+  writeFileSync(ledger, JSON.stringify({ seq: 1, held: { provisional: true, transport: 'direct' } }));
+  assert.equal(renderKey({ paths: p, sessionId: 's', fields: FIELDS }), null);
+  writeFileSync(ledger, '{torn');
   assert.equal(renderKey({ paths: p, sessionId: 's', fields: FIELDS }), null);
 });
 
