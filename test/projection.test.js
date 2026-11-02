@@ -382,3 +382,38 @@ for (const { name, steps } of [
     previous = result.sessions;
   }
 });
+
+// The status line's agent token: the root row's own background count, before any folding.
+test('a root row\'s background agents ride on its session record', async () => {
+  const a = row('a', { background: { agents: 3, other: 1 } });
+  const admitted = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a) });
+  assert.deepEqual(admitted.sessions.sessions.a, session(a, { seq: 5, agents: 3 }));
+  const reconciled = await project({ snapshot: snapshot(a), prior: admitted.sessions, seq: 6 });
+  assert.equal(reconciled.sessions.sessions.a.agents, 3);
+});
+
+test('zero, missing, malformed background, and a worker\'s background add no agents key', async () => {
+  const backgrounds = [
+    { agents: 0, other: 2 }, undefined, null, { agents: -1, other: 0 }, { agents: 1.5, other: 0 },
+    { agents: '2', other: 0 }, { other: 1 },
+  ];
+  for (const background of backgrounds) {
+    const a = row('a', background === undefined ? {} : { background });
+    // A prior record that carried a count loses it once the row reports none.
+    const result = await project({ snapshot: snapshot(a), prior: prior(session(a, { agents: 2 })) });
+    assert.equal(Object.hasOwn(result.sessions.sessions.a, 'agents'), false, JSON.stringify(background));
+  }
+  const root = row('a');
+  const worker = row('worker', { scope: 'worker', root: root.id, background: { agents: 4, other: 0 } });
+  const result = await project({ snapshot: snapshot(root, worker), event: { sessionId: 'a' }, prepared: prepared(root) });
+  assert.equal(Object.hasOwn(result.sessions.sessions.a, 'agents'), false);
+});
+
+test('a worker newer than its root does not change the root\'s agents', async () => {
+  const root = row('a', { background: { agents: 3, other: 0 } });
+  const worker = row('worker', { scope: 'worker', root: root.id, state: 'needs-input', updatedAt: 3000,
+    background: { agents: 7, other: 0 } });
+  const result = await project({ snapshot: snapshot(root, worker), event: { sessionId: 'a' }, prepared: prepared(root) });
+  assert.equal(result.sessions.sessions.a.state, 'needs-input');
+  assert.equal(result.sessions.sessions.a.agents, 3);
+});

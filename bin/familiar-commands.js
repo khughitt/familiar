@@ -43,6 +43,7 @@ import { sweepTemps } from '../src/bus/temp-sweep.js';
 import { pruneRenders, renderCacheDir } from '../src/render/term/render-cache.js';
 import { composeForIntent } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
+import { pruneStatusline } from '../src/render/term/stagecache.js';
 import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capability.js';
 import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
@@ -146,6 +147,9 @@ export async function renderStatusline({ stdin, payload, wrapped, fields, at }) 
   const ctx = await context();
   const { sessions } = await readSessions(ctx.paths.sessionsPath);
   const record = sessionId ? sessions[sessionId] : undefined;
+  // The reported agents ride on the session's record, validated here; the front door's key
+  // holds that record raw, so a changed count is a miss.
+  if (fields !== null) fields = { ...fields, agents: record?.agents ?? null };
 
   // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
   // much of the wrapped text fits beside it. Resolve one session only: a broken config in
@@ -297,13 +301,22 @@ export async function reap({ deps: given }) {
     startTimeOf: renderProcess.startTimeOf, lockWith: deps.lockWith, now,
   });
   await pruneTerminalOwners({ transmitDir: paths.transmitDir, ownerAlive, lockWith: deps.lockWith });
+  const statusline = pruneStatusline({
+    stateDir: paths.stateDir, sessionIds: Object.keys(sessions), now: now(),
+    pidAlive: (pid) => renderProcess.pidExists(pid),
+  });
   const { removed: renders } = await pruneRenders({ stateDir: paths.stateDir, sessions });
   const { removed: swept } = await sweepTemps({
-    dirs: [paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals'),
-      renderCacheDir(paths.stateDir)],
+    dirs: [
+      paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals'),
+      renderCacheDir(paths.stateDir),
+      // The status line's session files (a render cancelled mid-write) and stage caches.
+      join(paths.stateDir, 'statusline'), join(paths.stateDir, 'statusline', 'tasks'),
+    ],
     pidExists: renderProcess.pidExists, now,
   });
   return { reaped, awaiting, ended, pruned: removed.length, renders: renders.length, swept: swept.length,
+    statusline,
     lines: lines.map((line) => line.replace(/^familiar: observe:/, 'familiar: reap:')) };
 }
 
@@ -594,13 +607,14 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
-    const { reaped, awaiting, ended, pruned, renders, swept } = result;
+    const { reaped, awaiting, ended, pruned, renders, swept, statusline } = result;
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     if (awaiting.length > 0) process.stdout.write(`awaiting ${awaiting.join(' ')}\n`);
     if (ended.length > 0) process.stdout.write(`ended ${ended.join(' ')}\n`);
     if (pruned > 0) process.stdout.write(`pruned ${pruned} transmission ledger(s)\n`);
     if (renders > 0) process.stdout.write(`pruned ${renders} cached status line(s)\n`);
     if (swept > 0) process.stdout.write(`swept ${swept} orphaned temp file(s)\n`);
+    if (statusline > 0) process.stdout.write(`pruned ${statusline} status line file(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Its output is

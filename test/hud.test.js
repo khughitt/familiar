@@ -3,7 +3,7 @@
 // compose() re-centres the shortened block. These tests exist to make that impossible.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hudLines, truncEnd, truncMiddle, CAPS, BUDGET, ABSENT } from '../src/render/term/hud.js';
+import { hudLines, truncEnd, truncMiddle, CAPS, BUDGET, ABSENT, SEP } from '../src/render/term/hud.js';
 import { width, strip, fg, BOLD } from '../src/render/term/sgr.js';
 import { identityColors } from '../src/theme/ramp.js';
 import { STATES } from 'familiar-theme';
@@ -399,6 +399,7 @@ test('with a claim, every state, tone and height stays inside the budget', () =>
   const fields = {
     project: 'p'.repeat(40), branch: 'b'.repeat(26), model: 'm'.repeat(120), usedPercent: 100,
     claim: { id: 'autonomy-c6c847', others: 9 },
+    stage: 'parked: ' + 'x'.repeat(60), agents: 12,
   };
   const fixtures = [
     { intent: null, fields },
@@ -416,4 +417,65 @@ test('with a claim, every state, tone and height stays inside the budget', () =>
       if (rows >= 2) assert.ok(strip(lines[0]).includes('(autonomy-c6c847 +9)'), `rows=${rows}`);
     }
   }
+});
+
+// --- the stage and the agent count -------------------------------------------
+
+const stateLine = (intent, extra) => hudLines({ intent, fields: { ...FIELDS, ...extra } })[3];
+
+test('with no stage and no agents the state slot is byte-identical', () => {
+  for (const tone of [DARK, LIGHT]) {
+    for (const state of STATES) {
+      const intent = intentFor(state, 0, tone);
+      for (const rows of [1, 2, 3, 4, 5]) {
+        const base = hudLines({ intent, fields: FIELDS, rows });
+        assert.deepEqual(hudLines({ intent, fields: { ...FIELDS, stage: null, agents: null }, rows }), base);
+        assert.deepEqual(hudLines({ intent, fields: { ...FIELDS, stage: undefined, agents: 0 }, rows }), base);
+      }
+    }
+  }
+});
+
+test('the stage follows the state after a middle dot', () => {
+  assert.equal(SEP, ' · ');
+  assert.equal(strip(stateLine(intentFor('working', 0, DARK), { stage: 'designed' })), '▎ ⚡ working · designed');
+});
+
+test('agents read as a count', () => {
+  const at = (agents) => strip(stateLine(intentFor('working', 0, DARK), { agents }));
+  assert.equal(at(1), '▎ ⚡ working · 1 agent');
+  assert.equal(at(2), '▎ ⚡ working · 2 agents');
+  for (const none of [0, -1, 1.5, '2']) assert.equal(at(none), '▎ ⚡ working', String(none));
+});
+
+test('stage and agents together', () => {
+  assert.equal(
+    strip(stateLine(intentFor('working', 0, DARK), { stage: 'parked: review', agents: 3 })),
+    '▎ ⚡ working · parked: review · 3 agents',
+  );
+});
+
+test('an absent state still shows the stage', () => {
+  assert.equal(strip(stateLine(null, { stage: 'doing' })), '▎ — · doing');
+});
+
+test('the tokens take the dim stop and the state keeps its pen', () => {
+  const intent = { ...intentFor('error', 0, DARK), urgency: 'demand' };
+  const line = stateLine(intent, { stage: 'designed' });
+  assert.ok(line.includes(fg(intent.color.shadow) + ' · designed'), JSON.stringify(line));
+  assert.ok(line.includes(BOLD + fg(intent.color.highlight) + '✕ error'), JSON.stringify(line));
+});
+
+test('a long stage is cut, never the agents', () => {
+  const line = stateLine(intentFor('working', 0, DARK), { stage: 'parked: ' + 'r'.repeat(80), agents: 12 });
+  assert.ok(width(line) <= BUDGET);
+  assert.ok(strip(line).endsWith('· 12 agents'), strip(line));
+  assert.ok(strip(line).includes('…'));
+});
+
+test('the stage is sanitised', () => {
+  const line = stateLine(null, { stage: 'a\nb\x1b[31m' });
+  assert.ok(!line.includes('\n'));
+  assert.ok(!strip(line).includes('\x1b'));
+  assert.ok(!line.includes('\x1b[31m'));
 });

@@ -2,7 +2,7 @@ import { emitTransition } from '../src/observe/emission.js';
 import { applyEvent, readSnapshot, reapRegistry, paths as relayPaths, createProcessOps as relayProcessOps } from 'relay';
 import { observe } from '../src/observe/run.js';
 import { loadContext } from '../src/observe/context.js';
-import { readSessions } from '../src/bus/sessions.js';
+import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
 import * as nodeModule from 'node:module';
@@ -23,6 +23,9 @@ import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { displayProject } from '../src/bus/identity.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
+import { parkStorePath } from '../src/render/term/stagerefresh.js';
+import { cachePaths, mtimeStamp } from '../src/render/term/stagecache.js';
+import { sessionFilePath } from '../src/render/term/stagesession.js';
 import { RENDER_TTL_MS, renderCacheDir, renderCachePath } from '../src/render/term/render-cache.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
@@ -66,6 +69,35 @@ function env(over = {}) {
     FAMILIAR_THEMES_DIR: shippedThemesFixture,
     ...over,
   };
+}
+
+// A status line render can start the detached stage refresher, which runs `tasks` and
+// flow-state (under HOME) with the render's own environment. So every statusline test runs
+// with an env built key by key, never a copy of process.env: HOME and XDG_STATE_HOME are
+// test-owned, git is kept off the host's config, and `tasks` is a fake (the suite's own,
+// unless a test brings its own bin dir). Node's directory is on PATH for that fake's shebang.
+const suiteFakeTasks = fileURLToPath(new URL('fixtures/fake-tasks', import.meta.url));
+function isolatedEnv({ root = mkdtempSync(join(tmpdir(), 'familiar-isolated-')), bin: fakeBin = suiteFakeTasks } = {}) {
+  const dirs = { home: join(root, 'home'), xdgState: join(root, 'xdg-state'), config: join(root, 'config'), state: join(root, 'state') };
+  for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
+  return {
+    PATH: `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: dirs.home, XDG_STATE_HOME: dirs.xdgState,
+    FAMILIAR_CONFIG_DIR: dirs.config, FAMILIAR_STATE_DIR: dirs.state, RELAY_STATE_DIR: join(dirs.state, 'relay'),
+    FAMILIAR_THEMES_DIR: shippedThemesFixture, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+  };
+}
+
+// Waits (at most 5 s) until every refresher a render started is done: each expected cache is
+// written and no refresher lock remains. A test that lets one run calls this before teardown.
+async function awaitRefreshers(stateDir, tasks) {
+  const files = tasks.map(([id, worktree]) => cachePaths(stateDir, id, worktree).file);
+  const locksDir = join(stateDir, 'statusline', 'tasks');
+  const done = () => files.every((file) => existsSync(file))
+    && !(existsSync(locksDir) && readdirSync(locksDir).some((name) => name.endsWith('.lock')));
+  for (let waited = 0; !done() && waited < 5000; waited += 50) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.ok(done(), `a refresher is still running under ${stateDir}`);
 }
 
 test('setup claude-code prints exact JSON without reading configuration', () => {
@@ -314,7 +346,7 @@ test('removed hook and setup codex commands are usage errors before state work',
 
 test('statusline keeps malformed input cosmetic', () => {
   const result = spawnSync(process.execPath, [bin, 'statusline'], {
-    input: '{not json', encoding: 'utf8', env: env(),
+    input: '{not json', encoding: 'utf8', env: isolatedEnv(),
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
@@ -431,7 +463,7 @@ test('reap prunes a dead relay agent and reconciles even when nothing was pruned
   await f.admit();
   await f.publish(f.event('prompt'));
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'idle');
-  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0, lines: [] });
+  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0, statusline: 0, lines: [] });
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'working');
   await f.publish(f.event('prompt'), { ...f.handle, start: String(BigInt(f.handle.start) + 1n) });
   const result = await f.run();
@@ -448,7 +480,7 @@ test('reap lists registry agents awaiting their first event in JSON and pretty o
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, '');
     if (args[0] === '--json') assert.deepEqual(JSON.parse(result.stdout), {
-      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, renders: 0, swept: 0,
+      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, renders: 0, swept: 0, statusline: 0,
     });
     else assert.equal(result.stdout, 'awaiting reap-session\n');
   }
@@ -486,6 +518,77 @@ test('reap reports removed ended evidence in pretty output', async (t) => {
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, 'ended reap-session\n');
   assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+});
+
+test('reap removes statusline files of sessions that are gone', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const stateDir = f.p.stateDir;
+  const old = (Date.now() - 2 * 600_000) / 1000;
+  const writeJson = (path, value, mtime) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(value));
+    if (mtime !== undefined) utimesSync(path, mtime, mtime);
+  };
+  const sessionFile = (sid, taskId, worktree) => {
+    const path = sessionFilePath(stateDir, sid);
+    writeJson(path, { taskId, worktree, seenAt: '2026-11-01T00:00:00Z' });
+    return path;
+  };
+  const cacheFile = (taskId, worktree, mtime) => {
+    const paths = cachePaths(stateDir, taskId, worktree);
+    writeJson(paths.file, { taskId, worktree, stage: 'done' }, mtime);
+    return paths;
+  };
+  const live = sessionFile('reap-session', 'fam-aaaaaa', '/w/live');
+  const gone = sessionFile('gone-session', 'fam-bbbbbb', '/w/gone');
+  const named = cacheFile('fam-aaaaaa', '/w/live', old);            // old, but a live session names it
+  const unnamed = cacheFile('fam-bbbbbb', '/w/gone', old);          // old and named by no remaining file
+  writeJson(unnamed.lock, { pid: 1, at: new Date(Date.now() - 3_600_000).toISOString() });
+  const young = cacheFile('fam-cccccc', '/w/young');                // within the ceiling
+  const held = cacheFile('fam-dddddd', '/w/held', old);             // a live refresher holds its lock
+  writeJson(held.lock, { pid: process.pid, at: new Date().toISOString() });
+
+  const result = await f.run();
+  assert.equal(result.statusline, 3);
+  assert.equal(existsSync(gone), false);
+  assert.equal(existsSync(unnamed.file), false);
+  assert.equal(existsSync(unnamed.lock), false);
+  for (const kept of [live, named.file, young.file, held.file, held.lock]) assert.equal(existsSync(kept), true, kept);
+
+  assert.equal((await f.run()).statusline, 0, 'nothing left to prune');
+
+  // The pretty output names the removals, like the ledgers and temps beside it.
+  sessionFile('another-gone', 'fam-eeeeee', '/w/another');
+  const home = mkdtempSync(join(tmpdir(), 'familiar-reap-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const cli = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: {
+    PATH: '/usr/bin:/bin', HOME: home, FAMILIAR_CONFIG_DIR: f.e.FAMILIAR_CONFIG_DIR,
+    FAMILIAR_STATE_DIR: f.e.FAMILIAR_STATE_DIR, RELAY_STATE_DIR: f.e.RELAY_STATE_DIR,
+    FAMILIAR_THEMES_DIR: f.e.FAMILIAR_THEMES_DIR,
+  } });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.match(cli.stdout, /^pruned 1 status line file\(s\)$/m);
+});
+
+test('reap sweeps a dead writer\'s temps from the status line\'s session and cache dirs', async (t) => {
+  const f = reapFixture(t);
+  const dead = 999_999_999;
+  f.deps.renderProcess.pidExists = (pid) => pid !== dead;
+  const uuid = '0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44';
+  const session = `${sessionFilePath(f.p.stateDir, 'some-session')}.tmp.${dead}.${uuid}`;
+  const cache = `${cachePaths(f.p.stateDir, 'fam-aaaaaa', '/w').file}.tmp.${dead}.${uuid}`;
+  const live = `${cachePaths(f.p.stateDir, 'fam-bbbbbb', '/w').file}.tmp.${process.pid}.${uuid}`;
+  for (const path of [session, cache, live]) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '');
+  }
+  const result = await f.run();
+  assert.equal(result.swept, 2);
+  assert.equal(result.statusline, 0, 'a temp is not a session file or a cache');
+  assert.equal(existsSync(session), false);
+  assert.equal(existsSync(cache), false);
+  assert.equal(existsSync(live), true, 'a live writer\'s fresh temp stays');
 });
 
 // A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
@@ -589,7 +692,7 @@ test('reap accepts an absent relay directory and reconciles to no sessions', asy
   const result = spawnSync(process.execPath, [bin, '--json', 'reap'], { encoding: 'utf8', env: f.e });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0 });
+  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0, statusline: 0 });
   assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
 });
 
@@ -666,7 +769,7 @@ test('statusline with --with and NO intent prints the wrapped output in full —
   // is the wrapped status line ALONE and IN FULL: there is no cat to fit it against, so
   // nothing is dropped. The old code fitted it to a 4-row cat that did not exist, truncating
   // at line 4.
-  const e = env();
+  const e = isolatedEnv();
   // Without a scheme, context() throws before we reach the no-intent branch — seed it, exactly
   // as the preview tests do.
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
@@ -699,7 +802,7 @@ test('statusline with --with and NO intent prints the wrapped output in full —
 // never once locally. A megabyte makes the parent lose the race every time, so this pins
 // the contract instead of sampling it.
 test('statusline --with renders a wrapped command that never reads its stdin', () => {
-  const e = env();
+  const e = isolatedEnv();
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
   assert.equal(seed.status, 0, seed.stderr);
 
@@ -721,7 +824,7 @@ test('statusline --with renders a wrapped command that never reads its stdin', (
 // is a COSMETIC command, so the report is one stderr line and an exit-zero protocol kept
 // intact; what must not happen is the failure passing silently, or being named EPIPE.
 test('statusline --with reports a failing wrapped command, not its undrained stdin', () => {
-  const e = env();
+  const e = isolatedEnv();
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
   assert.equal(seed.status, 0, seed.stderr);
 
@@ -743,7 +846,7 @@ test('statusline --with reports a failing wrapped command, not its undrained std
 });
 
 test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', async () => {
-  const e = env();
+  const e = isolatedEnv();
   mkdirSync(e.FAMILIAR_CONFIG_DIR, { recursive: true });
   mkdirSync(e.FAMILIAR_STATE_DIR, { recursive: true });
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
@@ -1366,7 +1469,7 @@ test('pets writes explicit Codex tracks without changing either Codex selection'
 // ONE env for both commands. env() mints a fresh temp config dir per call, so calling it
 // twice would write the scheme into a directory the status line never reads.
 function statuslineEnv() {
-  const e = env();
+  const e = isolatedEnv();
   const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], {
     encoding: 'utf8', env: e,
   });
@@ -1519,9 +1622,9 @@ test('statusline names the task its session has claimed, on and off the bus', as
   const e = statuslineEnv();
   await seedBus(e, 'claimed');
   e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
-    { id: 'fam-ff5351', session: 'claimed', started: '2026-10-26T00:38:48Z', live: true },
-    { id: 'fam-aaaaaa', session: 'claimed', started: '2026-10-25T00:00:00Z', live: true },
-    { id: 'fam-bbbbbb', session: 'not-on-the-bus', started: '2026-10-25T00:00:00Z', live: true },
+    { id: 'fam-ff5351', session: 'claimed', started: '2026-10-26T00:38:48Z', worktree: '/w', live: true },
+    { id: 'fam-aaaaaa', session: 'claimed', started: '2026-10-25T00:00:00Z', worktree: '/w', live: true },
+    { id: 'fam-bbbbbb', session: 'not-on-the-bus', started: '2026-10-25T00:00:00Z', worktree: '/w', live: true },
     { id: 'fam-cccccc', session: 'claimed', started: '2026-10-27T00:00:00Z', live: false },
   ] });
   const render = (sessionId) => {
@@ -1533,6 +1636,7 @@ test('statusline names the task its session has claimed, on and off the bus', as
   assert.match(render('claimed'), /\(fam-ff5351 \+1\)/);
   assert.match(render('not-on-the-bus'), /\(fam-bbbbbb\)/);
   assert.doesNotMatch(render('nobody'), /\(fam-/);
+  await awaitRefreshers(e.FAMILIAR_STATE_DIR, [['fam-ff5351', '/w'], ['fam-bbbbbb', '/w']]);
 });
 
 // agy 1.4.12's status line, as recorded by fam-93c939: Claude Code's shape, with the
@@ -1577,8 +1681,8 @@ test('agy\'s status line names the task its conversation has claimed', async () 
   const e = statuslineEnv();
   const payload = agyStdin();
   e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
-    { id: 'fam-de2ffc', session: `agy:${payload.session_id}`, started: '2026-11-01T00:00:00Z', live: true },
-    { id: 'fam-aaaaaa', session: payload.session_id, started: '2026-11-01T00:00:00Z', live: true },
+    { id: 'fam-de2ffc', session: `agy:${payload.session_id}`, started: '2026-11-01T00:00:00Z', worktree: '/w', live: true },
+    { id: 'fam-aaaaaa', session: payload.session_id, started: '2026-11-01T00:00:00Z', worktree: '/w', live: true },
   ] });
   const render = (input) => {
     const result = statusline(e, [], input);
@@ -1590,6 +1694,7 @@ test('agy\'s status line names the task its conversation has claimed', async () 
   // The same UUID from Claude Code (no product) is a different session's claim.
   assert.match(render({ session_id: payload.session_id, cwd: process.cwd() }), /\(fam-aaaaaa\)/);
   assert.doesNotMatch(render(agyStdin({ session_id: '', conversation_id: '' })), /\(fam-/);
+  await awaitRefreshers(e.FAMILIAR_STATE_DIR, [['fam-de2ffc', '/w'], ['fam-aaaaaa', '/w']]);
 });
 
 test('statusline still honours --with, unchanged', () => {
@@ -1630,6 +1735,322 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /custom/);
   assert.equal(existsSync(marker), false, 'the wrapped path invoked git while collecting unused HUD fields');
+});
+
+// --- the task stage and reported agents --------------------------------------
+//
+// Every subprocess here (the status line, the refresher it spawns, the fake `tasks` and
+// flow-state) runs with an env built key by key: no inherited variable, HOME and the park
+// store's XDG_STATE_HOME under a test-owned root, and git kept off the host's config.
+
+const STAGE_ID = 'fam-8f0f2b';
+const stageFakeTasks = (root) => `#!/bin/sh
+printf '%s\\n' "$*" >> '${root}/tasks.log'
+case "$*" in
+  "claims --json") cat '${root}/claims.json' ;;
+  "where --json") printf '%s' '{"project":{"prefix":"fam","records":"${root}/records"}}' ;;
+  "show ${STAGE_ID} --json") printf '%s' '{"task":{"id":"${STAGE_ID}","status":"doing"}}' ;;
+  "list --parked --json") printf '%s' '{"tasks":[]}' ;;
+  *) echo "unexpected: $*" >&2; exit 64 ;;
+esac
+`;
+const stageFakeFlow = (root) => `#!/bin/sh
+printf '%s\\n' "flow-state $*" >> '${root}/tasks.log'
+printf '%s' '{"state":"outside"}'
+`;
+
+function stageFixture(t) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-stage-cli-')));
+  const dirs = {
+    bin: join(root, 'bin'), home: join(root, 'home'), xdgState: join(root, 'xdg-state'),
+    tasksDir: join(root, 'records', 'tasks'), worktree: join(root, 'worktree'),
+    config: join(root, 'config'), state: join(root, 'state'),
+  };
+  const flowDir = join(dirs.home, '.agents', 'bin');
+  for (const dir of [...Object.values(dirs), flowDir]) mkdirSync(dir, { recursive: true });
+  t.after(() => {
+    for (const dir of [dirs.state, join(dirs.state, 'statusline')]) if (existsSync(dir)) chmodSync(dir, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(join(dirs.bin, 'tasks'), stageFakeTasks(root), { mode: 0o755 });
+  writeFileSync(join(flowDir, 'flow-state'), stageFakeFlow(root), { mode: 0o755 });
+  writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [] }));
+  const e = isolatedEnv({ root, bin: dirs.bin });
+  const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
+  assert.equal(seeded.status, 0, `scheme set failed: ${seeded.stderr}`);
+  const claim = (session, id = STAGE_ID) => writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [
+    { id, session, started: '2026-11-01T00:00:00Z', worktree: dirs.worktree, live: true },
+  ] }));
+  const cache = cachePaths(dirs.state, STAGE_ID, dirs.worktree);
+  const writeFreshCache = (stage) => {
+    const parkStore = parkStorePath('fam', e);
+    mkdirSync(dirname(cache.file), { recursive: true });
+    writeFileSync(cache.file, JSON.stringify({
+      taskId: STAGE_ID, worktree: dirs.worktree,
+      tasksDir: dirs.tasksDir, tasksDirMtimeNs: mtimeStamp(dirs.tasksDir),
+      parkStore, parkStoreMtimeNs: mtimeStamp(parkStore),
+      stage, fault: null, refreshedAt: new Date().toISOString(),
+    }));
+  };
+  const log = () => (existsSync(join(root, 'tasks.log'))
+    ? readFileSync(join(root, 'tasks.log'), 'utf8').trim().split('\n') : []);
+  // The payload's cwd is the claim's worktree, which is no repository: no branch, no git write.
+  const render = (sessionId) => {
+    const result = statusline(e, [], { session_id: sessionId, cwd: dirs.worktree });
+    assert.equal(result.status, 0, result.stderr);
+    return { stateRow: strip(result.stdout).trimEnd().split('\n').at(-1), stdout: strip(result.stdout), stderr: result.stderr };
+  };
+  return { root, dirs, e, claim, cache, writeFreshCache, log, render };
+}
+
+// Each render runs twice: a miss (no line cached yet) and then a hit (the render cache's
+// SENTINEL, planted under the same key, is what prints). The stage and the refresher are read
+// in the front door, before the render cache is looked up, so both paths obey the same rules.
+test('statusline shows the cached stage and runs nothing but tasks claims, on a render-cache miss and hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'staged');
+  f.claim('staged');
+  f.writeFreshCache('designed');
+  for (const sid of ['staged', 'not-on-the-bus']) {
+    if (sid === 'not-on-the-bus') f.claim(sid);
+    for (const path of ['miss', 'hit']) {
+      if (path === 'hit') plantSentinel(f.e, sid);
+      rmSync(join(f.root, 'tasks.log'), { force: true });
+      const { stateRow, stdout, stderr } = f.render(sid);
+      assert.equal(stderr, '');
+      if (path === 'miss') {
+        assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+        assert.ok(stateRow.endsWith(' · designed'), JSON.stringify(stateRow));
+      } else {
+        assert.equal(stdout, SENTINEL, `${sid}: the second poll is a hit`);
+      }
+      assert.deepEqual(f.log(), ['claims --json'], `${sid} ${path}: a fresh cache starts no refresher`);
+    }
+  }
+});
+
+// Review C1: a stage that changes between two polls, with every other input unchanged, is a
+// changed key and so a changed line, never the cached one.
+test('a stage change between two polls changes the line on what would be a render-cache hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'changing');
+  f.claim('changing');
+  f.writeFreshCache('designed');
+  assert.ok(f.render('changing').stateRow.endsWith(' · designed'));
+  plantSentinel(f.e, 'changing');
+  assert.equal(f.render('changing').stdout, SENTINEL, 'an unchanged poll is a hit');
+  f.writeFreshCache('reviewed');
+  const { stateRow, stdout, stderr } = f.render('changing');
+  assert.equal(stderr, '');
+  assert.notEqual(stdout, SENTINEL);
+  assert.ok(stateRow.endsWith(' · reviewed'), JSON.stringify(stateRow));
+  assert.deepEqual(f.log(), ['claims --json', 'claims --json', 'claims --json'], 'no refresher on any poll');
+});
+
+// Spec goal 3, end to end through the front door: a task the session showed stays on the line
+// once its claim is released, from the session file, with its stage from a fresh cache. The
+// live line counts a second, older claim (+1); the released line names only the recorded task.
+test('a released claim stays on the line with its cached stage, on a render-cache miss and hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'released');
+  writeFileSync(join(f.root, 'claims.json'), JSON.stringify({ claims: [
+    { id: STAGE_ID, session: 'released', started: '2026-11-01T00:00:00Z', worktree: f.dirs.worktree, live: true },
+    { id: 'fam-000001', session: 'released', started: '2026-10-31T00:00:00Z', worktree: f.dirs.worktree, live: true },
+  ] }));
+  f.writeFreshCache('designed');
+  const live = f.render('released');
+  assert.equal(live.stderr, '');
+  assert.match(live.stdout, new RegExp(`\\(${STAGE_ID} \\+1\\)`));
+  assert.ok(existsSync(sessionFilePath(f.dirs.state, 'released')), 'the live claim was recorded');
+
+  writeFileSync(join(f.root, 'claims.json'), JSON.stringify({ claims: [] }));
+  f.writeFreshCache('closed');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const released = f.render('released');
+  assert.equal(released.stderr, '');
+  assert.match(released.stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.doesNotMatch(released.stdout, new RegExp(`${STAGE_ID} \\+`), 'a recorded task counts no other claims');
+  assert.ok(released.stateRow.endsWith(' · closed'), JSON.stringify(released.stateRow));
+
+  plantSentinel(f.e, 'released');
+  assert.equal(f.render('released').stdout, SENTINEL, 'an unchanged released line is a hit');
+  assert.deepEqual(f.log(), ['claims --json', 'claims --json'], 'a fresh cache starts no refresher');
+});
+
+test('statusline with no claim, no cache and no agents is unchanged', async (t) => {
+  const f = stageFixture(t);
+  assert.equal(f.render('not-on-the-bus').stateRow, '▎ —');
+  await seedBus(f.e, 'plain');
+  const { stateRow, stderr } = f.render('plain');
+  assert.equal(stderr, '');
+  assert.match(stateRow, /⚡ working$/);
+  assert.doesNotMatch(stateRow, /·/);
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'no task, no session file');
+});
+
+test('a seeded session\'s reported agents reach the line', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'busy');
+  const { sessionsPath } = paths(f.e);
+  const value = await readSessions(sessionsPath);
+  value.sessions.busy.agents = 2;
+  await writeSessions(sessionsPath, value);
+  const { stateRow, stderr } = f.render('busy');
+  assert.equal(stderr, '');
+  assert.ok(stateRow.endsWith('⚡ working · 2 agents'), JSON.stringify(stateRow));
+  // The count rides on the bus record, which the render key holds raw: a new count is a miss.
+  plantSentinel(f.e, 'busy');
+  assert.equal(f.render('busy').stdout, SENTINEL, 'an unchanged poll is a hit');
+  value.sessions.busy.agents = 3;
+  await writeSessions(sessionsPath, value);
+  const changed = f.render('busy');
+  assert.equal(changed.stderr, '');
+  assert.ok(changed.stateRow.endsWith('⚡ working · 3 agents'), JSON.stringify(changed.stateRow));
+});
+
+// The refresher a stale stage cache starts, on a render-cache miss and on a hit. On the hit the
+// stage cache already exists, so this waits for the refresher to rewrite it (a new refreshedAt)
+// and release its lock.
+async function awaitRewrite(f, before) {
+  const locksDir = dirname(f.cache.lock);
+  const done = () => JSON.parse(readFileSync(f.cache.file, 'utf8')).refreshedAt !== before
+    && !readdirSync(locksDir).some((name) => name.endsWith('.lock'));
+  for (let waited = 0; !done() && waited < 5000; waited += 50) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.ok(done(), 'the refresher did not rewrite the stage cache');
+}
+
+test('a stale cache is refreshed in the background, on a render-cache miss and hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'refreshing');
+  f.claim('refreshing');
+  const first = f.render('refreshing');
+  assert.equal(first.stderr, '');
+  assert.ok(first.stateRow.endsWith(' · —'), JSON.stringify(first.stateRow));
+  await awaitRefreshers(f.dirs.state, [[STAGE_ID, f.dirs.worktree]]);
+  const second = f.render('refreshing');
+  assert.equal(second.stderr, '');
+  assert.ok(second.stateRow.endsWith(' · doing'), JSON.stringify(second.stateRow));
+  assert.ok(f.log().includes(`flow-state ${STAGE_ID} --json --no-git`), 'the refresher found flow-state under HOME');
+
+  // The hit: a record write moves the tasks dir's stamp, the stage the cache holds is unchanged,
+  // so the render key is too. The cached line prints, and the refresher still starts.
+  plantSentinel(f.e, 'refreshing');
+  const before = JSON.parse(readFileSync(f.cache.file, 'utf8')).refreshedAt;
+  writeFileSync(join(f.dirs.tasksDir, 'fam-000000.md'), '');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const third = f.render('refreshing');
+  assert.equal(third.stderr, '');
+  assert.equal(third.stdout, SENTINEL, 'an unchanged stage is a render-cache hit');
+  await awaitRewrite(f, before);
+  assert.deepEqual(f.log(), ['claims --json', 'where --json', `show ${STAGE_ID} --json`, 'list --parked --json',
+    `flow-state ${STAGE_ID} --json --no-git`]);
+});
+
+// Review M1, end to end: a cache whose fault is not a string paints the line with — and one
+// warning, never a blank line.
+test('a stage cache with a non-string fault still paints the claim and warns', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'odd-fault');
+  f.claim('odd-fault');
+  f.writeFreshCache('designed');
+  writeFileSync(f.cache.file, JSON.stringify({ ...JSON.parse(readFileSync(f.cache.file, 'utf8')), fault: { code: 1 } }));
+  const before = readFileSync(f.cache.file, 'utf8');
+  // A refresher lock this test holds keeps the render from starting one.
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`;
+  writeFileSync(f.cache.lock, held);
+  const { stdout, stateRow, stderr } = f.render('odd-fault');
+  assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.ok(stateRow.endsWith(' · —'), JSON.stringify(stateRow));
+  assert.match(stderr, /^familiar: statusline: stage cache .*: not the cache shape\n$/);
+  assert.equal(readFileSync(f.cache.file, 'utf8'), before);
+  assert.equal(readFileSync(f.cache.lock, 'utf8'), held, 'no refresher took the lock');
+});
+
+// Review Focus 2, end to end: the session file cannot be written, the line still paints.
+// A refresher lock this test process holds keeps the render from starting one, so nothing
+// can still be running when the fixture is torn down.
+test('an unwritable state dir still paints the claim and warns', async (t) => {
+  const f = stageFixture(t);
+  f.claim('read-only');
+  mkdirSync(dirname(f.cache.lock), { recursive: true });
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`;
+  writeFileSync(f.cache.lock, held);
+  chmodSync(join(f.dirs.state, 'statusline'), 0o555);
+  chmodSync(f.dirs.state, 0o555);
+  const { stdout, stateRow, stderr } = f.render('read-only');
+  assert.equal(readFileSync(f.cache.lock, 'utf8'), held, 'no refresher took the lock');
+  assert.equal(existsSync(f.cache.file), false);
+  assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.equal(stateRow, '▎ — · —');
+  assert.match(stderr, /^familiar: statusline: session file .*EACCES/m);
+  // The one other line is the render cache's own write, after the line was printed, which the
+  // CLI boundary reports as a cosmetic fault.
+  const others = stderr.trimEnd().split('\n').filter((line) => !line.startsWith('familiar: statusline: '));
+  assert.deepEqual(others.map((line) => /^familiar: EACCES: .*statusline-render/.test(line)), [true], stderr);
+});
+
+test('a claim whose id is not a task id still paints, with a warning and no refresher', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'odd-claim');
+  for (const sid of ['odd-claim', 'not-on-the-bus']) {
+    f.claim(sid, 'BAD_ID');
+    rmSync(join(f.root, 'tasks.log'), { force: true });
+    const { stdout, stateRow, stderr } = f.render(sid);
+    assert.match(stdout, /\(BAD_ID\)/);
+    assert.ok(stateRow.endsWith(' · —'), JSON.stringify(stateRow));
+    assert.equal(stderr, 'familiar: statusline: stage cache: not a task id: "BAD_ID"\n');
+    assert.deepEqual(f.log(), ['claims --json']);
+  }
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'nothing recorded, nothing cached');
+});
+
+// The spec's cold cost gate, as what a render-cache hit loads. A session with no live claim
+// and no session file loads stagesession.js and none of the stage reader's modules; one with
+// a task loads the stage reader, and never the refresher's graph or the HUD's.
+function tracedStatusline(t, e, payload) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-imports-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const trace = join(dir, 'trace.txt');
+  writeFileSync(trace, '');
+  const result = spawnSync(process.execPath, ['--import', traceHook, bin, 'statusline'], {
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...e, FAMILIAR_TRACE_IMPORTS: trace },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return { result, loaded: readFileSync(trace, 'utf8').split('\n').filter(Boolean) };
+}
+const termModule = (name) => (url) => url.endsWith(`/src/render/term/${name}`);
+
+test('a render-cache hit with no task loads only the session-file check', { skip: traceSkip }, async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'taskless');
+  f.render('taskless');
+  plantSentinel(f.e, 'taskless');
+  const { result, loaded } = tracedStatusline(t, f.e, { session_id: 'taskless', cwd: f.dirs.worktree });
+  assert.equal(result.stdout, SENTINEL);
+  assert.equal(result.stderr, '');
+  const stage = ['stagecache.js', 'stagerefresh.js', 'stage.js', 'absent.js', 'hud.js'];
+  assert.deepEqual(loaded.filter((url) => stage.some((name) => termModule(name)(url))), []);
+  assert.ok(loaded.some(termModule('stagesession.js')), 'the trace saw the session-file check');
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'no task, no session file');
+});
+
+test('a render-cache hit with a task loads the stage reader, not the refresher or the HUD', { skip: traceSkip }, async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'tasked');
+  f.claim('tasked');
+  f.writeFreshCache('designed');
+  f.render('tasked');
+  plantSentinel(f.e, 'tasked');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const { result, loaded } = tracedStatusline(t, f.e, { session_id: 'tasked', cwd: f.dirs.worktree });
+  assert.equal(result.stdout, SENTINEL);
+  assert.equal(result.stderr, '');
+  const heavy = ['stagerefresh.js', 'stage.js', 'hud.js'];
+  assert.deepEqual(loaded.filter((url) => heavy.some((name) => termModule(name)(url))), []);
+  assert.ok(loaded.some(termModule('stagecache.js')), 'the trace saw the stage read');
+  assert.deepEqual(f.log(), ['claims --json'], 'a fresh cache starts no refresher');
 });
 
 // --- decay -----------------------------------------------------------------
@@ -2067,7 +2488,10 @@ test('the observer writes tasks warnings to stderr and still records the session
 });
 
 test('the status line paints the label in the colour its record carries', async () => {
-  const e = pinned('identities: []\n');
+  const e = isolatedEnv();
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'identities: []\n');
   e.FAKE_TASKS_LOG = join(e.FAMILIAR_STATE_DIR, 'tasks.log');
   await seedBus(e, 's1', { cwd: '/tmp/api', projectColor: '#317d01' });
   const r = spawnSync(process.execPath, [bin, 'statusline'], {
