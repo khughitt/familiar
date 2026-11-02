@@ -35,7 +35,8 @@ function validSession(value, key) {
     && text(value.cwd) && value.cwd === value.basis.cwd && text(value.projectKey)
     && nullableText(value.remote) && nullableText(value.repoRoot)
     && nullableText(value.repositoryRoot) && nullableText(value.projectColor)
-    && STATES.includes(value.state) && integer(value.updatedAt);
+    && STATES.includes(value.state) && integer(value.updatedAt)
+    && (value.agents === undefined || (integer(value.agents) && value.agents > 0));
 }
 
 export async function readSessions(path) {

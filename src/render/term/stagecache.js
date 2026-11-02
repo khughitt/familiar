@@ -3,7 +3,7 @@
 // spawn that refresher when the cache is stale. Everything here is synchronous and on the
 // render path: file reads, two stats, and at most one detached spawn.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ABSENT } from './hud.js';
@@ -122,4 +122,77 @@ export function readStage({ stateDir, task, cwd, now, spawnRefresher = defaultSp
   }
   if (!held) spawnRefresher({ taskId: task.id, worktree: task.worktree, cwd });
   return result;
+}
+
+function listDir(dir) {
+  try {
+    return readdirSync(dir);
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+function removeIfPresent(path) {
+  try {
+    unlinkSync(path);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+// The cache file a session file names, or null when it names none (it does not parse, or is
+// not the { taskId, worktree } shape the render would show).
+function namedCache(stateDir, path) {
+  let recorded;
+  try {
+    recorded = readJsonOrNull(path);
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+  if (typeof recorded?.taskId !== 'string' || typeof recorded.worktree !== 'string') return null;
+  try {
+    return cachePaths(stateDir, recorded.taskId, recorded.worktree).file;
+  } catch {
+    return null;
+  }
+}
+
+// `familiar reap`'s share. A session file goes once its session is not among `sessionIds` (the
+// bus's sessions). A cache goes once it is past STAGE_CEILING_MS and no remaining session file
+// names it, together with its lock, unless a live refresher holds that lock. Returns the
+// number of files removed.
+export function pruneStatusline({ stateDir, sessionIds, now, pidAlive }) {
+  const dir = join(stateDir, 'statusline');
+  const live = new Set(sessionIds.map(ledgerName));
+  const named = new Set();
+  let removed = 0;
+  for (const name of listDir(dir)) {
+    if (!name.endsWith('.json')) continue;
+    const path = join(dir, name);
+    if (!live.has(name.slice(0, -'.json'.length))) {
+      if (removeIfPresent(path)) removed += 1;
+      continue;
+    }
+    const file = namedCache(stateDir, path);
+    if (file !== null) named.add(file);
+  }
+
+  const tasksDir = join(dir, 'tasks');
+  const stems = new Set(listDir(tasksDir)
+    .filter((name) => /\.(json|lock)$/.test(name))
+    .map((name) => join(tasksDir, name.replace(/\.(json|lock)$/, ''))));
+  for (const stem of stems) {
+    const file = `${stem}.json`;
+    const lock = `${stem}.lock`;
+    if (named.has(file)) continue;
+    const mtimeMs = statSync(file, { throwIfNoEntry: false })?.mtimeMs;
+    if (mtimeMs !== undefined && !outOfWindow(now - mtimeMs, STAGE_CEILING_MS)) continue;
+    if (lockHeld(lock, now, pidAlive)) continue;
+    for (const path of [file, lock]) if (removeIfPresent(path)) removed += 1;
+  }
+  return removed;
 }

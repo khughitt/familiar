@@ -132,15 +132,25 @@ export function claimSession(data) {
   return data.product === 'antigravity' ? `agy:${data.session_id}` : data.session_id;
 }
 
-export function readFields(payload, { git = gitBranch, claim = claimedTask } = {}) {
+// THE TASK AND ITS STAGE ARE INJECTED. `taskOf` turns the live claim into the line's task (the
+// status line passes the one that keeps a released task, stagecache.js); `stageOf` reads that
+// task's cached stage. `agents` is the count on the session's bus record. The defaults are the
+// line without any of them: the live claim, no stage, no agent token.
+export function readFields(payload, {
+  git = gitBranch, claim = claimedTask, taskOf = (live) => live, stageOf = () => null, agents = null,
+} = {}) {
   const data = payload ?? {};
   const cwd = data.workspace?.current_dir ?? data.cwd ?? process.cwd();
   const pct = data.context_window?.used_percentage;
+  const branch = git(cwd);
+  const task = taskOf(claim(claimSession(data)));
 
   return {
     project: basename(cwd),
-    branch: git(cwd),
-    claim: claim(claimSession(data)),
+    branch,
+    claim: task,
+    stage: task ? stageOf(task) : null,
+    agents,
     model: data.model?.display_name ?? null,
     // ABSENT AND null ARE ONE CASE, and this is the line that makes them one. The docs state
     // used_percentage "may be null early in the session"; an existence check alone lets null

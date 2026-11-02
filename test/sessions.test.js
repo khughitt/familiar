@@ -88,6 +88,26 @@ test('wrong schema and malformed sessions or ended records fail closed', async (
   }
 });
 
+test('a session record may carry a positive agents count', async (t) => {
+  const path = await fixture(t);
+  for (const agents of [1, 2, 40]) {
+    const value = valid();
+    value.sessions.a.agents = agents;
+    await writeSessions(path, value);
+    assert.deepEqual(await readSessions(path), value, String(agents));
+  }
+});
+
+test('agents of 0, -1, 1.5 or \'2\' is malformed', async (t) => {
+  const path = await fixture(t);
+  for (const agents of [0, -1, 1.5, '2', null]) {
+    const value = valid();
+    value.sessions.a.agents = agents;
+    await writeFile(path, JSON.stringify(value));
+    await assert.rejects(readSessions(path), /invalid sessions file.*malformed sessions entry a/, JSON.stringify(agents));
+  }
+});
+
 test('sameBasis requires equal generation, agent, cwd and every non-null process field', () => {
   assert.equal(sameBasis(basis, structuredClone(basis)), true);
   assert.equal(sameBasis({ ...basis, process: null }, basis), false);

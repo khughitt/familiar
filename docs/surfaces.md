@@ -38,6 +38,16 @@ supported surface because it lays out and repaints those cells itself. Relay inv
 transcript content and lets a state change
 replace the image in place.
 
+The status line's state slot may add the session's task stage (its flow gate, else its
+tasks status or park) and a count of the agents relay reports, as in
+`▎ ⚡ working · designed · 2 agents`. `verified` is the gate flow recorded, not a check of
+the current tree. The count is reported work, refreshed on `Stop`, not proof the session is
+waiting on it. A finished or parked task stays on the line, with its outcome, until the
+session claims another (`familiar reap` drops it once the session is gone). The stage reads
+tasks' park store at a path predicted from tasks' private layout; `node
+test/host/tasks-park-store.mjs` checks that prediction against the installed `tasks`, so run
+it after a tasks upgrade.
+
 agy's custom status line works the same way. Its stdin has Claude Code's shape, with
 `product: "antigravity"` and the conversation UUID as `session_id`, which is the id relay
 publishes as `agy:<uuid>`; the status line and the hook therefore derive the same image id.

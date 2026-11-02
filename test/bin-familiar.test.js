@@ -2,7 +2,7 @@ import { emitTransition } from '../src/observe/emission.js';
 import { applyEvent, readSnapshot, reapRegistry, paths as relayPaths, createProcessOps as relayProcessOps } from 'relay';
 import { observe } from '../src/observe/run.js';
 import { loadContext } from '../src/observe/context.js';
-import { readSessions } from '../src/bus/sessions.js';
+import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { terminalOwnerPaths } from '../src/render/term/terminal-owner.js';
 import { test } from 'node:test';
 import * as nodeModule from 'node:module';
@@ -23,6 +23,8 @@ import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { displayProject } from '../src/bus/identity.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
+import { cachePaths, mtimeStamp, parkStorePath } from '../src/render/term/stagerefresh.js';
+import { sessionFilePath } from '../src/render/term/stagecache.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
@@ -430,7 +432,7 @@ test('reap prunes a dead relay agent and reconciles even when nothing was pruned
   await f.admit();
   await f.publish(f.event('prompt'));
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'idle');
-  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, lines: [] });
+  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, statusline: 0, lines: [] });
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'working');
   await f.publish(f.event('prompt'), { ...f.handle, start: String(BigInt(f.handle.start) + 1n) });
   const result = await f.run();
@@ -447,7 +449,7 @@ test('reap lists registry agents awaiting their first event in JSON and pretty o
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, '');
     if (args[0] === '--json') assert.deepEqual(JSON.parse(result.stdout), {
-      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, swept: 0,
+      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, swept: 0, statusline: 0,
     });
     else assert.equal(result.stdout, 'awaiting reap-session\n');
   }
@@ -485,6 +487,57 @@ test('reap reports removed ended evidence in pretty output', async (t) => {
   assert.equal(result.stderr, '');
   assert.equal(result.stdout, 'ended reap-session\n');
   assert.deepEqual((await readSessions(f.p.sessionsPath)).ended, {});
+});
+
+test('reap removes statusline files of sessions that are gone', async (t) => {
+  const f = reapFixture(t);
+  await f.admit();
+  const stateDir = f.p.stateDir;
+  const old = (Date.now() - 2 * 600_000) / 1000;
+  const writeJson = (path, value, mtime) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(value));
+    if (mtime !== undefined) utimesSync(path, mtime, mtime);
+  };
+  const sessionFile = (sid, taskId, worktree) => {
+    const path = sessionFilePath(stateDir, sid);
+    writeJson(path, { taskId, worktree, seenAt: '2026-11-01T00:00:00Z' });
+    return path;
+  };
+  const cacheFile = (taskId, worktree, mtime) => {
+    const paths = cachePaths(stateDir, taskId, worktree);
+    writeJson(paths.file, { taskId, worktree, stage: 'done' }, mtime);
+    return paths;
+  };
+  const live = sessionFile('reap-session', 'fam-aaaaaa', '/w/live');
+  const gone = sessionFile('gone-session', 'fam-bbbbbb', '/w/gone');
+  const named = cacheFile('fam-aaaaaa', '/w/live', old);            // old, but a live session names it
+  const unnamed = cacheFile('fam-bbbbbb', '/w/gone', old);          // old and named by no remaining file
+  writeJson(unnamed.lock, { pid: 1, at: new Date(Date.now() - 3_600_000).toISOString() });
+  const young = cacheFile('fam-cccccc', '/w/young');                // within the ceiling
+  const held = cacheFile('fam-dddddd', '/w/held', old);             // a live refresher holds its lock
+  writeJson(held.lock, { pid: process.pid, at: new Date().toISOString() });
+
+  const result = await f.run();
+  assert.equal(result.statusline, 3);
+  assert.equal(existsSync(gone), false);
+  assert.equal(existsSync(unnamed.file), false);
+  assert.equal(existsSync(unnamed.lock), false);
+  for (const kept of [live, named.file, young.file, held.file, held.lock]) assert.equal(existsSync(kept), true, kept);
+
+  assert.equal((await f.run()).statusline, 0, 'nothing left to prune');
+
+  // The pretty output names the removals, like the ledgers and temps beside it.
+  sessionFile('another-gone', 'fam-eeeeee', '/w/another');
+  const home = mkdtempSync(join(tmpdir(), 'familiar-reap-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const cli = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: {
+    PATH: '/usr/bin:/bin', HOME: home, FAMILIAR_CONFIG_DIR: f.e.FAMILIAR_CONFIG_DIR,
+    FAMILIAR_STATE_DIR: f.e.FAMILIAR_STATE_DIR, RELAY_STATE_DIR: f.e.RELAY_STATE_DIR,
+    FAMILIAR_THEMES_DIR: f.e.FAMILIAR_THEMES_DIR,
+  } });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.match(cli.stdout, /^pruned 1 status line file\(s\)$/m);
 });
 
 // A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
@@ -588,7 +641,7 @@ test('reap accepts an absent relay directory and reconciles to no sessions', asy
   const result = spawnSync(process.execPath, [bin, '--json', 'reap'], { encoding: 'utf8', env: f.e });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0 });
+  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, statusline: 0 });
   assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
 });
 
@@ -1629,6 +1682,144 @@ test('a bus-backed statusline with --with bypasses HUD field collection and git'
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /custom/);
   assert.equal(existsSync(marker), false, 'the wrapped path invoked git while collecting unused HUD fields');
+});
+
+// --- the task stage and reported agents --------------------------------------
+//
+// Every subprocess here (the status line, the refresher it spawns, the fake `tasks` and
+// flow-state) runs with an env built key by key: no inherited variable, HOME and the park
+// store's XDG_STATE_HOME under a test-owned root, and git kept off the host's config.
+
+const STAGE_ID = 'fam-8f0f2b';
+const stageFakeTasks = (root) => `#!/bin/sh
+printf '%s\\n' "$*" >> '${root}/tasks.log'
+case "$*" in
+  "claims --json") cat '${root}/claims.json' ;;
+  "where --json") printf '%s' '{"project":{"prefix":"fam","records":"${root}/records"}}' ;;
+  "show ${STAGE_ID} --json") printf '%s' '{"task":{"id":"${STAGE_ID}","status":"doing"}}' ;;
+  "list --parked --json") printf '%s' '{"tasks":[]}' ;;
+  *) echo "unexpected: $*" >&2; exit 64 ;;
+esac
+`;
+const stageFakeFlow = (root) => `#!/bin/sh
+printf '%s\\n' "flow-state $*" >> '${root}/tasks.log'
+printf '%s' '{"state":"outside"}'
+`;
+
+function stageFixture(t) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-stage-cli-')));
+  const dirs = {
+    bin: join(root, 'bin'), home: join(root, 'home'), xdgState: join(root, 'xdg-state'),
+    tasksDir: join(root, 'records', 'tasks'), worktree: join(root, 'worktree'),
+    config: join(root, 'config'), state: join(root, 'state'),
+  };
+  const flowDir = join(dirs.home, '.agents', 'bin');
+  for (const dir of [...Object.values(dirs), flowDir]) mkdirSync(dir, { recursive: true });
+  t.after(() => {
+    chmodSync(dirs.state, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(join(dirs.bin, 'tasks'), stageFakeTasks(root), { mode: 0o755 });
+  writeFileSync(join(flowDir, 'flow-state'), stageFakeFlow(root), { mode: 0o755 });
+  writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [] }));
+  const e = {
+    PATH: `${dirs.bin}:/usr/bin:/bin`, HOME: dirs.home, XDG_STATE_HOME: dirs.xdgState,
+    FAMILIAR_CONFIG_DIR: dirs.config, FAMILIAR_STATE_DIR: dirs.state, RELAY_STATE_DIR: join(dirs.state, 'relay'),
+    FAMILIAR_THEMES_DIR: shippedThemesFixture, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+  };
+  const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
+  assert.equal(seeded.status, 0, `scheme set failed: ${seeded.stderr}`);
+  const claim = (session) => writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [
+    { id: STAGE_ID, session, started: '2026-11-01T00:00:00Z', worktree: dirs.worktree, live: true },
+  ] }));
+  const cache = cachePaths(dirs.state, STAGE_ID, dirs.worktree);
+  const writeFreshCache = (stage) => {
+    const parkStore = parkStorePath('fam', e);
+    mkdirSync(dirname(cache.file), { recursive: true });
+    writeFileSync(cache.file, JSON.stringify({
+      taskId: STAGE_ID, worktree: dirs.worktree,
+      tasksDir: dirs.tasksDir, tasksDirMtimeNs: mtimeStamp(dirs.tasksDir),
+      parkStore, parkStoreMtimeNs: mtimeStamp(parkStore),
+      stage, fault: null, refreshedAt: new Date().toISOString(),
+    }));
+  };
+  const log = () => (existsSync(join(root, 'tasks.log'))
+    ? readFileSync(join(root, 'tasks.log'), 'utf8').trim().split('\n') : []);
+  // The payload's cwd is the claim's worktree, which is no repository: no branch, no git write.
+  const render = (sessionId) => {
+    const result = statusline(e, [], { session_id: sessionId, cwd: dirs.worktree });
+    assert.equal(result.status, 0, result.stderr);
+    return { stateRow: strip(result.stdout).trimEnd().split('\n').at(-1), stdout: strip(result.stdout), stderr: result.stderr };
+  };
+  return { root, dirs, e, claim, cache, writeFreshCache, log, render };
+}
+
+test('statusline shows the cached stage and runs nothing but tasks claims', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'staged');
+  f.claim('staged');
+  f.writeFreshCache('designed');
+  for (const sid of ['staged', 'not-on-the-bus']) {
+    if (sid === 'not-on-the-bus') f.claim(sid);
+    rmSync(join(f.root, 'tasks.log'), { force: true });
+    const { stateRow, stdout, stderr } = f.render(sid);
+    assert.equal(stderr, '');
+    assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+    assert.ok(stateRow.endsWith(' · designed'), JSON.stringify(stateRow));
+    assert.deepEqual(f.log(), ['claims --json'], 'a fresh cache starts no refresher');
+  }
+});
+
+test('statusline with no claim, no cache and no agents is unchanged', async (t) => {
+  const f = stageFixture(t);
+  assert.equal(f.render('not-on-the-bus').stateRow, '▎ —');
+  await seedBus(f.e, 'plain');
+  const { stateRow, stderr } = f.render('plain');
+  assert.equal(stderr, '');
+  assert.match(stateRow, /⚡ working$/);
+  assert.doesNotMatch(stateRow, /·/);
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'no task, no session file');
+});
+
+test('a seeded session\'s reported agents reach the line', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'busy');
+  const { sessionsPath } = paths(f.e);
+  const value = await readSessions(sessionsPath);
+  value.sessions.busy.agents = 2;
+  await writeSessions(sessionsPath, value);
+  const { stateRow, stderr } = f.render('busy');
+  assert.equal(stderr, '');
+  assert.ok(stateRow.endsWith('⚡ working · 2 agents'), JSON.stringify(stateRow));
+});
+
+test('a stale cache is refreshed in the background', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'refreshing');
+  f.claim('refreshing');
+  const first = f.render('refreshing');
+  assert.equal(first.stderr, '');
+  assert.ok(first.stateRow.endsWith(' · —'), JSON.stringify(first.stateRow));
+  for (let waited = 0; !existsSync(f.cache.file) && waited < 5000; waited += 50) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.ok(existsSync(f.cache.file), `no cache after 5 s; tasks log:\n${f.log().join('\n')}`);
+  const second = f.render('refreshing');
+  assert.equal(second.stderr, '');
+  assert.ok(second.stateRow.endsWith(' · doing'), JSON.stringify(second.stateRow));
+  assert.ok(f.log().includes(`flow-state ${STAGE_ID} --json --no-git`), 'the refresher found flow-state under HOME');
+});
+
+// Review Focus 2, end to end: the session file cannot be written, the line still paints.
+test('an unwritable state dir still paints the claim and warns', async (t) => {
+  const f = stageFixture(t);
+  f.claim('read-only');
+  chmodSync(f.dirs.state, 0o555);
+  const { stdout, stateRow, stderr } = f.render('read-only');
+  assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.equal(stateRow, '▎ — · —');
+  assert.match(stderr, /^familiar: statusline: session file .*EACCES/m);
+  assert.equal(stderr.trimEnd().split('\n').every((line) => line.startsWith('familiar: statusline: ')), true, stderr);
 });
 
 // --- decay -----------------------------------------------------------------

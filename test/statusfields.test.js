@@ -6,13 +6,14 @@
 // "malformed stdin yields absent fields" would pass while the CLI could never reach it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   readFields, gitBranch, claimedTask, BRANCH_TIMEOUT_MS, CLAIMS_TIMEOUT_MS,
 } from '../src/render/term/statusfields.js';
+import { taskForSession } from '../src/render/term/stagecache.js';
 
 const noGit = () => null;
 const noClaim = () => null;
@@ -308,4 +309,60 @@ test('readFields asks for the payload session\'s claim through the injected runn
   });
   assert.deepEqual(asked, ['abc']);
   assert.deepEqual(fields.claim, { id: 'fam-ff5351', others: 0 });
+});
+
+// --- the task stage and reported agents ----------------------------------
+
+test('readFields carries stage and agents through', () => {
+  const claim = { id: 'fam-8f0f2b', others: 0, worktree: '/w' };
+  const retained = { id: 'fam-aaaaaa', others: 0, worktree: '/w/old' };
+  const seen = [];
+  const fields = readFields(PAYLOAD, {
+    git: noGit,
+    claim: () => claim,
+    taskOf: (live) => { seen.push(['taskOf', live]); return live; },
+    stageOf: (task) => { seen.push(['stageOf', task]); return 'designed'; },
+    agents: 2,
+  });
+  assert.deepEqual(seen, [['taskOf', claim], ['stageOf', claim]]);
+  assert.deepEqual(fields.claim, claim);
+  assert.equal(fields.stage, 'designed');
+  assert.equal(fields.agents, 2);
+
+  // A released claim: taskOf supplies the retained task, and its stage is read.
+  const released = readFields(PAYLOAD, {
+    git: noGit, claim: noClaim, taskOf: () => retained, stageOf: (task) => `stage of ${task.id}`,
+  });
+  assert.deepEqual(released.claim, retained);
+  assert.equal(released.stage, 'stage of fam-aaaaaa');
+  assert.equal(released.agents, null);
+
+  // No task at all: no stage is asked for.
+  const none = readFields(PAYLOAD, { git: noGit, claim: noClaim, stageOf: () => assert.fail('no task, no stage') });
+  assert.deepEqual([none.claim, none.stage, none.agents], [null, null, null]);
+});
+
+// Review Focus 5: agy before its first conversation sends an empty session_id.
+test('readFields with a payload lacking session_id has no stage and no agents', () => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-fields-nosid-'));
+  try {
+    const stateDir = join(root, 'state');
+    const warnings = [];
+    for (const payload of [{ cwd: root }, { cwd: root, session_id: '' }, { cwd: root, session_id: '', product: 'antigravity' }]) {
+      const fields = readFields(payload, {
+        git: noGit,
+        // The default lookup asks nothing without a session; a claim here would be a bug upstream.
+        claim: (session) => (session === null ? null : assert.fail(`asked for ${session}`)),
+        taskOf: (live) => taskForSession({
+          stateDir, sessionId: payload.session_id, claim: live, now: 0, warn: (m) => warnings.push(m),
+        }),
+        stageOf: () => assert.fail('no task, no stage'),
+      });
+      assert.deepEqual([fields.claim, fields.stage, fields.agents], [null, null, null], JSON.stringify(payload));
+    }
+    assert.deepEqual(warnings, []);
+    assert.equal(existsSync(join(stateDir, 'statusline')), false, 'no session file is written');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

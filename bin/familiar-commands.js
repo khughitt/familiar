@@ -43,6 +43,7 @@ import { sweepTemps } from '../src/bus/temp-sweep.js';
 import { composeForIntent } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
 import { readFields } from '../src/render/term/statusfields.js';
+import { pruneStatusline, readStage, taskForSession } from '../src/render/term/stagecache.js';
 import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capability.js';
 import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
@@ -210,11 +211,15 @@ export async function reap({ deps: given }) {
     startTimeOf: renderProcess.startTimeOf, lockWith: deps.lockWith, now,
   });
   await pruneTerminalOwners({ transmitDir: paths.transmitDir, ownerAlive, lockWith: deps.lockWith });
+  const statusline = pruneStatusline({
+    stateDir: paths.stateDir, sessionIds: Object.keys(sessions), now: now(),
+    pidAlive: (pid) => renderProcess.pidExists(pid),
+  });
   const { removed: swept } = await sweepTemps({
     dirs: [paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals')],
     pidExists: renderProcess.pidExists, now,
   });
-  return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length,
+  return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length, statusline,
     lines: lines.map((line) => line.replace(/^familiar: observe:/, 'familiar: reap:')) };
 }
 
@@ -420,6 +425,22 @@ export async function main({ command, args: rest, color, mode }) {
     const wrapped = values.with ?? null;
     const rawOutput = wrapped ? runWrapped(wrapped, stdin) : null;
 
+    // The task stage and the reported agents. The task is the live claim, or the one this
+    // session last showed once its claim is released; its stage comes from the cache the
+    // detached refresher keeps. A fault is one warning line per render and never blanks it.
+    const warn = (message) => process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
+    const { stateDir } = ctx.paths;
+    const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
+    const taskFields = {
+      agents: record?.agents ?? null,
+      taskOf: (live) => taskForSession({ stateDir, sessionId: payload.session_id, claim: live, now: now(), warn }),
+      stageOf: (task) => {
+        const { stage, fault } = readStage({ stateDir, task, cwd, now: now() });
+        if (fault) warn(fault);
+        return stage;
+      },
+    };
+
     // NO CAT IS NOT A FALLBACK, IT IS THE TRUTH. A session not on the bus has no identity yet
     // — the first hook has not fired, or it was evicted.
     //
@@ -430,7 +451,7 @@ export async function main({ command, args: rest, color, mode }) {
     // slot reading as absent, at the full four rows (there is no cat here to fit against).
     if (!intent) {
       const output = wrapped ? rawOutput
-        : hudLines({ intent: null, fields: readFields(payload), rows: 4 }).join('\n') + '\n';
+        : hudLines({ intent: null, fields: readFields(payload, taskFields), rows: 4 }).join('\n') + '\n';
       process.stdout.write(output);
       if (visualFault !== undefined) {
         process.stderr.write(`familiar: statusline: ${visualFault.replace(/[\r\n]+/g, ' ')}\n`);
@@ -451,7 +472,7 @@ export async function main({ command, args: rest, color, mode }) {
         // familiar resolved — the thing that chose the slot, the hue and the member. In
         // ~/repo/packages/api, basename(cwd) is `api` while the identity is `repo`, and a HUD
         // labelled `api` beside an ember cat that means `repo` contradicts itself.
-        fields: { ...readFields(payload), project: intent.identity.project },
+        fields: { ...readFields(payload, taskFields), project: intent.identity.project },
         rows: hudRows,
       }).join('\n');
 
@@ -594,12 +615,13 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
-    const { reaped, awaiting, ended, pruned, swept } = result;
+    const { reaped, awaiting, ended, pruned, swept, statusline } = result;
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     if (awaiting.length > 0) process.stdout.write(`awaiting ${awaiting.join(' ')}\n`);
     if (ended.length > 0) process.stdout.write(`ended ${ended.join(' ')}\n`);
     if (pruned > 0) process.stdout.write(`pruned ${pruned} transmission ledger(s)\n`);
     if (swept > 0) process.stdout.write(`swept ${swept} orphaned temp file(s)\n`);
+    if (statusline > 0) process.stdout.write(`pruned ${statusline} status line file(s)\n`);
   } else if (command === 'install opencode') {
     // The path-knowing installer lives in a sibling binary (bin/familiar-opencode) because the
     // portability seam forbids THIS file from naming the integration directory. Its output is
