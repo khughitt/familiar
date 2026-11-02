@@ -147,6 +147,7 @@ export async function observe({ text, deps: given }) {
         envelope, snapshot, prior, relayProcess: deps.relayProcess,
         renderProcess: deps.renderProcess, adapterFor: deps.adapterFor,
         gitContext: deps.gitContext, lookupProjectColor: deps.lookupProjectColor,
+        lookupFamily: deps.lookupFamily, env: deps.env,
       });
       absent = enrichment.absent === true;
       if (!enrichment.ok && !absent) return { exitCode: failed.length ? 1 : enrichment.exitCode, lines: [...lines, line(enrichment.reason)] };
@@ -179,14 +180,25 @@ export async function observe({ text, deps: given }) {
       }
       if (event.harness === 'codex' && event.kind === 'session-start' && next && result.intent[next.sessionId]) {
         const ctx = result.ctx;
-        const { convergeCodexProject } = await import('../install/codex-converge.js');
-        const convergence = await convergeCodexProject({
-          repoRoot: next.repoRoot, member: result.intent[next.sessionId].current.identity.member,
-          catalog: ctx.catalog, pack: ctx.pack, themeId: ctx.themeId,
-          petsDir: join(deps.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
-        });
-        if (convergence.outcome === 'error') throw new Error(convergence.reason);
-        if (convergence.outcome === 'actionable') lines.push(line(convergence.reason));
+        // The session's own theme, which the visual pass has already loaded: several
+        // themes are live at once, and the pet gate checks the art of this one.
+        const { theme, member, role } = result.intent[next.sessionId].current.identity;
+        // The managed config is the repository's face, read by every later launch, so a
+        // per-launch role is never persisted into it. A roled session's member is the
+        // role's, not the repository's, and resolving a second identity here to find the
+        // repository's is not worth its cost on the hook path (spec §5.7).
+        if (role !== null) {
+          lines.push(line(`codex: session role "${role}" set — repository pet selection left unchanged`));
+        } else {
+          const { convergeCodexProject } = await import('../install/codex-converge.js');
+          const convergence = await convergeCodexProject({
+            repoRoot: next.repoRoot, themeId: theme, member,
+            catalog: ctx.catalog, themes: ctx.themes,
+            petsDir: join(deps.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
+          });
+          if (convergence.outcome === 'error') throw new Error(convergence.reason);
+          if (convergence.outcome === 'actionable') lines.push(line(convergence.reason));
+        }
       }
     }
     await cleanup(deps);

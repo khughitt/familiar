@@ -1,5 +1,6 @@
 import { parseIdentities } from '../src/bus/pins.js';
 import { visualResolver } from '../src/observe/context.js';
+import { preloadedThemes } from './helpers/themes.js';
 import { loadThemePack } from 'familiar-theme';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +14,7 @@ import { applyEvent, normalizeEvent } from 'relay';
 
 const generation = 'generation-1';
 const handle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 42, start: '123' };
-const context = { cwd: '/repo', projectKey: 'familiar-key', project: 'repo', remote: null, repoRoot: '/repo/wt', repositoryRoot: '/repo', projectColor: '#123456' };
+const context = { cwd: '/repo', projectKey: 'familiar-key', project: 'repo', remote: null, repoRoot: '/repo/wt', repositoryRoot: '/repo', projectColor: '#123456', family: null, role: null };
 const row = (sid, extra = {}) => ({
   id: `codex:${sid}`, harness: 'codex', sessionId: sid, scope: 'session',
   process: handle, cwd: '/repo', repoRoot: '/repo', remote: null, projectKey: 'relay-key',
@@ -25,7 +26,7 @@ const prepared = (agent, extra = {}) => ({ basis: basis(agent), terminal: { pid:
 const session = (agent, extra = {}) => ({
   sessionId: agent.sessionId, agentId: agent.id, harness: agent.harness,
   basis: basis(agent), ...context, pid: 100, starttime: 200,
-  seq: 1, state: agent.state, updatedAt: agent.updatedAt, ...extra,
+  seq: 1, admitted: 1, state: agent.state, updatedAt: agent.updatedAt, ...extra,
 });
 const prior = (...records) => ({ ...structuredClone(EMPTY_SESSIONS), sessions: Object.fromEntries(records.map((r) => [r.sessionId, r])) });
 const ended = (record, seq) => ({ sessionId: record.sessionId, harness: record.harness, project: record.project, pid: record.pid, starttime: record.starttime, seq });
@@ -35,11 +36,47 @@ const project = (options = {}) => projectSnapshot({ snapshot: snapshot(), prior:
 test('a fresh prepared event admits its session with every context and terminal field', async () => {
   const a = row('a');
   const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a) });
-  assert.deepEqual(result.sessions.sessions.a, session(a, { seq: 5 }));
+  assert.deepEqual(result.sessions.sessions.a, session(a, { seq: 5, admitted: 5 }));
   assert.deepEqual(result.sessions.registry, { generation, revision: 10 });
   assert.deepEqual(result.intent, { a: { visual: 'a' } });
   assert.deepEqual(result.capture, { prev: null, next: result.sessions.sessions.a });
   assert.equal(result.stale, false);
+});
+
+// `seq` moves on every event and state change, so it is no arrival order; `admitted` is
+// the seq at which a record entered sessions.json, kept while it stays (spec §5.6).
+test('a new record is admitted at its seq, keeps it while it stays, and is admitted again on return', async () => {
+  const a = row('a');
+  const admit = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a), seq: 5 });
+  assert.equal(admit.sessions.sessions.a.admitted, 5);
+  const done = row('a', { state: 'done', updatedAt: 2000 });
+  const changed = await project({ snapshot: snapshot(done), prior: admit.sessions, seq: 9 });
+  assert.deepEqual([changed.sessions.sessions.a.seq, changed.sessions.sessions.a.admitted], [9, 5]);
+  const event = await project({ snapshot: snapshot(done), prior: changed.sessions, seq: 10,
+    event: { sessionId: 'a' }, prepared: prepared(done) });
+  assert.deepEqual([event.sessions.sessions.a.seq, event.sessions.sessions.a.admitted], [10, 5]);
+  const dropped = await project({ snapshot: snapshot(row('b')), prior: event.sessions, seq: 11, mode: 'drop-only' });
+  assert.equal(Object.hasOwn(dropped.sessions.sessions, 'a'), false);
+  const back = await project({ snapshot: snapshot(a), prior: dropped.sessions, seq: 12,
+    event: { sessionId: 'a' }, prepared: prepared(a) });
+  assert.equal(back.sessions.sessions.a.admitted, 12);
+});
+
+// A record written before admission existed has no arrival order to recover: its next
+// projection, full or drop-only, gives it the current seq, which it then keeps.
+test('a pre-change record without admitted gets the current seq once', async () => {
+  const a = row('a');
+  const b = row('b');
+  const old = prior(session(a), session(b));
+  for (const record of Object.values(old.sessions)) delete record.admitted;
+  const reconciled = await project({ snapshot: snapshot(a, b), prior: old, seq: 7 });
+  assert.deepEqual([reconciled.sessions.sessions.a.admitted, reconciled.sessions.sessions.b.admitted], [7, 7]);
+  const later = await project({ snapshot: snapshot(row('a', { state: 'idle', updatedAt: 3000 }), b),
+    prior: reconciled.sessions, seq: 8 });
+  assert.deepEqual([later.sessions.sessions.a.seq, later.sessions.sessions.a.admitted], [8, 7]);
+  const teardown = await project({ snapshot: snapshot(a), prior: old, seq: 4, mode: 'drop-only' });
+  assert.deepEqual(Object.keys(teardown.sessions.sessions), ['a']);
+  assert.equal(teardown.sessions.sessions.a.admitted, 4);
 });
 
 test('an unadmitted registry agent without prepared enrichment is not projected', async () => {
@@ -68,7 +105,7 @@ test('projection preserves the Niri winner through reconcile and unrelated event
   const resolveVisuals = async (sessions) => ({
     intent: Object.fromEntries(Object.entries(sessions).map(([sid, record]) => [sid, {
       current: { state: record.state, urgency: record.state === 'done' ? 'notice' : 'none',
-        motion: 'static', motionPolicy: 'full', color: { base: '#123456' }, identity: { member: sid } },
+        motion: 'static', motionPolicy: 'full', color: { base: '#123456' }, identity: { theme: 'cats', member: sid } },
       expiresAt: null, after: null,
     }])), faults: new Map(),
   });
@@ -78,7 +115,7 @@ test('projection preserves the Niri winner through reconcile and unrelated event
     signals = planWindowSignals({ intent, sessions: sessions.sessions,
       sessionWindows: { a: { windowId: 7 }, b: { windowId: 7 } },
       windows: [{ id: 7, signal: { sources: ['familiar'] } }],
-      ...signals, themeId: 'cats', now: 1000,
+      ...signals, now: 1000,
     });
     return signals;
   };
@@ -277,7 +314,7 @@ test('session ids that name object properties stay ordinary session keys', async
   const a = row('__proto__');
   const result = await project({ snapshot: snapshot(a), event: { sessionId: '__proto__' }, prepared: prepared(a) });
   assert.deepEqual(result.capture.prev, null);
-  assert.deepEqual(result.sessions.sessions.__proto__, session(a, { seq: 5 }));
+  assert.deepEqual(result.sessions.sessions.__proto__, session(a, { seq: 5, admitted: 5 }));
   assert.deepEqual(Object.keys(result.intent), ['__proto__']);
 });
 
@@ -320,9 +357,9 @@ test('projection keeps checkout labels and repository anchors for path and remot
   for (const { pins, remote, slot } of cases) {
     const a = row('a');
     const ctx = { cwd: '/fixture/fix-api/src', repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
-      remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null };
+      remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null, family: null, role: null };
     const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a, { context: ctx }),
-      resolveVisuals: visualResolver({ pack, catalog: parseIdentities(JSON.stringify({ identities: pins })),
+      resolveVisuals: visualResolver({ themes: preloadedThemes({ fixture: pack }), catalog: parseIdentities(JSON.stringify({ identities: pins })),
         tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     });
     assert.deepEqual(result.faults, new Map());
@@ -373,7 +410,7 @@ for (const { name, steps } of [
     const { snapshot } = await applyEvent(event, options);
     const result = await project({ snapshot, prior: previous, event,
       prepared: { ...prepared(snapshot.agents[event.agentId]), basis: basis(snapshot.agents[event.agentId], snapshot.generation) },
-      resolveVisuals: visualResolver({ pack, catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
+      resolveVisuals: visualResolver({ themes: preloadedThemes({ fixture: pack }), catalog: { identities: [] }, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),
     });
     assert.deepEqual(result.faults, new Map());
     assert.equal(result.intent.a.current.state, state, nativeEvent);
@@ -387,7 +424,7 @@ for (const { name, steps } of [
 test('a root row\'s background agents ride on its session record', async () => {
   const a = row('a', { background: { agents: 3, other: 1 } });
   const admitted = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a) });
-  assert.deepEqual(admitted.sessions.sessions.a, session(a, { seq: 5, agents: 3 }));
+  assert.deepEqual(admitted.sessions.sessions.a, session(a, { seq: 5, admitted: 5, agents: 3 }));
   const reconciled = await project({ snapshot: snapshot(a), prior: admitted.sessions, seq: 6 });
   assert.equal(reconciled.sessions.sessions.a.agents, 3);
 });

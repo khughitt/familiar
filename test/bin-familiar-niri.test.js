@@ -124,3 +124,45 @@ else process.exit(9);
   assert.deepEqual([attention.desktop.status, attention.desktop.dnd], ['known', 'on']);
   assert.deepEqual(attention.desktop.workspaces.map((row) => row.id), ['4']);
 });
+
+// Several themes are live at once, so the window tag comes from each intent record's own
+// identity: sync lights the window from intent.json without reading config.yaml (here one
+// loadConfig would refuse).
+test('sync tags a window with the intent record\'s theme and member, reading no config', { timeout: 20_000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'familiar-niri-tag-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const state = join(dir, 'state');
+  const config = join(dir, 'config');
+  const fakeBin = join(dir, 'bin');
+  const sent = join(dir, 'sent.jsonl');
+  await mkdir(state); await mkdir(config); await mkdir(fakeBin);
+  await writeFile(join(config, 'config.yaml'), 'theme: cats\nmotion: sometimes\n');
+  await writeFile(join(fakeBin, 'noctalia'), `#!${process.execPath}
+process.stdout.write('on\\n');
+`, { mode: 0o755 });
+  await writeFile(join(fakeBin, 'niri'), `#!${process.execPath}
+import { appendFileSync } from 'node:fs';
+const argv = process.argv.slice(2);
+const args = argv.join(' ');
+if (args === 'msg -j windows') process.stdout.write(JSON.stringify([{ id: 7, pid: ${process.pid}, workspace_id: 4, signal: null }]));
+else if (args === 'msg -j workspaces') process.stdout.write(JSON.stringify([{ id: 4, idx: 1, name: null, output: 'DP-1',
+  is_urgent: false, is_active: true, is_focused: true, active_window_id: null }]));
+else if (argv[1] === 'set-window-signal') appendFileSync(${JSON.stringify(sent)}, JSON.stringify(argv.slice(1)) + '\\n');
+else process.exit(9);
+`, { mode: 0o755 });
+  const session = { sessionId: 's1', harness: 'claude-code', agentId: 'claude-code:s1',
+    basis: { generation: 'generation', agentId: 'claude-code:s1', cwd: '/repo', process: null },
+    project: 'repo', projectKey: 'path:/repo', cwd: '/repo', remote: null,
+    repoRoot: null, repositoryRoot: null, projectColor: null,
+    pid: process.pid, starttime: 1, seq: 1, state: 'needs-input', updatedAt: 1 };
+  await writeFile(join(state, 'sessions.json'), JSON.stringify({ schema: 1, registry: null, sessions: { s1: session }, ended: {} }));
+  await writeFile(join(state, 'intent.json'), JSON.stringify({ s1: { expiresAt: null, after: null, current: {
+    sessionId: 's1', state: 'needs-input', urgency: 'demand', motion: 'pulse', motionPolicy: 'full',
+    color: { base: '#e5a33c' }, identity: { theme: 'forest', member: 'ginger' },
+  } } }));
+  const result = spawnSync(process.execPath, [bin, 'sync'], { encoding: 'utf8',
+    env: { HOME: dir, FAMILIAR_STATE_DIR: state, FAMILIAR_CONFIG_DIR: config, PATH: fakeBin } });
+  assert.equal(result.status, 0, result.stderr);
+  const [args] = (await readFile(sent, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(args.slice(args.indexOf('--tag')), ['--tag', 'forest/ginger']);
+});

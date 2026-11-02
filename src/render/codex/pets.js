@@ -1,3 +1,5 @@
+import { ID_RE } from '../../bus/id.js';
+
 // Codex owns pet rendering, timing, placement, and turn-state selection. Familiar's
 // integration is therefore an offline compiler: canonical theme animation becomes one
 // native spritesheet and an explicit manifest, with no terminal escape output here.
@@ -6,6 +8,34 @@
 // not a tunable default.
 export const FRAME = Object.freeze({ width: 192, height: 208, columns: 8, rows: 9 });
 export const SPRITESHEET_PATH = 'assets/sheet.png';
+
+// ONE PET PER (THEME, MEMBER). Several themes are live at once and two of them may
+// name a member alike, so the pet id carries its theme: `familiar-<theme>--<member>`.
+// The double hyphen is the separator because ID_RE forbids consecutive hyphens inside
+// an id, so the pair decodes uniquely (`forest-cats`/`ginger` and `forest`/`cats-ginger`
+// differ only in where the `--` falls). Codex 0.166.0 loads and draws a custom pet so
+// named (probed 2026-11-02 by the method of
+// docs/specs/2026-09-05-codex-identity-parity-design.md §6.1).
+const PET_PREFIX = 'familiar-';
+const PET_SEPARATOR = '--';
+
+export function petId(themeId, memberId) {
+  for (const [what, id] of [['theme', themeId], ['member', memberId]]) {
+    if (typeof id !== 'string' || !ID_RE.test(id)) {
+      throw new Error(`petId: ${what} ${JSON.stringify(id)} is not an id`);
+    }
+  }
+  return `${PET_PREFIX}${themeId}${PET_SEPARATOR}${memberId}`;
+}
+
+// The inverse of petId, or null for anything petId cannot have produced.
+export function parsePetId(id) {
+  if (typeof id !== 'string' || !id.startsWith(PET_PREFIX)) return null;
+  const halves = id.slice(PET_PREFIX.length).split(PET_SEPARATOR);
+  if (halves.length !== 2 || !halves.every((half) => ID_RE.test(half))) return null;
+  const [themeId, memberId] = halves;
+  return { themeId, memberId };
+}
 
 const OCCUPIED = Object.freeze({
   idle: Object.freeze([0, 1, 2, 3, 4, 5]),

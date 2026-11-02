@@ -3,7 +3,11 @@ import { promisify } from 'node:util';
 import { assertHexColor } from '../protocol/color.js';
 
 export const TASKS_TIMEOUT_MS = 2_000;
-export const NO_PROJECT = Object.freeze({ prefix: null, color: null, warnings: Object.freeze([]) });
+// `root` is the registered root `tasks resolve` names: where the project's family file
+// lives (src/bus/family.js), never the checkout, which may be a worktree (spec §5.3).
+export const NO_PROJECT = Object.freeze({
+  prefix: null, color: null, root: null, warnings: Object.freeze([]),
+});
 
 export async function lookupProjectColor(dir, {
   exec = promisify(execFile), timeoutMs = TASKS_TIMEOUT_MS,
@@ -45,16 +49,20 @@ export async function lookupProjectColor(dir, {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) {
     throw fault('expected a result object');
   }
-  if (result.status === 'unregistered') return { prefix: null, color: null, warnings };
+  if (result.status === 'unregistered') return { prefix: null, color: null, root: null, warnings };
   if (result.status !== 'resolved') throw fault(`status ${JSON.stringify(result.status)}`);
   if (typeof result.prefix !== 'string' || result.prefix === '') {
     throw fault('resolved project must have a non-empty prefix');
   }
-  if (!Object.hasOwn(result, 'color')) return { prefix: result.prefix, color: null, warnings };
+  if (typeof result.root !== 'string' || result.root === '') {
+    throw fault('resolved project must have a non-empty root');
+  }
+  const { prefix, root } = result;
+  if (!Object.hasOwn(result, 'color')) return { prefix, color: null, root, warnings };
   try {
     assertHexColor(result.color);
   } catch (error) {
     throw fault(error.message);
   }
-  return { prefix: result.prefix, color: result.color, warnings: [] };
+  return { prefix, color: result.color, root, warnings: [] };
 }

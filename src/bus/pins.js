@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import { parse } from 'yaml';
-import { assertSlot } from 'familiar-theme';
+import { assertSlot } from '../protocol/slot-hues.js';
 
 // A pin path and a git repo root can name the same directory through different
 // routes: `git rev-parse --show-toplevel` reports the PHYSICAL path, while a

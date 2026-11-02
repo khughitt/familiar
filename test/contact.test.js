@@ -96,7 +96,7 @@ const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.ur
 // The engine ships no art, and the sheet's whole geometry claim below (twelve
 // ROWS, six state COLUMNS, hence portrait) depends on having more members
 // than states — the committed single-member engine fixture cannot stand in
-// for that. Self-authored instead: twelve single-slot members, same shape as
+// for that. Self-authored instead: twelve members, the size of the real roster,
 // the real roster, built once and reused via FAMILIAR_THEMES_DIR.
 function writeTwelveMemberTheme(dir) {
   const buf = Buffer.alloc(8 * 8 * 4);
@@ -119,8 +119,8 @@ function writeTwelveMemberTheme(dir) {
       `  - id: ${id}`,
       `    asset-root: sprites/${id}`,
       `    label: M${slot}`,
-      `    slots: [${slot}]`,
-      `    persona: synthetic member ${slot} of twelve, one per slot like the real roster`,
+      `    roles: [${slot === 0 ? 'default' : ''}]`,
+      `    persona: synthetic member ${slot} of twelve, the first holding the default role`,
       '    animation:',
       '      kind: static',
       '    poses:',
@@ -128,7 +128,7 @@ function writeTwelveMemberTheme(dir) {
     ].join('\n'));
   }
   writeFileSync(join(dir, 'theme.yaml'), [
-    'spec-version: 1',
+    'spec-version: 2',
     'id: cats',
     'label: Cats',
     'rows: 4',

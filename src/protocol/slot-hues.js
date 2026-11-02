@@ -1,12 +1,22 @@
-import { SLOT_COUNT, assertSlot } from 'familiar-theme';
 import { assertHexColor, hexToHsl, oklchChroma } from './color.js';
 
+// The number of canonical slots. ENGINE POLICY since theme spec-version 2: a theme
+// declares roles, never slots, so the slot count and its hues both live here. A slot
+// decides a project's colour; which member draws it is the theme's roles and the
+// project's pin (src/bus/resolve.js).
+export const SLOT_COUNT = 12;
+
+export function assertSlot(slot) {
+  if (!Number.isInteger(slot) || slot < 0 || slot >= SLOT_COUNT) {
+    throw new Error(`slot out of range: ${slot}`);
+  }
+  return slot;
+}
+
 // The twelve canonical slots' colours. FROZEN, and theme-independent by design:
-// a project pinned to slot 0 is a ginger tabby under `cats` and an ember under
-// `elements` -- same colour, different character, no code change.
+// changing a row changes the colour of every project that hashes or pins to it.
 //
-// ENGINE POLICY, not theme contract: a theme file never mentions a hue. Kept out
-// of familiar-theme so the contract package stays "what a theme must contain".
+// ENGINE POLICY, not theme contract: a theme file never mentions a hue.
 export const SLOTS = [
   { slot: 0, hue: 22, sat: 62 },
   { slot: 1, hue: 40, sat: 58 },
@@ -22,10 +32,10 @@ export const SLOTS = [
   { slot: 11, hue: 0, sat: 6 },
 ];
 
-// SLOT_COUNT used to be `SLOTS.length`. The split severed that derivation, so
-// this is the only thing standing between the two numbers and silent drift --
-// the same defect this codebase keeps deleting (ID_RE, GRAPHICS_MARKERS, FLOOR).
-// It throws at import time, so a mismatch cannot reach a running familiar.
+// SLOT_COUNT is a written number, not `SLOTS.length`: assertSlot and autoSlot read it
+// before any row does. This guard is all that stands between the two and silent
+// drift -- the same defect this codebase keeps deleting (ID_RE, GRAPHICS_MARKERS,
+// FLOOR). It throws at import time, so a mismatch cannot reach a running familiar.
 if (SLOTS.length !== SLOT_COUNT) {
   throw new Error(
     `slot-hues: ${SLOTS.length} hue rows for ${SLOT_COUNT} slots — the two must agree`

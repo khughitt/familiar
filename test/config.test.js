@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, loadTone, themeDirFor } from '../src/config.js';
+import { loadConfig, loadTone, themeDirFor, themeFor, themeIdsOf } from '../src/config.js';
 
 const paths = {
   configPath: '/cfg/config.yaml',
@@ -27,12 +27,12 @@ function realPaths() {
 
 test('config names the active theme', async () => {
   const readFile = async () => 'theme: cats\n';
-  assert.deepEqual(await loadConfig({ paths, readFile }), { themeId: 'cats', motionPolicy: 'full' });
+  assert.deepEqual(await loadConfig({ paths, readFile }), { themeId: 'cats', families: {}, motionPolicy: 'full' });
 });
 
 test('a missing config defaults to the cats theme — the one that ships', async () => {
   const readFile = async () => { throw Object.assign(new Error(''), { code: 'ENOENT' }); };
-  assert.deepEqual(await loadConfig({ paths, readFile }), { themeId: 'cats', motionPolicy: 'full' });
+  assert.deepEqual(await loadConfig({ paths, readFile }), { themeId: 'cats', families: {}, motionPolicy: 'full' });
 });
 
 test('each motion policy round-trips from config', async () => {
@@ -40,7 +40,7 @@ test('each motion policy round-trips from config', async () => {
     const readFile = async () => `motion: ${motionPolicy}\n`;
     assert.deepEqual(
       await loadConfig({ paths, readFile }),
-      { themeId: 'cats', motionPolicy },
+      { themeId: 'cats', families: {}, motionPolicy },
     );
   }
 });
@@ -66,7 +66,7 @@ test('an unknown motion policy is rejected with the valid choices', async () => 
 test('the DEFAULT readFile() reads the real config.yaml — no injection', async () => {
   const real = realPaths();
   writeFileSync(real.configPath, 'theme: dogs\n');
-  assert.deepEqual(await loadConfig({ paths: real }), { themeId: 'dogs', motionPolicy: 'full' });
+  assert.deepEqual(await loadConfig({ paths: real }), { themeId: 'dogs', families: {}, motionPolicy: 'full' });
 });
 
 test('a user theme shadows a shipped one of the same name', () => {
@@ -131,4 +131,36 @@ test('a missing scheme.json names the portable command that writes it', async ()
 test('a malformed scheme is an error, not a silent dark default', async () => {
   const readFile = async () => '{"mode":"sepia","satScale":1}';
   await assert.rejects(loadTone({ paths, readFile }), /SchemeTone\.mode/);
+});
+
+const FAMILIES = 'theme: cats\nfamilies:\n  guild: cats\n  verifiably: plant-nooks\n';
+const load = (text) => loadConfig({ paths, readFile: async () => text });
+
+test('families map a family to its theme and load frozen', async () => {
+  const config = await load(FAMILIES);
+  assert.deepEqual(config.families, { guild: 'cats', verifiably: 'plant-nooks' });
+  assert.ok(Object.isFrozen(config.families));
+});
+
+test('families must be a map of family to theme id', async () => {
+  await assert.rejects(load('families: [a]\n'), /config\.yaml: families must be a map of family to theme id/);
+  await assert.rejects(load('families: cats\n'), /config\.yaml: families must be a map of family to theme id/);
+});
+
+test('an invalid family name or theme id is rejected', async () => {
+  await assert.rejects(load('families:\n  Guild: cats\n'), /family "Guild" is invalid/);
+  await assert.rejects(load('families:\n  guild: ../x\n'), /"\.\.\/x" is invalid/);
+  await assert.rejects(load('families:\n  guild: 5\n'), /families\.guild/);
+});
+
+test('themeFor: a named family uses its theme, anything else the default', async () => {
+  const config = await load(FAMILIES);
+  assert.deepEqual(themeFor(config, 'verifiably'), { theme: 'plant-nooks', themeSource: 'family' });
+  assert.deepEqual(themeFor(config, 'other'), { theme: 'cats', themeSource: 'default' });
+  assert.deepEqual(themeFor(config, null), { theme: 'cats', themeSource: 'default' });
+});
+
+test('themeIdsOf lists the default then each family theme, distinct', async () => {
+  assert.deepEqual(themeIdsOf(await load(FAMILIES)), ['cats', 'plant-nooks']);
+  assert.deepEqual(themeIdsOf(await load('theme: dogs\n')), ['dogs']);
 });

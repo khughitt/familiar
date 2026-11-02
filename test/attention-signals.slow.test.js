@@ -8,15 +8,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths as familiarPaths } from '../src/bus/paths.js';
+import { writeTheme } from './helpers/themes.js';
 
 const skip = process.platform !== 'linux' ? 'requires Linux process groups' : false;
 const NIRI_BIN = fileURLToPath(new URL('../bin/familiar-niri', import.meta.url));
-const THEME = fileURLToPath(new URL('fixtures/theme-pack', import.meta.url));
 const SOCKET = '/run/user/1000/niri-signals.sock';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -56,7 +56,7 @@ async function coordinator(t) {
   const themes = join(root, 'themes');
   const config = join(root, 'config');
   for (const dir of [fakeBin, themes, config]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  cpSync(THEME, join(themes, 'cats'), { recursive: true });
+  writeTheme(themes, 'cats');
   writeFileSync(join(config, 'config.yaml'), 'theme: cats\nmotion: full\n');
   writeFileSync(join(config, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   writeFileSync(join(fakeBin, 'niri'), FAKE_NIRI, { mode: 0o755 });

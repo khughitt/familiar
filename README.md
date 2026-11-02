@@ -1,7 +1,9 @@
 # familiar
 
 Desktop/terminal/agent familiar engine. Themes install separately with
-`familiar theme add`; this repo ships no art.
+`familiar theme add`; this repo ships no art. A theme is a cast of roles plus an optional world; a project's
+family picks the theme and the session's `FAMILIAR_ROLE` picks the member
+([family, role and world](docs/install.md#family-role-and-world)).
 
 - Lifecycle hooks are owned by relay; `familiar setup relay` prints its observer entries.
   See the [operator cutover instructions](docs/install.md#relay-observers-and-lifecycle-hooks-operator-cutover).

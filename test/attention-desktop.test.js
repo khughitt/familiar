@@ -7,6 +7,12 @@ import { loadThemePack } from 'familiar-theme';
 import { reduceAttention } from '../src/attention/model.js';
 import { attentionByWorkspace, projectDesktop, resolvePresentations } from '../integrations/niri/attention.js';
 import { createRegistry, handle, nativeEvent, traceAttention } from './helpers/attention.js';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadContext } from '../src/observe/context.js';
+import { paths as familiarPaths } from '../src/bus/paths.js';
+import { preloadedThemes, writeTheme } from './helpers/themes.js';
 
 const pack = await loadThemePack(new URL('./fixtures/theme-pack', import.meta.url).pathname);
 
@@ -180,9 +186,9 @@ test('an unmapped completion stays unmarked until a later unfocused mapping, wit
 
 // --- presentation ----------------------------------------------------------------------
 
-const ctx = { pack, tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'reduced' };
+const ctx = { themes: preloadedThemes({ fixture: pack }), tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'reduced' };
 const intentFor = (sessionId, extra = {}) => ({ [sessionId]: { current: {
-  sessionId, state: 'working', identity: { member: 'pip', label: 'Pip', project: 'repo', slot: 0 },
+  sessionId, state: 'working', identity: { theme: 'fixture', member: 'pip', label: 'Pip', project: 'repo', slot: 0 },
   color: { base: '#a1b2c3' }, motionPolicy: 'full', sprite: { terminal: '/elsewhere/working.png' }, ...extra,
 } } });
 
@@ -228,7 +234,7 @@ test('missing identity or art is neutral and diagnosed, never another state imag
   const none = await resolvePresentations({ state: t.state, intent: {}, loadContext: async () => ctx });
   assert.deepEqual([none.presentations[id].sprite, none.presentations[id].color], [null, null]);
   assert.match(none.diagnostics[0], /identity unavailable/);
-  const missingMember = await resolvePresentations({ state: t.state, intent: intentFor('s1', { identity: { member: 'ghost', label: 'Ghost', project: 'repo', slot: 0 } }), loadContext: async () => ctx });
+  const missingMember = await resolvePresentations({ state: t.state, intent: intentFor('s1', { identity: { theme: 'fixture', member: 'ghost', label: 'Ghost', project: 'repo', slot: 0 } }), loadContext: async () => ctx });
   assert.equal(missingMember.presentations[id].sprite, null);
   assert.equal(missingMember.presentations[id].color, '#a1b2c3');
   assert.match(missingMember.diagnostics[0], /art unavailable/);
@@ -245,4 +251,48 @@ test('a dismissed withheld-completion diagnostic leaves the marker but stays exp
   assert.deepEqual(group.diagnosticIds, []);
   assert.deepEqual(group.dismissedDiagnosticIds, [id]);
   assert.equal(group.count, 1);
+});
+
+// Two live themes whose member ids collide, read through the real context: each episode's
+// art comes from its own identity's theme, and a theme that is not installed costs only
+// its own episodes their art.
+test('each episode takes art from its identity\'s theme, and an uninstalled theme fails only its own', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-attention-themes-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const paths = familiarPaths({
+    FAMILIAR_STATE_DIR: join(dir, 'state'), FAMILIAR_CONFIG_DIR: join(dir, 'config'), FAMILIAR_THEMES_DIR: join(dir, 'shipped'),
+  });
+  mkdirSync(paths.userThemesDir, { recursive: true });
+  writeFileSync(paths.configPath, 'theme: cats\nfamilies:\n  verifiably: forest\n');
+  writeFileSync(paths.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeTheme(paths.userThemesDir, 'cats', { member: 'ginger' });
+  writeTheme(paths.userThemesDir, 'forest', { member: 'ginger' });
+
+  const { t: trace, send } = scene();
+  send('codex', 'PermissionRequest', { session: 's1' }, 101);
+  send('opencode', 'session.error', { session: 's2' }, 201);
+  const forestId = trace.episodesOf('codex:s1')[0].id;
+  const missingId = trace.episodesOf('opencode:s2')[0].id;
+  const identity = (theme) => ({ identity: { theme, member: 'ginger', label: 'Ginger', project: 'repo', slot: 0 } });
+  const intent = { ...intentFor('s1', identity('forest')), ...intentFor('s2', identity('x')) };
+  let contexts = 0;
+  const { presentations, diagnostics } = await resolvePresentations({
+    state: trace.state, intent, loadContext: () => { contexts += 1; return loadContext({ paths }); },
+  });
+  assert.equal(contexts, 1);
+  assert.equal(presentations[forestId].sprite, join(paths.userThemesDir, 'forest', 'sprites', 'ginger', 'needs-approval.png'));
+  assert.equal(presentations[missingId].sprite, null);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0], new RegExp(`^attention: art unavailable for episode ${missingId}: theme "x": .+`));
+});
+
+test('presentation loads the themes its open episodes name in one call', async () => {
+  const { t, send } = scene();
+  send('codex', 'PermissionRequest', { session: 's1' }, 101);
+  send('opencode', 'session.error', { session: 's2' }, 201);
+  const themes = preloadedThemes({ fixture: pack });
+  const intent = { ...intentFor('s1'), ...intentFor('s2') };
+  const { diagnostics } = await resolvePresentations({ state: t.state, intent, loadContext: async () => ({ ...ctx, themes }) });
+  assert.deepEqual(diagnostics, []);
+  assert.deepEqual(themes.loads, [['fixture']]);
 });

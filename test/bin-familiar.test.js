@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync, closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
-  openSync, symlinkSync, utimesSync,
+  openSync, renameSync, symlinkSync, utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +33,8 @@ import { startTimeOf } from '../src/bus/proc.js';
 import { PLACEHOLDER, imageIdFor } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
+import { preloadedThemes, writeTheme } from './helpers/themes.js';
+import { TINY_PNG } from './helpers/fixture.js';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import { reportCommandError, reportCosmeticError } from '../bin/familiar.js';
 import { makePrepareSprites, settleStatusline, sheetRowCaptions } from '../bin/familiar-commands.js';
@@ -57,7 +59,7 @@ const bareApcs = (text) => (text.match(BARE_APC) ?? []).length;
 // installed under the "cats" id — the config default every test here relies
 // on unless it says otherwise. Built once and reused; the pack is read-only.
 const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-shipped-themes-'));
-cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
+writeTheme(shippedThemesFixture, 'cats');
 
 function env(over = {}) {
   const stateDir = mkdtempSync(join(tmpdir(), 'familiar-state-'));
@@ -594,13 +596,13 @@ test('reap sweeps a dead writer\'s temps from the status line\'s session and cac
 // A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
 // default outer timeout), and most of a cold `familiar observe` was module loading. A
 // teardown drops presentation state and resets the terminal: it never resolves a theme,
-// reads config or draws, so it must not load the theme contract, the YAML parser, or the
-// CLI's other commands. module.registerHooks arrived in Node 22.15, and the admitted
+// reads config or draws, so it must not load the theme contract, the YAML or TOML parsers,
+// or the CLI's other commands. module.registerHooks arrived in Node 22.15, and the admitted
 // session's terminal owner is this test process, which only Linux can target without a tty.
 const traceHook = fileURLToPath(new URL('fixtures/trace-imports.mjs', import.meta.url));
 const traceSkip = typeof nodeModule.registerHooks !== 'function' ? 'module.registerHooks needs Node 22.15 or later'
   : process.platform !== 'linux' ? 'the traced teardown targets a /proc terminal owner' : false;
-const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml)\//.test(url)
+const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml|smol-toml)\//.test(url)
   || url.endsWith('/bin/familiar-commands.js');
 
 function tracedObserve(t, e, envelope) {
@@ -629,7 +631,7 @@ const envelopeFor = (event, snapshot) => ({
   registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
 });
 
-test('a SessionEnd ends an admitted session without loading the theme contract, YAML or the other commands', { skip: traceSkip }, async (t) => {
+test('a SessionEnd ends an admitted session without loading the theme contract, YAML, TOML or the other commands', { skip: traceSkip }, async (t) => {
   const f = reapFixture(t);
   // The owner is this process with a starttime it never had: dead on every host.
   f.deps.adapterFor = () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid });
@@ -650,12 +652,21 @@ test('a SessionEnd ends an admitted session without loading the theme contract, 
   assert.deepEqual(loaded.filter(heavyModule), []);
 });
 
-test('the import trace sees the theme contract and YAML on an event that resolves visuals', { skip: traceSkip }, async (t) => {
+// The control for the teardown trace: an envelope that resolves visuals loads both. A
+// reconcile, not a hook event, because a hook event's enrichment proves process ownership
+// first, and a refusal there (this test process is not the session's harness) returns
+// before visuals load. The prompt event this used passed only while enrichment's
+// identity module happened to import the theme contract for its slot count.
+test('the import trace sees the theme contract and YAML on an envelope that resolves visuals', { skip: traceSkip }, async (t) => {
   const f = reapFixture(t);
   await f.admit();
-  const prompt = f.event('prompt');
-  const { snapshot } = await f.publish(prompt);
-  const { loaded } = tracedObserve(t, f.e, envelopeFor(prompt, snapshot));
+  const snapshot = await readSnapshot({ paths: relayPaths(f.e) });
+  const { result, loaded } = tracedObserve(t, f.e, {
+    schema: 1, type: 'reconcile', subscriber: 'familiar', event: null,
+    registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: false, reaped: [],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(loaded.some((url) => url.endsWith('/src/observe/context.js')), 'the reconcile resolved visuals');
   const heavy = loaded.filter(heavyModule).map((url) => url.replace(/^.*\/node_modules\/([^/]+)\/.*$/, '$1'));
   assert.ok(heavy.includes('familiar-theme') && heavy.includes('yaml'), `loaded: ${[...new Set(heavy)].join(', ')}`);
 });
@@ -707,21 +718,20 @@ test('an animation asset fault is one concise cosmetic line at the CLI boundary'
   ]);
 });
 
-test('the sheet caption takes its colour from the member\'s first slot, and the column aligns', () => {
-  const row = (id, slots) => ({ id, member: { slots, label: id } });
-  const captions = sheetRowCaptions(
-    [row('one', [1]), row('many', [1, 2, 3]), row('three', [3])],
-    { mode: 'dark', satScale: 1 },
-  );
-  // [slots, swatch, label, id] — the caption's columns are 2+ spaces apart.
+test('the sheet caption names each member\'s roles, default first, and the column aligns', () => {
+  const row = (id, roles) => ({ id, member: { roles, label: id } });
+  const captions = sheetRowCaptions([row('one', ['reviewer', 'default']), row('many', []), row('three', ['planner'])]);
+  // [label, id, roles] — the caption's columns are 2+ spaces apart.
   const fields = (caption) => caption.trim().split(/\s\s+/);
 
-  assert.equal(fields(captions[1])[0], '1,2,3', 'the column shows every slot the member holds');
-  assert.equal(fields(captions[1])[1], fields(captions[0])[1], 'coloured by slots[0]...');
-  assert.notEqual(fields(captions[1])[1], fields(captions[2])[1], '...not by its last slot');
-  // One width for the whole column: a multi-slot member must not push every
-  // other row's swatch and label out of alignment.
-  assert.equal(new Set(captions.map((c) => c.indexOf(fields(c)[1]))).size, 1);
+  assert.deepEqual(captions.map(fields), [
+    ['one', 'one', 'default, reviewer'],
+    ['many', 'many', '(pin only)'],
+    ['three', 'three', 'planner'],
+  ]);
+  // One width for the id column: a long id must not push every other row's roles
+  // out of alignment.
+  assert.equal(new Set(captions.map((c) => c.indexOf(fields(c)[2]))).size, 1);
 });
 
 // Same boundary, a genuinely different throw site: `scheme set` with a bad
@@ -995,14 +1005,14 @@ test('an incoming malformed animation reports its member fault before preflight'
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const poses = STATES.map((state) => `      ${state}: ${state} pose`).join('\n');
   const pack = parseThemePack(`
-spec-version: 1
+spec-version: 2
 id: cats
 label: Cats
 members:
   - id: broken-cat
     asset-root: sprites/broken-cat
     label: Broken Cat
-    slots: [3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: Broken.
     animation: { kind: clips }
     poses:
@@ -1018,7 +1028,7 @@ ${poses}
   const namedFault = 'animation: member "broken-cat" manifest has unknown role "wobble"';
   let preflights = 0;
   const prepareSprites = makePrepareSprites({
-    pack,
+    themes: preloadedThemes({ cats: pack }),
     catalog: parseIdentities('identities: []'),
     tone: { mode: 'dark', satScale: 1 },
   }, {
@@ -1029,6 +1039,7 @@ ${poses}
   const result = await prepareSprites({ bad: {
     sessionId: 'bad', projectKey: 'github.com/me/api', project: 'api',
     remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api', projectColor: null,
+    family: null, role: null,
   } });
   assert.equal(result.faults.get('bad'), namedFault);
   assert.equal(preflights, 0, 'preflight ran after validation failed');
@@ -1105,7 +1116,7 @@ test('pets --sync-projects selects a pet in the current repository with no ident
   assert.equal(result.stderr, '');
   assert.match(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
-    /^\[tui\]\npet = "custom:familiar-[a-z0-9-]+"$/m,
+    /^\[tui\]\npet = "custom:familiar-cats--pip"$/m,
   );
   assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
   assert.equal(
@@ -1197,7 +1208,7 @@ test('pets --sync-projects creates a managed project config and excludes it loca
   assert.equal(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
     '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
-      + '[tui]\npet = "custom:familiar-pip"\n',
+      + '[tui]\npet = "custom:familiar-cats--pip"\n',
   );
   assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
   assert.equal(
@@ -1217,7 +1228,7 @@ test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
-    /pet = "custom:familiar-pip"/,
+    /pet = "custom:familiar-cats--pip"/,
   );
 });
 
@@ -1230,14 +1241,14 @@ test('pets --sync-projects replaces only its managed config and does not duplica
   writeFileSync(
     join(project, '.codex', 'config.toml'),
     '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
-      + '[tui]\npet = "custom:familiar-old"\n',
+      + '[tui]\npet = "custom:familiar-cats--old"\n',
   );
 
   const second = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
     cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(second.status, 0, second.stderr);
-  assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-pip/);
+  assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-cats--pip/);
   const exclusions = readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8')
     .split('\n').filter((line) => line === '.codex/config.toml');
   assert.equal(exclusions.length, 1);
@@ -1259,7 +1270,7 @@ test('pets --sync-projects leaves a tracked project config untouched and prints 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(configPath, 'utf8'), original);
   assert.match(result.stdout, new RegExp(`tracked project config left unchanged: ${configPath}`));
-  assert.match(result.stdout, /add manually:\n\[tui\]\npet = "custom:familiar-pip"/);
+  assert.match(result.stdout, /add manually:\n\[tui\]\npet = "custom:familiar-cats--pip"/);
   assert.doesNotMatch(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
 });
 
@@ -1319,7 +1330,7 @@ test('pets --sync-projects reports and skips an identity path that is not presen
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, new RegExp(`skipped missing identity path: ${missing}`));
   assert.equal(existsSync(join(missing, '.codex', 'config.toml')), false);
-  assert.equal(existsSync(join(codexHome, 'pets', 'familiar-pip', 'pet.json')), true);
+  assert.equal(existsSync(join(codexHome, 'pets', 'familiar-cats--pip', 'pet.json')), true);
 });
 
 test('pets --sync-projects refuses a symlinked .codex directory before writing outside the project', (t) => {
@@ -1341,7 +1352,7 @@ test('project sync refuses a config created after preflight before changing any 
   const { runEnv, project } = codexProjectSyncFixture(t);
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const configDir = join(project, '.codex');
   const configPath = join(configDir, 'config.toml');
   const excludePath = join(project, '.git', 'info', 'exclude');
@@ -1361,7 +1372,7 @@ test('project sync refuses an empty marker tracked after preflight', async (t) =
   writeFileSync(marker, '');
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const originalExclude = readFileSync(excludePath, 'utf8');
   const added = spawnSync('git', ['add', '-f', '.codex'], { cwd: project, encoding: 'utf8' });
   assert.equal(added.status, 0, added.stderr);
@@ -1375,7 +1386,7 @@ test('project sync preserves an exclusion edited after preflight', async (t) => 
   const { runEnv, project } = codexProjectSyncFixture(t);
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const excludePath = join(project, '.git', 'info', 'exclude');
   writeFileSync(excludePath, `${readFileSync(excludePath, 'utf8')}# concurrent edit\n`);
 
@@ -1452,16 +1463,76 @@ test('pets writes explicit Codex tracks without changing either Codex selection'
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /^wrote 1 pets /);
-  assert.match(result.stdout, /\[tui\] pet = "custom:familiar-<member>"/);
+  assert.match(result.stdout, /\[tui\] pet = "custom:familiar-<theme>--<member>"/);
   assert.match(result.stdout, /user-wide: .*config\.toml/);
   assert.match(result.stdout, /project \(trusted\): <project>\/\.codex\/config\.toml/);
   assert.equal(readFileSync(join(projectCodex, 'config.toml'), 'utf8'), projectConfig);
-  const manifest = JSON.parse(readFileSync(join(out, 'familiar-pip', 'pet.json'), 'utf8'));
+  const manifest = JSON.parse(readFileSync(join(out, 'familiar-cats--pip', 'pet.json'), 'utf8'));
   assert.deepEqual(Object.keys(manifest.animations).sort(), [
     'failed', 'failed-root-hold', 'idle', 'review', 'review-root-hold', 'running', 'waiting',
   ]);
-  assert.equal(existsSync(join(out, 'familiar-pip', 'assets', 'sheet.png')), true);
+  assert.equal(existsSync(join(out, 'familiar-cats--pip', 'assets', 'sheet.png')), true);
   assert.equal(readFileSync(join(codexHome, 'config.toml'), 'utf8'), config);
+});
+
+// `install pets` compiles every theme the config makes live: `theme:` and each
+// `families:` entry. The env is built key by key: the CLI reads nothing else here.
+function petsEnv(t, configYaml) {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-pets-themes-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const configDir = join(root, 'config');
+  const stateDir = join(root, 'state');
+  const codexHome = join(root, 'codex-home');
+  for (const dir of [configDir, stateDir, codexHome, join(root, 'home')]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(configDir, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(configDir, 'config.yaml'), configYaml);
+  const runEnv = {
+    PATH: process.env.PATH, HOME: join(root, 'home'), USER: 'familiar-test',
+    FAMILIAR_CONFIG_DIR: configDir, FAMILIAR_STATE_DIR: stateDir,
+    RELAY_STATE_DIR: join(stateDir, 'relay'), FAMILIAR_THEMES_DIR: shippedThemesFixture,
+    CODEX_HOME: codexHome,
+  };
+  return { runEnv, configDir, out: join(codexHome, 'pets') };
+}
+
+// Review Focus 5: two themes share the member id `pip`, and each keeps its own pet.
+test('install pets writes one pet per member of every configured theme, keyed on the pair', (t) => {
+  const { runEnv, configDir, out } = petsEnv(t, 'theme: cats\nfamilies:\n  guild: forest\nmotion: full\n');
+  writeTheme(join(configDir, 'themes'), 'forest');
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME, maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^wrote 2 pets /);
+  assert.deepEqual(readdirSync(out).sort(), ['familiar-cats--pip', 'familiar-forest--pip']);
+  for (const theme of ['cats', 'forest']) {
+    const dir = join(out, `familiar-${theme}--pip`);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'pet.json'), 'utf8')).id, `familiar-${theme}--pip`);
+    const stamp = JSON.parse(readFileSync(join(dir, 'familiar-stamp.json'), 'utf8'));
+    assert.deepEqual([stamp.themeId, stamp.memberId], [theme, 'pip']);
+  }
+});
+
+test('install pets fails by name on a configured theme that is not installed, and writes no pet', (t) => {
+  const { runEnv, out } = petsEnv(t, 'theme: cats\nfamilies:\n  garden: plant-nooks\nmotion: full\n');
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'familiar: theme "plant-nooks" is not installed\n');
+  assert.equal(existsSync(out), false);
+});
+
+test('install pets fails by name on a configured theme whose pack does not load', (t) => {
+  const { runEnv, configDir, out } = petsEnv(t, 'theme: cats\nfamilies:\n  guild: forest\nmotion: full\n');
+  writeTheme(join(configDir, 'themes'), 'forest', { packId: 'woods' });
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, 'familiar: theme "forest": pack id "woods" does not match its directory\n');
+  assert.equal(existsSync(out), false);
 });
 
 // --- the native HUD --------------------------------------------------------
@@ -1506,7 +1577,7 @@ async function seedBus(e, sessionId, {
     paths: p, relay: { readSnapshot: () => readSnapshot({ paths: registryPaths }) },
     relayProcess: processOps,
     adapterFor: () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid }),
-    gitContext, lookupProjectColor: async () => ({ color: projectColor, warnings: [] }),
+    gitContext, lookupProjectColor: async () => ({ color: projectColor, root: null, warnings: [] }),
     loadContext: () => loadContext({ paths: p }),
     emitTransition: async () => ({ kind: 'unchanged' }), env: e,
   } });
@@ -1542,7 +1613,7 @@ for (const wrapped of [false, true]) {
     const e = statuslineEnv();
     await seedBus(e, 'faulted');
     writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
-      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+      `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { cats: missing-cat }\n`);
     const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
     const payload = { session_id: 'faulted', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } };
     const ledger = ledgerPaths(paths(e).transmitDir, 'faulted').entryPath;
@@ -1571,6 +1642,68 @@ for (const wrapped of [false, true]) {
       'the diagnostic must follow the complete rendered output');
   });
 }
+
+// A theme whose world fails proof is the same visual fault as a missing sprite: the record
+// is not drawn, the HUD (or --with output) still reaches stdout, and the world fault reaches
+// stderr. The proof runs inside resolveAll, so a throw there must not escape to the command
+// error handler (empty stdout, non-zero exit).
+for (const wrapped of [false, true]) {
+  test(`statusline keeps ${wrapped ? '--with output unchanged' : 'the HUD'} when its theme's world fails proof`, async () => {
+    const shipped = mkdtempSync(join(tmpdir(), 'familiar-world-themes-'));
+    const dir = writeTheme(shipped, 'cats');
+    writeFileSync(join(dir, 'theme.yaml'), readFileSync(join(dir, 'theme.yaml'), 'utf8').replace('members:', [
+      'world:', '  asset-root: world', '  size: [1, 1]', '  locales:',
+      '    home: { image: home.png, places: [[0, 0]] }', 'members:',
+    ].join('\n')));
+    mkdirSync(join(dir, 'world'));
+    writeFileSync(join(dir, 'world', 'home.png'), TINY_PNG());
+    const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+    await seedBus(e, 'worldless');
+    rmSync(join(dir, 'world', 'home.png'));
+    const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
+    const result = statusline(e, args, { session_id: 'worldless', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } });
+    assert.equal(result.status, 0, result.stderr);
+    if (wrapped) assert.equal(result.stdout, 'custom\n\nlast');
+    else {
+      assert.match(result.stdout, /Opus 4\.8/);
+      assert.equal(result.stdout.trimEnd().split('\n').length, 4);
+    }
+    assert.doesNotMatch(result.stdout, /\x1b\[|\u{10EEEE}/u);
+    assert.match(result.stderr, /^familiar: statusline: session worldless: .*world: locale "home".*\n$/);
+    assert.equal(result.stderr.trimEnd().split('\n').length, 1);
+  });
+}
+
+// A world fault is a fault like any other to the render cache: never cached, so it is said on
+// every poll. A world image is not in the key, so a line cached while it was whole serves
+// until the TTL; past it the fault shows, and the next poll says it again.
+test('a world that fails proof is said on every poll and never cached', async () => {
+  const shipped = mkdtempSync(join(tmpdir(), 'familiar-world-themes-'));
+  const dir = writeTheme(shipped, 'cats');
+  writeFileSync(join(dir, 'theme.yaml'), readFileSync(join(dir, 'theme.yaml'), 'utf8').replace('members:', [
+    'world:', '  asset-root: world', '  size: [1, 1]', '  locales:',
+    '    home: { image: home.png, places: [[0, 0]] }', 'members:',
+  ].join('\n')));
+  mkdirSync(join(dir, 'world'));
+  writeFileSync(join(dir, 'world', 'home.png'), TINY_PNG());
+  const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+  await seedBus(e, 'worldly');
+  const payload = { session_id: 'worldly', cwd: process.cwd() };
+  const at = Date.now();
+  const good = statusline(atClock(e, at), [], payload);
+  assert.equal(good.stderr, '');
+  const cachePath = renderCachePath(paths(e).stateDir, 'worldly');
+  assert.ok(existsSync(cachePath), 'a whole world\'s line is cached');
+  rmSync(join(dir, 'world', 'home.png'));
+  const expired = at + RENDER_TTL_MS;
+  for (const poll of [0, 1]) {
+    const faulted = statusline(atClock(e, expired + poll), [], payload);
+    assert.equal(faulted.status, 0, faulted.stderr);
+    assert.match(faulted.stderr, /world: locale "home"/, `poll ${poll} says the world fault`);
+    assert.ok(!faulted.stdout.includes(PLACEHOLDER), 'a faulted line draws no cells');
+  }
+  assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).renderedAt, at, 'no faulted poll rewrote the entry');
+});
 
 // THE ONE THAT PROVES THE COMPOSED PATH. The test above deliberately uses an unknown session,
 // so it exercises neither intent resolution nor composeForIntent -- on its own it would leave
@@ -2114,6 +2247,67 @@ test('an unchanged poll is served from the render cache, and a changed input ren
   assert.ok(!config.stdout.includes(PLACEHOLDER), 'motion off drops the cells');
 });
 
+// Which pack a session draws from is keyed already: its family and role are on its record,
+// and `families:` is in config.yaml. The pack itself is keyed by each installed theme's
+// descriptor, so `theme add` (with or without --replace, which renames a new pack into place),
+// `theme remove` and an edit to a theme.yaml (its roles, rows or world) are each a miss, in the
+// user's themes and the shipped ones alike, without the hit path reading any YAML.
+test('a family, a role, a families: entry and a theme pack added, edited, replaced or removed are each a miss', async () => {
+  const shipped = mkdtempSync(join(tmpdir(), 'familiar-keyed-themes-'));
+  writeTheme(shipped, 'cats');
+  const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+  const userThemes = join(e.FAMILIAR_CONFIG_DIR, 'themes');
+  writeTheme(userThemes, 'forest');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\n');
+  await seedBus(e, 'keyed');
+  const payload = { session_id: 'keyed', cwd: process.cwd() };
+  const miss = (label) => {
+    const result = statusline(e, [], payload);
+    assert.equal(result.status, 0, result.stderr);
+    assert.notEqual(result.stdout, SENTINEL, label);
+  };
+  miss('first render');
+  plantSentinel(e, 'keyed');
+  assert.equal(statusline(e, [], payload).stdout, SENTINEL, 'an unchanged poll hits');
+
+  const setRecord = async (fields) => {
+    const store = await readSessions(paths(e).sessionsPath);
+    Object.assign(store.sessions.keyed, fields);
+    await writeSessions(paths(e).sessionsPath, store);
+  };
+  await setRecord({ family: 'guild' });
+  miss('the record\'s family is part of the key');
+  plantSentinel(e, 'keyed');
+  await setRecord({ role: 'reviewer' });
+  miss('the record\'s role is part of the key');
+  plantSentinel(e, 'keyed');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nfamilies:\n  guild: forest\n');
+  miss('families: is part of the key');
+
+  plantSentinel(e, 'keyed');
+  const descriptor = join(userThemes, 'forest', 'theme.yaml');
+  writeFileSync(descriptor, readFileSync(descriptor, 'utf8').replace('rows: 4', 'rows: 3'));
+  miss('an edit to the family theme\'s theme.yaml is part of the key');
+
+  plantSentinel(e, 'keyed');
+  renameSync(join(userThemes, 'forest'), join(userThemes, '.forest-backup'));
+  writeTheme(userThemes, 'forest');
+  miss('a pack renamed into place (theme add --replace) is part of the key');
+
+  plantSentinel(e, 'keyed');
+  writeTheme(userThemes, 'plants');
+  miss('a newly added theme is part of the key');
+
+  plantSentinel(e, 'keyed');
+  rmSync(join(userThemes, 'plants'), { recursive: true });
+  miss('a removed theme is part of the key');
+
+  plantSentinel(e, 'keyed');
+  const shippedDescriptor = join(shipped, 'cats', 'theme.yaml');
+  writeFileSync(shippedDescriptor, readFileSync(shippedDescriptor, 'utf8').replace('label: Fixture', 'label: Edited'));
+  miss('an edit to a shipped theme.yaml is part of the key');
+});
+
 test('a cached line outlives neither the TTL nor its intent\'s decay', async () => {
   const e = statuslineEnv();
   await seedBus(e, 'decaying', { state: 'done' });
@@ -2141,7 +2335,7 @@ test('--with output, a faulted line and a session-less payload are never cached'
   assert.equal(existsSync(cacheDir), false);
 
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
-    `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+    `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { cats: missing-cat }\n`);
   for (let i = 0; i < 2; i++) {
     const faulted = statusline(e, [], { session_id: 'uncached', cwd: process.cwd() });
     assert.match(faulted.stderr, /missing-cat/, 'the fault is said on every poll');
@@ -2346,7 +2540,7 @@ function observerIdentity(e, dir) {
 const basenameOf = (dir) => dir.split('/').at(-1);
 
 const resolvedAs = (color, warnings = []) => JSON.stringify({
-  results: [{ input: 'x', kind: 'path', status: 'resolved', prefix: 'api', ...(color ? { color } : {}) }],
+  results: [{ input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', ...(color ? { color } : {}) }],
   warnings,
 });
 
@@ -2503,4 +2697,89 @@ test('the status line paints the label in the colour its record carries', async 
   // The colour comes from the record, never from a `tasks resolve` per render. The one call
   // this path does make is the claim lookup.
   assert.equal(readFileSync(e.FAKE_TASKS_LOG, 'utf8'), 'claims --json\n');
+});
+
+// --- Family, theme and role on whoami and projects -------------------------------------
+
+// A `tasks` that registers each checkout at a root of its own, by the path asked for, so
+// two checkouts can belong to two families.
+function tasksByPath(t, roots) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-tasks-by-path-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const script = join(dir, 'tasks');
+  writeFileSync(script, `#!/usr/bin/env node
+const roots = ${JSON.stringify(roots)};
+const input = process.argv.at(-1);
+console.log(JSON.stringify({ results: [{ input, kind: 'path', status: 'resolved', prefix: 'x', root: roots[input] }], warnings: [] }));
+`);
+  chmodSync(script, 0o755);
+  return dir;
+}
+
+function familyLayout(t) {
+  const temp = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-cli-families-')));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const a = seedRepo(join(temp, 'alpha'));
+  const b = seedRepo(join(temp, 'beta'));
+  mkdirSync(join(a, 'tools'));
+  writeFileSync(join(a, 'tools', 'family.toml'), 'name = "guild"\n');
+  mkdirSync(join(b, 'tools'));
+  writeFileSync(join(b, 'tools', 'family.toml'), 'name = "grove"\n');
+  const e = pinned('identities: []\n');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'),
+    'theme: cats\nmotion: off\nfamilies:\n  guild: guild-theme\n  grove: grove-theme\n');
+  mkdirSync(join(e.FAMILIAR_CONFIG_DIR, 'themes'));
+  writeTheme(join(e.FAMILIAR_CONFIG_DIR, 'themes'), 'guild-theme');
+  writeTheme(join(e.FAMILIAR_CONFIG_DIR, 'themes'), 'grove-theme');
+  e.PATH = `${tasksByPath(t, { [a]: a, [b]: b })}:${e.PATH}`;
+  return { a, b, e };
+}
+
+test('whoami reports the family, its theme and the role from FAMILIAR_ROLE', (t) => {
+  const { a, e } = familyLayout(t);
+  const w = whoami({ ...e, FAMILIAR_ROLE: 'reviewer' }, a);
+  assert.deepEqual(
+    [w.family, w.theme, w.themeSource, w.role, w.memberSource],
+    ['guild', 'guild-theme', 'family', 'reviewer', 'unmapped'],
+  );
+  assert.equal(typeof w.anchor, 'string');
+  const text = spawnSync(process.execPath, [bin, 'whoami', a], {
+    encoding: 'utf8', env: { ...e, FAMILIAR_ROLE: 'reviewer' },
+  });
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^  family  guild · theme guild-theme \(family\)$/m);
+  assert.match(text.stdout, /^  role    reviewer · member .+ \(unmapped\)$/m);
+  const bare = whoami(e, a);
+  assert.deepEqual([bare.role, bare.memberSource], [null, 'default']);
+});
+
+test('whoami refuses a reserved or malformed FAMILIAR_ROLE', (t) => {
+  const { a, e } = familyLayout(t);
+  for (const role of ['default', 'Reviewer']) {
+    const r = spawnSync(process.execPath, [bin, 'whoami', a], { encoding: 'utf8', env: { ...e, FAMILIAR_ROLE: role } });
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, /FAMILIAR_ROLE/);
+  }
+});
+
+test('projects lists checkouts with no role even when FAMILIAR_ROLE is set', (t) => {
+  const { a, b, e } = familyLayout(t);
+  const rows = projectsJson({ ...e, FAMILIAR_ROLE: 'reviewer' }, [a, b]);
+  assert.deepEqual(rows.map((p) => [p.project, p.family, p.theme, p.themeSource, p.memberSource]), [
+    ['alpha', 'guild', 'guild-theme', 'family', 'default'],
+    ['beta', 'grove', 'grove-theme', 'family', 'default'],
+  ]);
+  assert.equal(Object.hasOwn(rows[0], 'role'), false);
+});
+
+test('projects lists two families under two theme headers', (t) => {
+  const { a, b, e } = familyLayout(t);
+  const r = spawnSync(process.execPath, [bin, '--color', 'never', 'projects', a, b], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  const headers = r.stdout.match(/^  \S+ — .+$/gm);
+  assert.equal(headers.length, 2, r.stdout);
+  assert.match(headers[0], /^  guild-theme — /);
+  assert.match(headers[1], /^  grove-theme — /);
+  assert.match(r.stdout, /^      .+ · default · auto$/m);
 });

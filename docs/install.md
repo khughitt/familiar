@@ -21,7 +21,9 @@ directory, such as your working checkout. It installs only the pack itself
 (`theme.yaml`, licence files, and each member's sprite directory), validates
 exactly those files, and atomically installs them into
 `~/.config/familiar/themes/<id>`. Anything else in the checkout (tool
-workspaces, docs, build output) is left behind.
+workspaces, docs, build output) is left behind. A theme that is already installed
+refuses a second `theme add`; see [Replacing and removing
+themes](#replacing-and-removing-themes).
 
 macOS agent lifecycle is supported. The portable core is CI-backed, and the
 Darwin agent resolver was activated on live-hook evidence captured on a physical
@@ -37,6 +39,81 @@ the same gate exercised it and found the sprite never changes pose. tmux is supp
 inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes on tmux
 ≤ 3.7c; status-line colour depth; multiple attached clients with different outer
 terminals are not addressed). Intel Macs, macOS 13, and other terminals stay unclaimed.
+
+### Replacing and removing themes
+
+```sh
+familiar theme add --replace <theme-url-or-directory>   # install a new copy over an installed theme
+familiar theme remove <id>                              # remove an installed theme and its receipt
+```
+
+`theme remove` deletes the pack under `~/.config/familiar/themes/<id>` and its install
+receipt under `~/.config/familiar/theme-receipts/<id>.json`, whichever exist. It
+refuses a pack directory that is a symlink, and a shipped theme, which is not
+removable. Removing a user theme that shadows a shipped one brings the shipped one
+back. A theme that config still names faults wherever it is drawn until config names
+another or it is installed again.
+
+`theme add --replace` validates the new copy first, then moves the installed pack
+and receipt into a backup directory,
+`~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `pack/` and
+`receipt.json`. It installs the new pack, writes its receipt, and only then deletes
+the backup and, when no other backup remains, the `.replace-backup` directory itself. If the install fails after the old theme was moved aside, the new copy
+is removed and the old pack and receipt are moved back; the error names the cause.
+`theme add` and `theme remove` share one lock, so neither runs while another is
+under way.
+
+#### Rolling back from a surviving backup
+
+If moving the old theme back fails too, the backup stays where it is and nothing
+deletes it: not a later `theme add`, whose staging sweep never reaches it, nor
+`theme remove`. `theme list` names it as `replacement backup of '<id>' at <path> —
+restore or remove it`. The error names it too, together with the moves still to make:
+
+```text
+theme add: replacing '<id>' failed (<cause>) and restoring it failed (<error>) — the
+previous theme is kept at <path>: move its pack to <themes>/<id> and its receipt.json
+to <theme-receipts>/<id>.json, or remove it
+```
+
+It names only the entries still in the backup. If the old pack already went back and
+only its receipt did not, it names only `receipt.json`, and `themes/<id>` then holds
+the old pack: leave that directory alone. Make exactly the moves it names. The
+commands below make the same moves, each only when the backup still holds that entry:
+
+```sh
+B=~/.config/familiar/themes/.replace-backup/<id>-<instant>   # the path theme list names
+ls -A "$B"                                                   # pack, receipt.json, or both
+if [ -e "$B/pack" ]; then
+  # The old pack is still in the backup, so anything at themes/<id> is what is left of
+  # the new copy (usually nothing: a failed replace removes it first). Remove that
+  # leftover, then move the old pack back.
+  rm -rf ~/.config/familiar/themes/<id>
+  mv "$B/pack" ~/.config/familiar/themes/<id>
+fi
+if [ -e "$B/receipt.json" ]; then
+  mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
+fi
+rmdir "$B"
+# The root too, once no backup is left in it; only its ENOTEMPTY is silenced.
+rmdir ~/.config/familiar/themes/.replace-backup 2>/dev/null || true
+familiar theme list                                          # the theme is back, the notice gone
+```
+
+To keep neither, delete the backup (`rm -r "$B"`) and install the theme you want.
+
+Two other errors leave a backup directory that is not a rollback:
+
+- `theme add: <cause> — theme '<id>' is restored as it was, but its backup directory
+  <path> could not be removed (<error>); remove it`. The old theme is back in place,
+  and the backup no longer holds any of it: `rm -r "$B"`.
+- `theme '<id>' installed; could not remove the replacement backup at <path>: <error>`.
+  The replacement worked, and the backup holds the theme it replaced. Delete it
+  (`rm -r "$B"`) unless you want that theme back. To go back, `theme add --replace`
+  its source rather than following the steps above: those steps would leave the new
+  receipt in place when the old theme had none.
+
+With `FAMILIAR_CONFIG_DIR` set, every `~/.config/familiar` above is that directory.
 
 ### Relay observers and lifecycle hooks (operator cutover)
 
@@ -161,6 +238,145 @@ This launch requirement applies to Familiar's presentation and automatic project
 selection. Codex's native pet renderer works independently, using the installed
 art and `[tui] pet` setting described [below](#codex-pets).
 
+### Moving a host to spec-version 2 themes
+
+A theme pack at spec-version 1 (members declare `slot` or `slots`, no `roles`) is
+refused by a build that reads spec-version 2, and every session on the host faults on
+it until the pack is replaced. A spec-version 2 pack declares `roles:` on its members
+with exactly one `default` holder. Run these per host, in order; each host's owner runs
+them, and the window between steps 1 and 2 is the time it takes to type them.
+
+1. Install the new familiar build. When the checkout that `familiar` on `PATH` resolves
+   to is the one being updated (`readlink -f "$(command -v familiar)"` names a file in
+   it), pulling or merging into that checkout is the install moment: from then on every
+   hook exits with the launcher's missing-dependency line until `npm ci` has run there,
+   and every session faults on the spec-version 1 pack until step 2. Run `npm ci` in
+   that checkout immediately and go straight to step 2. A fresh install runs
+   `npm install` and `npm link` in the checkout instead.
+2. Keep a copy of each installed v1 theme and its receipt outside the themes directory,
+   for a rollback, then replace the theme from its spec-version 2 source. The copy holds
+   the pack as `<id>` and its receipt as `<id>.json`; the receipt's `source.url` and
+   `source.commit` (or `source.path` for a local source) say where the pack came from:
+
+   ```sh
+   keep=~/familiar-v1-themes   # any directory outside ~/.config/familiar/themes
+   mkdir -p "$keep"
+   cp -a ~/.config/familiar/themes/<id> "$keep/<id>"
+   cp -a ~/.config/familiar/theme-receipts/<id>.json "$keep/<id>.json"
+   familiar theme add --replace <theme-url-or-directory>
+   ```
+
+   A plain `familiar theme add` refuses an installed theme and names `--replace`;
+   `--replace` backs the installed pack up, installs the new one and removes the
+   backup once the new pack is receipted.
+
+   Then restart `familiar-niri watch`, which keeps the code and theme it started with
+   in memory: its attention art is lost and its window tags follow the old config until
+   it restarts. Stop it and wait for it to exit before starting the new one, which
+   refuses to start while the old one holds `attention-coordinator.lock`. Define this
+   helper once in the shell you run the restart in; it stops one pid (refusing an empty
+   or multi-pid argument) and waits up to 10 s for it to be gone:
+
+   ```sh
+   stop_and_wait() {  # stop_and_wait <pid>
+     case "$1" in
+       ''|*[!0-9]*) echo "stop_and_wait: need exactly one positive pid, got: '$1'" >&2; return 1 ;;
+     esac
+     [ "$1" -gt 0 ] || { echo "stop_and_wait: pid must be positive" >&2; return 1; }
+     kill "$1" || { echo "could not stop pid $1" >&2; return 1; }
+     for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
+     echo "pid $1 still running after 10 s" >&2; return 1
+   }
+   ```
+
+   Where the supervised `familiar-attention` user unit runs the watcher
+   ([Niri workspace awareness](#niri-workspace-awareness-desktop-attention-and-moments)),
+   restart the unit; a plain stop is a clean exit that nothing restarts:
+
+   ```sh
+   systemctl --user restart familiar-attention
+   ```
+
+   Where Niri starts it (`spawn-sh-at-startup "familiar-niri watch"` in the Niri
+   config), stop it and relaunch it through Niri:
+
+   ```sh
+   stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
+   niri msg action spawn-sh -- "familiar-niri watch"
+   ```
+
+   The anchored pattern matches only the watcher's own command line. The same
+   procedure, with the unit's creation, is in `docs/runbooks/desktop-attention-rollout.md`.
+
+3. Check the result. The member of the default role shows with source `default`:
+
+   ```sh
+   familiar whoami
+   ```
+
+4. If any pet is compiled for Codex, recompile and re-select:
+   `familiar install pets --sync-projects`. It refuses each repository whose managed
+   `.codex/config.toml` still names a single-theme pet id, naming the file; remove those
+   as [Single-theme pet ids](#codex-pets) describes, then run the command again.
+5. Records written by the previous build lack `family` and `role`. They fault once and
+   each session's next hook rewrites its record. Pins and `identities.yaml` are untouched.
+
+**Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
+after familiar does, and nothing is removed before its replacement is at hand. Do the
+first two steps while the new build is still checked out, so the time the host spends
+on the previous build with the spec-version 2 pack installed is only step 4's wait for
+`theme add`:
+
+1. If a `theme add` left an empty backup root, remove it, since the previous build
+   rejects it as an invalid theme id and `theme list`, `theme show` and `theme preview`
+   fail while it exists. The command refuses a root that still holds a backup, which
+   [Rolling back from a surviving backup](#rolling-back-from-a-surviving-backup) covers:
+
+   ```sh
+   rmdir ~/.config/familiar/themes/.replace-backup
+   ```
+
+2. Have the v1 pack available as a local directory. The copy kept in step 2 of the
+   upgrade is `"$keep/<id>"`. With no copy, clone the source from the receipt and check
+   out the commit it records:
+
+   ```sh
+   git clone <source.url> <dir> && git -C <dir> checkout <source.commit>
+   ```
+
+   An `https` source cannot be added at a commit directly: `theme add <url>` clones the
+   default branch, which may already be spec-version 2.
+3. Check out the previous build in the checkout `familiar` resolves to and run `npm ci`
+   there (the previous build has no `theme remove`). From here until step 4 completes,
+   the previous build faults on the installed spec-version 2 pack.
+4. Delete the installed spec-version 2 pack and its receipt, then add the v1 pack. Set
+   `keep` again to the directory the upgrade used (or use `<dir>` from the clone); the
+   removal runs only when that directory holds a v1 pack:
+
+   ```sh
+   keep=~/familiar-v1-themes
+   test -f "$keep/<id>/theme.yaml" &&
+   rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json &&
+   familiar theme add "$keep/<id>"
+   ```
+
+5. Restart `familiar-niri watch` as in step 2 of the upgrade (the unit or the Niri
+   relaunch, with `stop_and_wait`), so it runs the previous build and reads the
+   restored theme.
+
+Codex: the previous build recognises a managed `.codex/config.toml` by a `pet` value of
+`custom:familiar-` followed by letters, digits and hyphens, so it treats a per-theme
+selection (`custom:familiar-<theme>--<member>`) as its own and rewrites it. Run the
+previous build's `familiar install pets --sync-projects` to write single-theme
+selections; its pets must be compiled, so run `familiar install pets` there first if
+the `~/.codex/pets/familiar-<member>` directories were deleted. If it refuses a file
+(`refusing unmanaged project config <path>`), that file is not one of Familiar's three
+managed lines and stays yours.
+
+Session records: the previous build's `sessions.json` validator (under the familiar state
+directory) checks the keys it knows and ignores others, so records carrying `family`,
+`role` and `admitted` are read as they are and need no step.
+
 ## Project identity and Git worktrees
 
 A registered project's colour chooses its familiar as described below. Without
@@ -199,9 +415,71 @@ and its `members:` map.
   `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
   `store` and is not always detectable: declare `core.worktree` there too.
 - **After upgrading.** Records from before the identity upgrades may lack a
-  repository anchor or `projectColor`. They leave the bus until each session's
+  repository anchor, `projectColor`, `family` or `role`. They leave the bus until each session's
   next hook re-admits it; a status line may show no identity until then. Pins
   are untouched.
+
+### Family, role and world
+
+A family is a named set of projects. A project declares its family in a family file at
+its registered root (the `root` that `tasks resolve` returns, so a worktree whose branch
+predates the file still has the family): `tools/family.toml`, else `family.toml`, the
+first that exists. Familiar reads one key, `name`, an id (lowercase letters and digits
+joined by single hyphens). A project with no family file has no family. A file that
+cannot be parsed, a `name` that is not an id, a file over 65536 bytes, or a symlink or
+path that leaves the root is an error: the hook prints one line and writes nothing.
+The family is read once per session and checkout, with the colour.
+
+The family selects the theme. `config.yaml` names the default theme and maps families to
+themes:
+
+```yaml
+theme: cats
+families:
+  guild: cats
+  verifiably: plant-nooks
+motion: full
+```
+
+A family named under `families:` uses the theme it names; an unnamed family, or a
+project with no family, uses `theme:`. Config is not checked against the installed
+themes: a named theme that is not installed faults for that family's projects only.
+A pin's `members:` map is keyed by theme id, so a pin applies to whichever theme the
+family resolves to, and an entry for another theme is inert.
+
+The theme's cast then gives the member. A member declares `roles:` in the pack, and one
+member holds the reserved role `default`. A session's role is the environment variable
+`FAMILIAR_ROLE`, an id, set by whatever launches the agent
+(`FAMILIAR_ROLE=reviewer claude`); unset or empty means no role. An invalid value, or
+`default` itself, is a refused event: the observer prints one error line, exits 0 and
+writes nothing, so the session keeps its previous record. The member is:
+
+| role | the theme holds the role | pin names a member of this theme | member | source shown |
+| --- | --- | --- | --- | --- |
+| none | not applicable | no | the `default` holder | `default` |
+| none | not applicable | yes | the pinned member | `pin` |
+| set | yes | either | the role's member | `role` |
+| set | no | no | the `default` holder | `unmapped` |
+| set | no | yes | the pinned member | `pin` |
+
+A pin replaces the `default` holder for its project and never overrides a role the theme
+covers. A role the theme does not cover is not a fault; `familiar whoami` shows
+`unmapped` so a theme author sees which roles the cast lacks. The hue is the project's,
+as in [Project colour](#project-colour); roles never change it.
+
+```text
+$ FAMILIAR_ROLE=reviewer familiar whoami
+<project>
+  family  guild · theme cats (family)
+  role    reviewer · member <label> (role)
+```
+
+`family` shows `—` when there is none and `role` shows `—` when unset. A theme may
+also carry a world: a background per locale, with places where members stand. Every
+session shows the `home` locale. `familiar theme validate <dir>` prints a theme's roles
+and the default member, and its world's locales with their place counts (or
+`world none`). The identity in `intent.json` carries the family, theme, role, member
+source and, when the theme has a world, the locale image and its places.
 
 ### Project colour
 
@@ -223,8 +501,9 @@ defaults to plain output.
 
 ### Codex pets
 
-Install the current theme's pets and select one for the repository you are in,
-along with every `path:` entry in `~/.config/familiar/identities.yaml`:
+Install the pets of every configured theme (`theme:` and each `families:` entry)
+and select one for the repository you are in, along with every `path:` entry in
+`~/.config/familiar/identities.yaml`:
 
 ```sh
 familiar install pets --sync-projects
@@ -239,7 +518,36 @@ Compiling the pets is a prerequisite, not a convenience. After the first
 `install pets`, the [relay lifecycle setup](#codex-lifecycle-hooks) lets Familiar's
 observer maintain a Codex session's project selection from its first turn onward.
 It refuses to select a member whose pet has not been compiled for the active
-theme, and says so. Re-run `familiar install pets` after switching themes.
+theme, and says so. Re-run `familiar install pets` after switching themes or
+adding a family. A configured theme that is not installed, or whose pack does not
+load, fails the command by name before any pet is written.
+
+Each pet is named for its theme and member, `familiar-<theme>--<member>`, so two
+themes holding a member of the same id each keep their own pet. A project's
+selection is the repository's face: the member its family's theme gives it with no
+role. A Codex session started with `FAMILIAR_ROLE` set leaves the selection as it is
+and says so in one line, so a per-launch role is never written into the repository.
+
+**Single-theme pet ids.** Familiar recognises a managed `.codex/config.toml` only
+when it names a per-theme id. A managed file that names a single-theme id
+`custom:familiar-<member>` is therefore not Familiar's: `install pets --sync-projects`
+refuses it by path, and convergence reports it, with the same
+`refusing unmanaged project config <path>` message it gives a config you wrote
+yourself. So check each refused file before removing it. Remove it only when it holds
+exactly these three lines, with a `pet` value that has no `--` after `familiar-`:
+
+```toml
+# Managed by Familiar. Run `familiar install pets --sync-projects` to update.
+[tui]
+pet = "custom:familiar-<member>"
+```
+
+Any other refused file is yours: leave it, and set its `pet` yourself if you want a
+Familiar pet there. After removing the managed ones, run
+`familiar install pets --sync-projects` again to write the per-theme selection.
+Pet directories under `~/.codex/pets/` named `familiar-<member>`, with no `--` in
+the name, are never selected and can be deleted. Keep every
+`familiar-<theme>--<member>` directory: those are the current pets.
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. In a Git worktree the config is written in that worktree
@@ -255,13 +563,13 @@ Choose a user-wide default in `~/.codex/config.toml`:
 
 ```toml
 [tui]
-pet = "custom:familiar-ginger"
+pet = "custom:familiar-cats--ginger"
 ```
 
 For a project-specific pet, use `familiar whoami <project>` to find the assigned
 member (`familiar projects <dir>...` draws several at once, each sprite over its
 name, and says whether the project colour, a pin or the project's hash chose
-each slot), then set `pet = "custom:familiar-<member>"` in that trusted project's `.codex/config.toml`.
+each slot), then set `pet = "custom:familiar-<theme>--<member>"` in that trusted project's `.codex/config.toml`.
 Restart an existing Codex session after syncing.
 
 ### OpenCode

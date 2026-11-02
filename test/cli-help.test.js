@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { renderHelp } from '../bin/familiar.js';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 import { decodeRgba, encodeRgba } from 'familiar-theme';
+import { writeTheme } from './helpers/themes.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -93,7 +94,7 @@ test('root and bare families print offline help with status zero', (t) => {
     assert.equal(root.match(new RegExp(`^${heading}$`, 'gm'))?.length, 1);
   }
   for (const command of [
-    'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
+    'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme remove ID', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
     'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup relay', 'observe', 'statusline', 'reap',
   ]) {
     assert.equal(root.split('\n').filter((line) => line.startsWith(`  ${command} `)).length, 1, command);
@@ -103,7 +104,7 @@ test('root and bare families print offline help with status zero', (t) => {
 });
 
 const leaves = [
-  ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
+  ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'remove'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
   ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'relay'], ['observe'], ['statusline'], ['reap'],
 ];
@@ -198,21 +199,22 @@ test('whoami reports the resolver and proves selected assets', (t) => {
   // fixture pack, installed as a user theme (the same shadow mechanism a
   // real cats install uses).
   mkdirSync(join(f.config, 'themes'));
-  cpSync(themeFixture, join(f.config, 'themes', 'fixture'), { recursive: true });
+  writeTheme(join(f.config, 'themes'), 'fixture');
   writeFileSync(join(f.config, 'config.yaml'), 'theme: fixture\nmotion: full\n');
   writeFileSync(join(f.config, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
 
   const result = run(['whoami', repo], f.env);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^widget$/m);
-  assert.match(result.stdout, /^  theme\s+fixture$/m);
+  assert.match(result.stdout, /^  family\s+— · theme fixture \(default\)$/m);
+  assert.match(result.stdout, /^  role\s+— · member .+ \(default\)$/m);
   assert.match(result.stdout, /^  slot\s+\d+ · hue \d+°$/m);
   assert.match(result.stdout, /^  member\s+.+ \([a-z0-9-]+\)$/m);
 
   const member = result.stdout.match(/^  member\s+.+ \(([a-z0-9-]+)\)$/m)?.[1];
   assert.ok(member, result.stdout);
   const broken = join(f.config, 'themes', 'broken');
-  cpSync(themeFixture, broken, { recursive: true });
+  writeTheme(join(f.config, 'themes'), 'broken');
   writeFileSync(join(f.config, 'config.yaml'), 'theme: broken\nmotion: full\n');
   const missing = join(broken, 'sprites', member, 'idle.png');
   unlinkSync(missing);
@@ -226,7 +228,7 @@ test('whoami reports the resolver and proves selected assets', (t) => {
 
 function fixtureTheme(f) {
   mkdirSync(join(f.config, 'themes'));
-  cpSync(themeFixture, join(f.config, 'themes', 'fixture'), { recursive: true });
+  writeTheme(join(f.config, 'themes'), 'fixture');
   writeFileSync(join(f.config, 'config.yaml'), 'theme: fixture\nmotion: full\n');
   writeFileSync(join(f.config, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
 }
@@ -246,8 +248,8 @@ test('projects prints one cell per directory and says who decided the slot', (t)
   // Sorted by label, one column off a TTY, blank line between cells.
   const cells = result.stdout.trim().split('\n\n').slice(1);
   assert.equal(cells.length, 2);
-  assert.match(cells[0], /^  #[0-9a-f]{6}  loose\n      .+ · slot \d+ · auto$/);
-  assert.match(cells[1], /^  #[0-9a-f]{6}  widget\n      .+ · slot 7 · pin$/);
+  assert.match(cells[0], /^  #[0-9a-f]{6}  loose\n      .+ · default · auto$/);
+  assert.match(cells[1], /^  #[0-9a-f]{6}  widget\n      .+ · default · pin$/);
 
   // With no DIR the pin catalog's paths are the list.
   const pinsOnly = run(['projects'], f.env);
@@ -274,7 +276,7 @@ test('whoami text names the project colour and its tasks project', (t) => {
   const f = fixture(t);
   fixtureTheme(f);
   f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
-    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', color: '#317d01' },
   ], warnings: [] });
   const r = run(['whoami', gitRepo(t)], f.env);
   assert.equal(r.status, 0, r.stderr);
@@ -286,12 +288,12 @@ test('projects shows the project colour and its source', (t) => {
   const f = fixture(t);
   fixtureTheme(f);
   f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
-    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', color: '#317d01' },
   ], warnings: [] });
   const r = run(['--color', 'never', 'projects', gitRepo(t)], f.env);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
-  assert.match(r.stdout, /^  #317d01  widget\n      .+ · slot 3 · colour$/m);
+  assert.match(r.stdout, /^  #317d01  widget\n      .+ · default · colour$/m);
 });
 
 test('projects fills the terminal width with columns', (t) => {
@@ -406,7 +408,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
   const oldRootLeaves = ['themes', 'preview', 'contact', 'pets'];
   const retired = new RegExp(
     `familiar (?:${oldRootLeaves.join('|')})\\b|tools/whoami\\.mjs|` +
-    'familiar theme (?!list\\b|add\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
+    'familiar theme (?!list\\b|add\\b|remove\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
     'u',
   );
   // Both agents' configuration is generated now, so a literal placeholder path in user-facing

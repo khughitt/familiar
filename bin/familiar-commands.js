@@ -1,18 +1,18 @@
 // Every familiar command but `observe`, which bin/familiar.js routes on its own: that file
 // parses and routes, and loads this module only for the commands implemented here.
-import { loadContext as context, makePrepareSprites } from '../src/observe/context.js';
+import { loadContext as context, makePrepareSprites, assertPackMatchesDirectory } from '../src/observe/context.js';
 export { makePrepareSprites } from '../src/observe/context.js';
-import { readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
+import { spritesheet, petFile, petId, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
-import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
-import { listThemes, stagingStatus } from '../src/theme/catalog.js';
-import { addTheme } from '../src/theme/add.js';
+import { loadConfig, loadTone, writeTone, themeDirFor, themeFor, themeIdsOf } from '../src/config.js';
+import { listThemes, replacementBackups, stagingStatus } from '../src/theme/catalog.js';
+import { addTheme, removeTheme } from '../src/theme/add.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { setupDocument } from '../src/install/setup.js';
 import { readReceipt, receiptPath } from '../src/theme/receipt.js';
@@ -31,6 +31,8 @@ import { defaultProcessOps } from '../src/bus/proc.js';
 import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
+import { lookupFamily } from '../src/bus/family.js';
+import { roleFromEnv } from '../src/observe/enrich.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
@@ -49,8 +51,8 @@ import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
 import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
 import {
-  loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
-  assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
+  loadThemePack, loadThemePackSync, memberOrThrow, defaultMember, DEFAULT_ROLE, ROW_MIN, ROW_MAX,
+  assetsFor, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
 } from 'familiar-theme';
 import { cliColor, cliSwatch, parseLeaf, leafOptionsFor, readStdin, usageError } from './familiar.js';
 import { commandAt } from '../src/commands.js';
@@ -159,21 +161,28 @@ export async function renderStatusline({ stdin, payload, wrapped, fields, at }) 
   let expiresAt = null;
   if (record) {
     const one = { [sessionId]: record };
-    const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
+    const { identities, spriteFor, animationFor, worldFor, faults } = await makePrepareSprites(ctx)(one);
     if (faults.has(sessionId)) {
       fault = `session ${sessionId}: ${faults.get(sessionId)}`.replace(/[\r\n]+/g, ' ');
     } else {
-      // Keep the decay contract: polling must not show done/error forever.
-      const intentRecord = resolveAll({
-        agents: one,
-        identities,
-        tone: ctx.tone,
-        spriteFor,
-        animationFor,
-        motionPolicy: ctx.motionPolicy,
-      })[sessionId];
-      intent = displayedIntent(intentRecord, at);
-      expiresAt = intentRecord.expiresAt ?? null;
+      // Keep the decay contract: polling must not show done/error forever. The theme's world
+      // is proven lazily inside resolveAll, so a broken world throws here: it is the same
+      // visual fault as a sprite failure (HUD on stdout, the fault on stderr), not a crash.
+      try {
+        const intentRecord = resolveAll({
+          agents: one,
+          identities,
+          tone: ctx.tone,
+          spriteFor,
+          animationFor,
+          worldFor,
+          motionPolicy: ctx.motionPolicy,
+        })[sessionId];
+        intent = displayedIntent(intentRecord, at);
+        expiresAt = intentRecord.expiresAt ?? null;
+      } catch (error) {
+        fault = `session ${sessionId}: ${error.message}`.replace(/[\r\n]+/g, ' ');
+      }
     }
   }
 
@@ -216,54 +225,55 @@ export async function renderStatusline({ stdin, payload, wrapped, fields, at }) 
   return { output: lines.join('\n') + (lines.length ? '\n' : ''), fault, expiresAt, settle };
 }
 
-// The `theme sheet` caption row. Exported and pure because it now makes a
-// choice: a member holds several slots but the swatch takes one colour.
-export function sheetRowCaptions(rows, tone) {
-  const slotText = rows.map((row) => row.member.slots.join(','));
-  // Width once, from the widest list. `padStart(2)` was right when every member
-  // held exactly one slot; a member holding 1,2,3 would shove every other row's
-  // label three columns right.
-  const width = Math.max(...slotText.map((text) => text.length));
-  return rows.map((row, index) => {
-    // slots[0] is the member's primary identity — the same first-declared-wins
-    // rule as bySlot, read from the member's end instead of the slot's.
-    const swatch = cliSwatch(identityColors({ slot: row.member.slots[0], projectColor: null }, tone).base);
-    return `  ${slotText[index].padStart(width)}  ${swatch}  `
-      + `${row.member.label.padEnd(20)}${row.id}\n`;
-  });
+// A member's roles as the theme views print them: `default` first, then the rest in
+// declaration order. A member with none is reachable only by a project's pin.
+export function rolesText(roles) {
+  if (roles.length === 0) return '(pin only)';
+  return [...roles].sort((a, b) => (b === DEFAULT_ROLE) - (a === DEFAULT_ROLE)).join(', ');
+}
+
+// The `theme sheet` caption row: label, id, then the member's roles. No swatch: since
+// spec-version 2 a member holds no slot, so it has no colour of its own to show.
+export function sheetRowCaptions(rows) {
+  const idWidth = Math.max(...rows.map((row) => row.id.length));
+  return rows.map((row) => `  ${row.member.label.padEnd(20)}${row.id.padEnd(idWidth)}  ${rolesText(row.member.roles)}\n`);
 }
 
 function reportTasksWarnings(warnings) {
   for (const warning of new Set(warnings)) process.stderr.write(`familiar: tasks: ${warning}\n`);
 }
 
-// The identity pipeline whoami and projects share: config -> pack -> pin catalog,
-// loaded once, then one directory at a time through git and the resolver. The
-// asset proof (assetsFor) is part of resolving, not of printing: an identity whose
-// sprites are missing is not an identity the surfaces can show.
-async function identityResolver() {
-  const paths = resolvePaths();
-  const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
-  const pack = await loadThemePack(themeDirFor(paths, themeId));
-  const catalog = await loadIdentities(paths.identitiesPath);
+// The identity pipeline whoami and projects share: the context (config, tone, pin
+// catalog and the live themes), then one directory at a time through git, tasks, the
+// family file and the resolver. Each directory's family picks its theme, and only that
+// theme is loaded. The asset proof (assetsFor) is part of resolving, not of printing: an
+// identity whose sprites are missing is not an identity the surfaces can show.
+//
+// `role` is the agent's role: whoami reports the invoking agent's (FAMILIAR_ROLE), while
+// projects lists checkouts, which have no role, and passes null.
+async function identityResolver({ role }) {
+  const { config, tone, catalog, themes } = await context();
   return {
-    themeId,
+    config,
     tone,
-    pack,
     catalog,
     async resolve(cwd) {
       const { remote, repoRoot, repositoryRoot } = await gitContext(cwd);
       const projectKey = projectKeyFor({ remote, repositoryRoot, cwd });
       const project = displayProject({ repoRoot, cwd });
       const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
-      const { color: projectColor, prefix, warnings } = repoRoot
+      const { color: projectColor, prefix, root, warnings } = repoRoot
         ? await lookupProjectColor(repoRoot)
         : NO_PROJECT;
+      const family = root === null ? null : await lookupFamily(root);
+      await themes.load([themeFor(config, family).theme]);
       const identity = resolveIdentity({
-        projectKey, project, remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
+        projectKey, project, remote, repoRoot, repositoryRoot, projectColor,
+        family, role, catalog, themes,
       });
+      const pack = themes.packFor(identity.theme);
       assetsFor(pack, identity.member, tone.mode);
-      return { identity, pin, prefix, warnings };
+      return { identity, pack, pin, prefix, warnings };
     },
   };
 }
@@ -332,32 +342,38 @@ export async function main({ command, args: rest, color, mode }) {
   } else if (command === 'whoami') {
     const { positionals } = parseLeaf(rest, leafOptions);
     const cwd = positionals[0] ?? process.cwd();
-    const resolver = await identityResolver();
+    const resolver = await identityResolver({ role: roleFromEnv(process.env) });
     const { identity, prefix, warnings } = await resolver.resolve(cwd);
     reportTasksWarnings(warnings);
     const { hue } = slotSpec(identity.slot);
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         project: identity.project,
-        theme: resolver.themeId,
+        family: identity.family,
+        theme: identity.theme,
+        themeSource: identity.themeSource,
+        role: identity.role,
         slot: identity.slot,
         color: identity.projectColor,
         source: identity.source,
         hue,
         member: { id: identity.member, label: identity.label },
+        memberSource: identity.memberSource,
+        anchor: identity.anchor,
       })}\n`);
       return;
     }
     process.stdout.write(
       `${identity.project}\n` +
-      `  theme   ${resolver.themeId}\n` +
+      `  family  ${identity.family ?? '—'} · theme ${identity.theme} (${identity.themeSource})\n` +
+      `  role    ${identity.role ?? '—'} · member ${identity.label} (${identity.memberSource})\n` +
       `  slot    ${identity.slot} · hue ${hue}°\n` +
       (identity.projectColor ? `  colour  ${identity.projectColor} · ${prefix}\n` : '') +
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'projects') {
     const { positionals, values } = parseLeaf(rest, leafOptions);
-    const resolver = await identityResolver();
+    const resolver = await identityResolver({ role: null });
     // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
     // names no directory, so only `path:` pins can be walked.
     const given = positionals.length > 0
@@ -378,9 +394,10 @@ export async function main({ command, args: rest, color, mode }) {
     reportTasksWarnings(resolved.flatMap(({ warnings }) => warnings));
     resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
 
-    // The same view control, the same bounds, and the same reason as `theme show`.
-    const viewRows = values.rows === undefined ? resolver.pack.rows : Number(values.rows);
-    if (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX) {
+    // The same view control, the same bounds, and the same reason as `theme show`. Without
+    // --rows each theme's own rows apply, so the override is checked once here.
+    const viewRows = values.rows === undefined ? null : Number(values.rows);
+    if (viewRows !== null && (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX)) {
       throw new Error(
         `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(values.rows)}`
       );
@@ -391,11 +408,14 @@ export async function main({ command, args: rest, color, mode }) {
     }
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        theme: resolver.pack.id,
         projects: resolved.map(({ identity }) => ({
           project: identity.project,
+          family: identity.family,
+          theme: identity.theme,
+          themeSource: identity.themeSource,
           member: identity.member,
           label: identity.label,
+          memberSource: identity.memberSource,
           slot: identity.slot,
           color: identity.projectColor,
           source: identity.source,
@@ -418,47 +438,57 @@ export async function main({ command, args: rest, color, mode }) {
     }
 
     const useColor = cliColor({ color });
-    const cells = resolved.map(({ identity }) => {
-      const colors = identityColors(identity, resolver.tone);
-      const swatch = cliSwatch(identity.projectColor ?? colors.base, { color: useColor });
-      const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
-      // resolve() proved the member's assets exist. Idle is what a roster shows,
-      // as it is for `theme show`; --state asks for another pose.
-      const png = graphical
-        ? readFileSync(assetsFor(resolver.pack, identity.member, resolver.tone.mode)[state].terminal)
-        : null;
-      return {
-        lines: [
-          `  ${swatch}  ${name}`,
-          `      ${identity.label} · slot ${identity.slot} · ${identity.source}`,
-        ],
-        png,
-        cols: png ? boxFor(png, viewRows).cols : 0,
-      };
-    });
+    // One group per theme, in first-use order (the projects are sorted by name): a
+    // family's checkouts draw from its theme, so the list reads as one roster per theme.
+    const groups = new Map();
+    for (const entry of resolved) {
+      const { theme } = entry.identity;
+      if (!groups.has(theme)) groups.set(theme, { pack: entry.pack, entries: [] });
+      groups.get(theme).entries.push(entry);
+    }
     const gutter = 4;
     const width = interactive ? process.stdout.columns : undefined;
-    // The sprite is part of the cell's width: a wide member must not overhang the
-    // caption column beside it.
-    const { cellWidth, perRow } = gridPlan(cells.map((c) => c.lines), {
-      width, gutter, minCellWidth: Math.max(0, ...cells.map((c) => c.cols)),
-    });
-
-    process.stdout.write(`\n  ${resolver.pack.id} — ${resolver.pack.label}\n\n`);
-    if (cells.length === 0) {
-      process.stdout.write('  (no projects: pass directories, or pin paths in identities.yaml)\n\n');
-    }
-    for (let start = 0; start < cells.length; start += perRow) {
-      const row = cells.slice(start, start + perRow);
-      if (graphical) {
-        // The caption's two-space indent is where the sprite's box starts too, so
-        // the art sits over its own name; each advance is one whole cell.
-        process.stdout.write('  ' + transmitAcross(
-          row.map((c) => ({ png: c.png, cols: c.cols, advance: cellWidth + gutter })),
-          { rows: viewRows, frame },
-        ));
+    for (const [theme, { pack, entries }] of groups) {
+      const rows = viewRows ?? pack.rows;
+      const cells = entries.map(({ identity }) => {
+        const colors = identityColors(identity, resolver.tone);
+        const swatch = cliSwatch(identity.projectColor ?? colors.base, { color: useColor });
+        const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
+        // resolve() proved the member's assets exist. Idle is what a roster shows,
+        // as it is for `theme show`; --state asks for another pose.
+        const png = graphical
+          ? readFileSync(assetsFor(pack, identity.member, resolver.tone.mode)[state].terminal)
+          : null;
+        return {
+          lines: [
+            `  ${swatch}  ${name}`,
+            `      ${identity.label} · ${identity.memberSource} · ${identity.source}`,
+          ],
+          png,
+          cols: png ? boxFor(png, rows).cols : 0,
+        };
+      });
+      // The sprite is part of the cell's width: a wide member must not overhang the
+      // caption column beside it.
+      const { cellWidth, perRow } = gridPlan(cells.map((c) => c.lines), {
+        width, gutter, minCellWidth: Math.max(0, ...cells.map((c) => c.cols)),
+      });
+      process.stdout.write(`\n  ${theme} — ${pack.label}\n\n`);
+      for (let start = 0; start < cells.length; start += perRow) {
+        const row = cells.slice(start, start + perRow);
+        if (graphical) {
+          // The caption's two-space indent is where the sprite's box starts too, so
+          // the art sits over its own name; each advance is one whole cell.
+          process.stdout.write('  ' + transmitAcross(
+            row.map((c) => ({ png: c.png, cols: c.cols, advance: cellWidth + gutter })),
+            { rows, frame },
+          ));
+        }
+        process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
       }
-      process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
+    }
+    if (groups.size === 0) {
+      process.stdout.write('\n  (no projects: pass directories, or pin paths in identities.yaml)\n\n');
     }
   } else if (command === 'niri focus') {
     // A bounded user click: no attention lock, no state, one socket exchange. The
@@ -485,7 +515,7 @@ export async function main({ command, args: rest, color, mode }) {
     // rule generator.
     // It runs once, at install; nothing on the hook path imports it.
     //
-    // ONE PET PER MEMBER. Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
+    // ONE PET PER (THEME, MEMBER). Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
     // user-wide default and an override in a trusted project's `.codex/config.toml` can choose
     // different members. Config remains user-owned unless --sync-projects explicitly opts into
     // Familiar-managed local files; tracked project config is never rewritten.
@@ -501,22 +531,33 @@ export async function main({ command, args: rest, color, mode }) {
       : join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets');
 
     const ctx = await context({ paths, config });
+    // EVERY LIVE THEME, OR NONE. Each theme `theme:` and `families:` name is loaded and
+    // checked before any pet is written: a missing or invalid one fails the command by
+    // name rather than being skipped, since a family whose pets were never compiled is
+    // one whose sessions convergence refuses to select.
+    const themeIds = themeIdsOf(config);
+    for (const id of themeIds) {
+      if (!existsSync(themeDirFor(paths, id))) throw new Error(`theme "${id}" is not installed`);
+    }
+    await ctx.themes.load(themeIds);
+    const packs = themeIds.map((id) => [id, ctx.themes.packFor(id)]);
     const projectSync = values['sync-projects']
-      ? await planCodexProjectSync({ catalog: ctx.catalog, pack: ctx.pack, cwd: process.cwd() })
+      ? await planCodexProjectSync({ catalog: ctx.catalog, themes: ctx.themes, cwd: process.cwd() })
       : null;
     if (projectSync) reportTasksWarnings(projectSync.warnings);
 
     let written = 0;
-    for (const [memberId, member] of ctx.pack.members) {
+    for (const [themeId, pack] of packs) for (const [memberId, member] of pack.members) {
       // The SAME resolver every other surface uses — not a second path to the same PNGs. The
       // sprites codex renders are byte-for-byte the ones the terminal and the bar render.
-      const assets = assetsFor(ctx.pack, memberId, ctx.tone.mode);
+      const assets = assetsFor(pack, memberId, ctx.tone.mode);
       const poses = Object.fromEntries(
         STATES.map((state) => [state, decodeRgba(readFileSync(assets[state].terminal))]),
       );
-      const { set: animationSet } = await loadAnimationMember(ctx.pack, memberId);
+      const { set: animationSet } = await loadAnimationMember(pack, memberId);
 
-      const id = `familiar-${memberId}`;
+      // Keyed on the pair: two live themes may both hold a member of this id.
+      const id = petId(themeId, memberId);
       const dir = join(out, id);
       mkdirSync(join(dir, 'assets'), { recursive: true });
 
@@ -546,7 +587,7 @@ export async function main({ command, args: rest, color, mode }) {
       // PUBLISH LAST. The stamp is the only thing that says "this pet is
       // complete and belongs to this theme", so it is the last byte written.
       writeFileSync(join(dir, STAMP_FILE), JSON.stringify(stampFor({
-        themeId: ctx.themeId,
+        themeId,
         memberId,
         frame: FRAME,
         motionPolicy: ctx.motionPolicy,
@@ -575,7 +616,7 @@ export async function main({ command, args: rest, color, mode }) {
     if (!projectSync) {
       const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
       process.stdout.write(
-        'enable one with:  [tui] pet = "custom:familiar-<member>"\n' +
+        'enable one with:  [tui] pet = "custom:familiar-<theme>--<member>"\n' +
         `user-wide: ${userConfig}\n` +
         'project (trusted): <project>/.codex/config.toml\n',
       );
@@ -708,7 +749,7 @@ export async function main({ command, args: rest, color, mode }) {
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         theme: themeId,
-        member: { id: memberId, label: member.label, persona: member.persona, slots: member.slots },
+        member: { id: memberId, label: member.label, persona: member.persona, roles: member.roles },
         states: states.map((state) => ({ state, pose: member.poses[state] })),
       })}\n`);
       return;
@@ -721,7 +762,7 @@ export async function main({ command, args: rest, color, mode }) {
       capability === GRAPHICS_CAPABILITY.ANIMATION ||
       capability === GRAPHICS_CAPABILITY.STATIC
     );
-    process.stdout.write(`\n  ${member.label} · ${themeId} · slot${member.slots.length === 1 ? '' : 's'} ${member.slots.join(', ')}\n  ${member.persona}\n\n`);
+    process.stdout.write(`\n  ${member.label} · ${themeId} · roles ${rolesText(member.roles)}\n  ${member.persona}\n\n`);
     for (const state of states) {
       // Caption UNDER the art, for the same constant-box reason as the theme grid
       // below — see the note there. The pose text is long enough to wrap, which made
@@ -740,36 +781,52 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
     }
   } else if (command === 'theme add') {
-    const { positionals } = parseLeaf(rest, leafOptions);
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const paths = resolvePaths();
-    const { themeId: activeId } = await loadConfig({ paths });
-    const result = await addTheme({ paths, source: positionals[0] });
+    const active = new Set(themeIdsOf(await loadConfig({ paths })));
+    const result = await addTheme({ paths, source: positionals[0], replace: values.replace === true });
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        id: result.id, dir: result.dir, members: result.members, active: result.id === activeId,
+        id: result.id, dir: result.dir, members: result.members, active: active.has(result.id),
       })}\n`);
       return;
     }
     process.stdout.write(`installed theme '${result.id}' (${result.members} members) at ${result.dir}\n`);
-    if (result.id !== activeId) {
+    if (!active.has(result.id)) {
       process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
     }
+  } else if (command === 'theme remove') {
+    const { positionals } = parseLeaf(rest, leafOptions);
+    const result = await removeTheme({ paths: resolvePaths(), id: positionals[0] });
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return;
+    }
+    const what = [result.removed.pack && 'pack', result.removed.receipt && 'receipt'].filter(Boolean).join(' and ');
+    process.stdout.write(`removed theme '${result.id}' (${what})\n`);
   } else if (command === 'theme list') {
     parseLeaf(rest, leafOptions);
     // Deliberately NOT context(): a broken theme on disk must not stop you
     // LISTING what is on disk — that is exactly when you need the list. Each
     // pack is loaded independently and a failure is reported on its own row.
     const paths = resolvePaths();
-    const { themeId: activeId } = await loadConfig({ paths });
+    const active = new Set(themeIdsOf(await loadConfig({ paths })));
     const rows = listThemes(paths);
+    // The checks every live theme passes (src/observe/context.js), so a theme listed as
+    // readable is one a session can draw from.
+    const loadRow = (row) => {
+      const pack = loadThemePackSync(row.dir);
+      assertPackMatchesDirectory(pack, row.id);
+      return pack;
+    };
 
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify(rows.map((row) => {
         let pack = null, error = null;
-        try { pack = loadThemePackSync(row.dir); } catch (err) { error = err.message; }
+        try { pack = loadRow(row); } catch (err) { error = err.message; }
         return {
           id: row.id,
-          active: row.id === activeId,
+          active: active.has(row.id),
           source: row.shadowed ? 'user (shadows shipped)' : row.source,
           label: pack?.label ?? null,
           members: pack ? pack.members.size : null,
@@ -782,10 +839,10 @@ export async function main({ command, args: rest, color, mode }) {
 
     process.stdout.write('\n');
     for (const row of rows) {
-      const status = row.id === activeId ? 'active' : '';
+      const status = active.has(row.id) ? 'active' : '';
       let detail;
       try {
-        const pack = loadThemePackSync(row.dir);
+        const pack = loadRow(row);
         const source = row.shadowed ? 'user (shadows shipped)' : row.source;
         // pack.label is required non-empty by parseThemePack, and pack.members
         // is a Map — hence .size, not .length.
@@ -811,22 +868,35 @@ export async function main({ command, args: rest, color, mode }) {
     } else if (staging === 'not-a-directory') {
       process.stdout.write(`  ${join(paths.userThemesDir, '.staging')} is not a directory — remove it\n`);
     }
+    // A backup survives only a replacement whose restore failed: the one copy of a theme.
+    const backups = replacementBackups(paths);
+    if (backups.notADirectory) process.stdout.write(`  ${backups.root} is not a directory — remove it\n`);
+    for (const { id, path } of backups.backups) {
+      process.stdout.write(`  replacement backup of '${sanitize(id)}' at ${sanitize(path)} — restore or remove it\n`);
+    }
     process.stdout.write('\n');
   } else if (command === 'theme validate') {
     const { positionals } = parseLeaf(rest, leafOptions);
     const pack = await validateThemePack(resolve(positionals[0]));
-    const covered = pack.bySlot.size;
+    // `default` first, then every other role in the order the members declare them.
+    const roles = [DEFAULT_ROLE, ...[...pack.byRole.keys()].filter((role) => role !== DEFAULT_ROLE)];
+    const locales = pack.world === null ? null
+      : [...pack.world.locales].map(([name, locale]) => ({ name, places: locale.places.length }));
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        id: pack.id, label: pack.label, members: pack.members.size,
-        slotsCovered: covered, slotCount: SLOT_COUNT, specVersion: pack.specVersion,
+        id: pack.id, label: pack.label, members: pack.members.size, roles,
+        defaultMember: defaultMember(pack), world: locales === null ? null : { locales },
+        specVersion: pack.specVersion,
       })}\n`);
       return;
     }
+    const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
     process.stdout.write(
       `${pack.id} — ${pack.label}\n` +
-      `  ${pack.members.size} member${pack.members.size === 1 ? '' : 's'}, ` +
-      `${covered}/${SLOT_COUNT} slots covered\n` +
+      `  ${plural(pack.members.size, 'member')}; default member ${defaultMember(pack)}\n` +
+      `  roles ${roles.map((role) => `${role} (${pack.byRole.get(role)})`).join(', ')}\n` +
+      `  world ${locales === null ? 'none'
+        : locales.map(({ name, places }) => `${name} (${plural(places, 'place')})`).join(', ')}\n` +
       `  conforms to spec-version ${pack.specVersion}\n`,
     );
   } else if (command === 'theme show') {
@@ -856,18 +926,18 @@ export async function main({ command, args: rest, color, mode }) {
     const { mode: schemeMode } = ctxTone;
 
     if (mode === 'json') {
-      const slots = [];
-      for (let slot = 0; slot < SLOT_COUNT; slot++) {
-        let member = null, fault = null;
+      // The fault is the member's asset proof, the same one the text view draws from.
+      const members = [...pack.members.values()].map((member) => {
+        let fault = null;
         try {
-          member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+          assetsFor(pack, member.id, schemeMode);
         } catch (error) {
           fault = error.message;
         }
-        slots.push({ slot, member: member ? { id: member.id, label: member.label } : null, fault });
-      }
+        return { id: member.id, label: member.label, roles: member.roles, fault };
+      });
       process.stdout.write(`${JSON.stringify({
-        id: row.id, label: pack.label, source: row.source, shadowed: row.shadowed ?? false, slots,
+        id: row.id, label: pack.label, source: row.source, shadowed: row.shadowed ?? false, members,
       })}\n`);
       return;
     }
@@ -882,11 +952,11 @@ export async function main({ command, args: rest, color, mode }) {
     );
 
     // THIS VERB'S ENTIRE VALUE IS THE ART — README says `familiar theme show` renders
-    // the twelve slots WITH their art. Without graphics (a plain TERM, or a
+    // the theme's members WITH their art. Without graphics (a plain TERM, or a
     // tmux pane the probe refuses — and for tmux it says which setting) it silently
-    // degrades to a bare slot listing. `preview` stays quiet about this on
+    // degrades to a bare member listing. `preview` stays quiet about this on
     // purpose (test/bin-familiar.test.js pins that); `theme` does not, because
-    // a human judging whether twelve familiars cohere as a set needs to know
+    // a human judging whether a cast coheres as a set needs to know
     // they are looking at labels, not the set.
     if (interactive && !graphical) {
       process.stderr.write(
@@ -912,41 +982,25 @@ export async function main({ command, args: rest, color, mode }) {
     if (pack.description) process.stdout.write(`  ${pack.description}\n`);
     process.stdout.write('\n');
 
-    // SLOT ORDER, not member order. The slot is the stable identity a project
-    // hashes to; a theme is that identity's inhabitants. Walking the slots is
-    // also what surfaces a gap as a gap rather than a shorter list.
-    const useColor = cliColor({ color });
-    for (let slot = 0; slot < SLOT_COUNT; slot++) {
-      // A REAL SWATCH, not the text "hue 22/62". identityColors({ slot, projectColor: null }, tone) is
-      // the same ramp every other surface paints this slot with, so the strip
-      // shows the colour the bar and the border actually use rather than a
-      // second opinion computed here. sgr.js exports fg(hex) and no background
-      // setter, hence a block glyph rather than a filled cell.
-      const swatch = cliSwatch(identityColors({ slot, projectColor: null }, ctxTone).base, { color: useColor });
-
-      // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
-      // precisely when this view earns its keep — so the gap is caught, labelled,
-      // and the grid keeps going. A theme must fill all twelve; showing WHICH one
-      // is missing beats refusing to draw any of them.
-      //
-      // assetsFor + readFileSync + transmit live in THIS SAME try, not after it.
-      // The build workflow writes all twelve member blocks up front and fills
-      // sprites one member at a time, so every intermediate state of a theme
-      // under construction has twelve members and fewer than twelve sprite
-      // sets — assetsFor throwing on a faulted asset-root or a missing
-      // <state>.png is the ORDINARY case this view exists to survive, not an
-      // edge case. One bad slot labels itself; the other eleven still draw.
-      let member = null;
+    // DECLARATION ORDER: the cast as its author wrote it. Since spec-version 2 a member
+    // holds roles, not slots, so the caption names the roles a member answers to.
+    const idWidth = Math.max(...[...pack.members.keys()].map((id) => id.length));
+    for (const member of pack.members.values()) {
+      // assetsFor + readFileSync + transmit live in ONE try per member. The build
+      // workflow writes every member block up front and fills sprites one member at
+      // a time, so every intermediate state of a theme under construction has more
+      // members than sprite sets — assetsFor throwing on a faulted asset-root or a
+      // missing <state>.png is the ORDINARY case this view exists to survive, not an
+      // edge case. One bad member labels itself; the others still draw.
       let fault = null;
       let rendered = null;
       try {
-        member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+        const assets = assetsFor(pack, member.id, schemeMode);
         if (graphical) {
-          const assets = assetsFor(pack, member.id, schemeMode);
           // A STRIP, NOT A GRID, and that is a property of transmit(): it sends
           // C=1 (the image does not move the cursor) and then advances by hand
           // with exactly `rows` newlines, so consecutive images always stack
-          // vertically. Twelve side by side would need a placement-capable
+          // vertically. Side by side would need a placement-capable
           // emitter that does not exist — see the spec's §1.2 and §9.
           rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows, frame });
         }
@@ -966,15 +1020,15 @@ export async function main({ command, args: rest, color, mode }) {
       if (rendered) process.stdout.write(rendered);
 
       process.stdout.write(
-        `  ${String(slot).padStart(2)}  ${swatch}  ` +
-        `${(member?.label ?? '(no member)').padEnd(20)}${fault ?? member?.id}\n`
+        `  ${member.label.padEnd(20)}${member.id.padEnd(idWidth)}  ${rolesText(member.roles)}`
+        + `${fault === null ? '' : `  ${fault}`}\n`
       );
     }
     process.stdout.write('\n');
   } else if (command === 'theme sheet') {
     const { values } = parseLeaf(rest, leafOptions);
     // THE WHOLE THEME AT A GLANCE: one row per member, six poses across it, at whatever
-    // height fits your screen. `theme` shows twelve members in ONE state and `preview`
+    // height fits your screen. `theme` shows every member in ONE state and `preview`
     // shows one member in six — the sheet neither of them can draw is the one that puts
     // every member beside every state, and that is the view you want when judging
     // whether a roster reads as a set.
@@ -1006,7 +1060,7 @@ export async function main({ command, args: rest, color, mode }) {
     }
 
     const ids = memberArg === undefined
-      ? [...Array(SLOT_COUNT).keys()].map((slot) => defaultMemberForSlot(pack, slot))
+      ? [...pack.members.keys()]
       : [memberOrThrow(pack, memberArg).id];
 
     // json with no --out has no file to describe and nothing worth rendering (a
@@ -1064,7 +1118,7 @@ export async function main({ command, args: rest, color, mode }) {
       capability === GRAPHICS_CAPABILITY.STATIC
     );
     process.stdout.write(`\n  ${pack.id} — ${pack.label}\n  ${STATES.join('   ')}\n\n`);
-    const captions = sheetRowCaptions(boxed, ctxTone);
+    const captions = sheetRowCaptions(boxed);
     for (const [index, row] of boxed.entries()) {
       if (graphical) {
         process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows, frame }));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeRemote, gitContext, projectKeyFor, displayProject, autoSlot,
 } from '../src/bus/identity.js';
-import { SLOT_COUNT } from 'familiar-theme';
+import { SLOT_COUNT } from '../src/protocol/slot-hues.js';
 import { execFile, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';

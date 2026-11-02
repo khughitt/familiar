@@ -16,6 +16,16 @@ test('missingDependencies: every declared dependency without a node_modules entr
   assert.deepEqual(missingDependencies(fixture(['yaml', 'jsonc-parser'])), []);
 });
 
+// The family file's TOML parser is a runtime dependency like yaml: the launcher gate
+// names it when the tree lacks it, rather than a hook failing on a bare specifier.
+test('missingDependencies: the real manifest declares smol-toml, so its absence is named', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const missing = missingDependencies({
+    root, exists: (path) => !path.endsWith('/node_modules/smol-toml'),
+  });
+  assert.deepEqual(missing, ['smol-toml']);
+});
+
 test('requireDependencies: one line naming the project and the install command', () => {
   const lines = [];
   const codes = [];

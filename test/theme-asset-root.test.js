@@ -29,25 +29,25 @@ const POSES = `
       error: error
       done: done`;
 
-// The twelve slots a lone member has to hold to make a whole theme. Coverage is
-// checked at parse time, so a fixture declaring one member declares all twelve.
-const EVERY_SLOT = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+// The roles a lone member has to hold to make a whole theme: exactly one member holds
+// `default`, so a fixture declaring one member gives it that role.
+const DEFAULT_ONLY = ['default'];
 
-// slots, not slot: the caller passes the list this member holds, because only
-// the caller knows how many members its descriptor declares.
-function member(id, slots, assetRoot = `sprites/${id}`) {
+// The caller passes the roles this member holds, because only the caller knows how
+// many members its descriptor declares.
+function member(id, roles, assetRoot = `sprites/${id}`) {
   return `  - id: ${id}
     asset-root: ${assetRoot}
     label: ${id}
-    slots: [${slots.join(', ')}]
+    roles: [${roles.join(', ')}]
     persona: A sufficiently detailed test persona.
     animation: { kind: static }
     poses:${POSES}
 `;
 }
 
-function descriptor(members = member('valid-cat', EVERY_SLOT)) {
-  return `spec-version: 1
+function descriptor(members = member('valid-cat', DEFAULT_ONLY)) {
+  return `spec-version: 2
 id: cats
 label: Cats
 rows: 4
@@ -56,7 +56,7 @@ ${members}`;
 }
 
 test('asset-root is required and names the member', () => {
-  const yaml = descriptor(member('valid-cat', EVERY_SLOT).replace('    asset-root: sprites/valid-cat\n', ''));
+  const yaml = descriptor(member('valid-cat', DEFAULT_ONLY).replace('    asset-root: sprites/valid-cat\n', ''));
   assert.throws(
     () => parseThemePack(yaml, '/themes/cats'),
     /member "valid-cat".*asset-root.*missing/i,
@@ -76,7 +76,7 @@ for (const [label, value] of [
 ]) {
   test(`asset-root rejects ${label} paths`, () => {
     assert.throws(
-      () => parseThemePack(descriptor(member('valid-cat', EVERY_SLOT, value)), '/themes/cats'),
+      () => parseThemePack(descriptor(member('valid-cat', DEFAULT_ONLY, value)), '/themes/cats'),
       /member "valid-cat".*asset-root/i,
     );
   });
@@ -85,7 +85,7 @@ for (const [label, value] of [
 test('pure parsing stores normalized lexical asset fields without touching the filesystem', () => {
   const themeDir = '/a/theme/that/does/not/exist';
   const parsed = parseThemePack(
-    descriptor(member('valid-cat', EVERY_SLOT, 'prior/static-v1/sprites/valid-cat')),
+    descriptor(member('valid-cat', DEFAULT_ONLY, 'prior/static-v1/sprites/valid-cat')),
     themeDir,
   );
   const found = parsed.members.get('valid-cat');
@@ -95,7 +95,7 @@ test('pure parsing stores normalized lexical asset fields without touching the f
 
 test('memberAssetDir refuses a parse-only lexical directory as unproven', () => {
   const pack = parseThemePack(
-    descriptor(member('valid-cat', EVERY_SLOT, 'prior/static-v1/sprites/valid-cat')),
+    descriptor(member('valid-cat', DEFAULT_ONLY, 'prior/static-v1/sprites/valid-cat')),
     '/themes/cats',
   );
   const found = pack.members.get('valid-cat');
@@ -118,10 +118,10 @@ function loaderFixture() {
   symlinkSync(outside, join(themeDir, 'sprites', 'escape-cat'));
   writeFileSync(join(themeDir, 'sprites', 'not-a-directory'), 'not a directory');
   const yaml = descriptor([
-    member('valid-cat', [0]),
-    member('escape-cat', [1]),
-    member('missing-cat', [2]),
-    member('not-a-directory', [3, 4, 5, 6, 7, 8, 9, 10, 11]),
+    member('valid-cat', ['default']),
+    member('escape-cat', []),
+    member('missing-cat', []),
+    member('not-a-directory', []),
   ].join(''));
   writeFileSync(join(themeDir, 'theme.yaml'), yaml);
   return { root, themeDir, outside, yaml };
@@ -159,7 +159,7 @@ test('async and sync loaders produce the same parsed members, proven roots, and 
   const asyncPack = await loadThemePack(themeDir);
   const syncPack = loadThemePackSync(themeDir);
   assert.deepEqual(memberSummary(asyncPack), memberSummary(syncPack));
-  assert.deepEqual([...asyncPack.bySlot], [...syncPack.bySlot]);
+  assert.deepEqual([...asyncPack.byRole], [...syncPack.byRole]);
   assert.equal(asyncPack.members.get('valid-cat').assetDirProof, 'filesystem');
   assert.equal(syncPack.members.get('valid-cat').assetDirProof, 'filesystem');
 });
@@ -182,7 +182,7 @@ test('a sibling descriptor resolves an immutable release root from the theme dir
   const assetRoot = `releases/${digest}/sprites/valid-cat`;
   mkdirSync(join(themeDir, assetRoot), { recursive: true });
   const temporary = join(themeDir, '.theme.yaml.promote-test');
-  writeFileSync(temporary, descriptor(member('valid-cat', EVERY_SLOT, assetRoot)));
+  writeFileSync(temporary, descriptor(member('valid-cat', DEFAULT_ONLY, assetRoot)));
 
   const asyncPack = await loadThemePack(themeDir, { descriptorPath: temporary });
   const syncPack = loadThemePackSync(themeDir, { descriptorPath: temporary });

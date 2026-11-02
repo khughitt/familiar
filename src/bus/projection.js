@@ -26,10 +26,14 @@ export async function projectSnapshot({
   let intent;
   let faults = new Map();
 
+  // `admitted` is the seq at which a record entered sessions.json, kept while it stays:
+  // `seq` moves on every event and state change, so it orders nothing by arrival. One
+  // that leaves and returns is admitted again; one written before admission existed
+  // gets the current seq, its true order being gone (spec §5.6).
   if (mode === 'drop-only') {
     const present = new Set(roots.map((row) => row.sessionId));
     for (const [sid, record] of previous) {
-      if (present.has(sid)) kept.set(sid, record);
+      if (present.has(sid)) kept.set(sid, { ...record, admitted: record.admitted ?? seq });
     }
     intent = Object.fromEntries(Object.entries(priorIntent).filter(([sid]) => kept.has(sid)));
   } else {
@@ -78,7 +82,7 @@ export async function projectSnapshot({
       const { agents: _carried, ...base } = context;
       kept.set(sid, {
         ...base, sessionId: sid, agentId: row.id, harness: row.harness, basis,
-        seq: changed ? seq : old.seq, state: row.state, updatedAt: row.updatedAt,
+        seq: changed ? seq : old.seq, admitted: old?.admitted ?? seq, state: row.state, updatedAt: row.updatedAt,
         ...agentsOf(rootRows.get(row.id)),
       });
     }

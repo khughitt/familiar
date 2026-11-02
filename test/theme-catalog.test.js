@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliColor, cliSwatch } from '../bin/familiar.js';
-import { SLOT_COUNT, ROW_MIN, ROW_MAX, STATES, encodeRgba } from 'familiar-theme';
+import { ROW_MIN, ROW_MAX, STATES, encodeRgba } from 'familiar-theme';
 
 // Injected roots. Nothing here touches disk: catalog.js takes `readdir` and
 // `exists` so the enumeration rules can be tested without building a tree.
@@ -126,9 +126,12 @@ const themeFixture = fileURLToPath(new URL('../test/fixtures/theme-pack', import
 // its own `theme` still resolves to by default. Built once and reused.
 const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-catalog-shipped-'));
 cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
+// A pack's own id must match the directory it is installed under.
+writeFileSync(join(shippedThemesFixture, 'cats', 'theme.yaml'),
+  readFileSync(join(themeFixture, 'theme.yaml'), 'utf8').replace(/^id: fixture$/m, 'id: cats'));
 
-// A second, independently-generated theme with two members (able covering
-// eleven slots, baker covering the twelfth) — the engine fixture is
+// A second, independently-generated theme with two members (able holding the
+// default role, baker holding none) — the engine fixture is
 // deliberately single-member, so it cannot stand in for a test whose whole
 // point is fault isolation ACROSS members. Self-authored, so this needs no
 // real art either.
@@ -143,16 +146,13 @@ function writeTwoMemberTheme(dir) {
   }
   const png = encodeRgba({ w: 8, h: 8, buf });
   const poseBlock = STATES.map((state) => `      ${state}: flat grey square`).join('\n');
-  for (const [member, slots] of [
-    ['able', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
-    ['baker', [11]],
-  ]) {
+  for (const member of ['able', 'baker']) {
     const spritesDir = join(dir, 'sprites', member);
     mkdirSync(spritesDir, { recursive: true });
     for (const state of STATES) writeFileSync(join(spritesDir, `${state}.png`), png);
   }
   writeFileSync(join(dir, 'theme.yaml'), [
-    'spec-version: 1',
+    'spec-version: 2',
     'id: broken',
     'label: Broken',
     'rows: 4',
@@ -160,8 +160,8 @@ function writeTwoMemberTheme(dir) {
     '  - id: able',
     '    asset-root: sprites/able',
     '    label: Able',
-    '    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]',
-    '    persona: covers eleven slots so removing baker still leaves eleven',
+    '    roles: [default]',
+    '    persona: the default member, whose sprites stay in place',
     '    animation:',
     '      kind: static',
     '    poses:',
@@ -169,7 +169,7 @@ function writeTwoMemberTheme(dir) {
     '  - id: baker',
     '    asset-root: sprites/baker',
     '    label: Baker',
-    '    slots: [11]',
+    '    roles: []',
     '    persona: the one member whose sprite directory gets removed',
     '    animation:',
     '      kind: static',
@@ -220,21 +220,35 @@ test('familiar theme list names the shipped theme active', () => {
   assert.match(result.stdout, /shipped/);
 });
 
+// A user theme copied from the fixture pack, its descriptor's id set to the directory
+// it sits in, as `theme add` installs it: a pack whose id differs from its directory
+// lists as a fault (Ruling 11), which the next test but one pins.
+function ownId(env, dir) {
+  const descriptor = join(env.FAMILIAR_CONFIG_DIR, 'themes', dir, 'theme.yaml');
+  writeFileSync(descriptor, readFileSync(descriptor, 'utf8').replace(/^id: fixture$/m, `id: ${dir}`));
+  return descriptor;
+}
+
 // An inactive theme keeps the fixed status column blank, so its details align
 // with the active row and with any description continuation below it.
-//
-// The fixture also pins a real distinction: the copied directory is named
-// `spare` while the theme.yaml inside it still says `id: fixture`. themeDirFor
-// resolves by DIRECTORY name, so the directory is what the listing must print.
 test('a theme that is not active has a blank status and aligns its description', () => {
   const env = cliEnv({ theme: 'cats', userThemes: { spare: themeFixture } });
-  const descriptor = join(env.FAMILIAR_CONFIG_DIR, 'themes', 'spare', 'theme.yaml');
+  const descriptor = ownId(env, 'spare');
   writeFileSync(descriptor, `${readFileSync(descriptor, 'utf8')}\ndescription: Spare roster\n`);
   const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^ {2}cats {8}active {4}Fixture/m);
   assert.match(result.stdout, /^ {2}spare {7} {10}Fixture/m);
   assert.match(result.stdout, /^ {24}Spare roster$/m);
+});
+
+// themeDirFor resolves by DIRECTORY name, so a directory renamed by hand reaches a pack
+// whose id says otherwise; every live surface faults on it, and the listing says so.
+test('a user theme whose pack id differs from its directory lists as unreadable', () => {
+  const env = cliEnv({ theme: 'cats', userThemes: { spare: themeFixture } });
+  const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^ {2}spare {17}— unreadable: pack id "fixture" does not match its directory$/m);
 });
 
 test('an unreadable active theme still prints active on its row', () => {
@@ -264,11 +278,12 @@ test('a stray file in the user themes root does not brick themes, theme, or prev
 
   const preview = spawnSync(process.execPath, [bin, 'theme', 'preview', 'pip'], { encoding: 'utf8', env });
   assert.equal(preview.status, 0, preview.stderr);
-  assert.match(preview.stdout, /Pip · cats · slots 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11/);
+  assert.match(preview.stdout, /Pip · cats · roles default/);
 });
 
 test('familiar theme list reports a user theme that shadows a shipped one', () => {
   const env = cliEnv({ userThemes: { cats: themeFixture } });
+  ownId(env, 'cats');
   const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /shadows shipped/);
@@ -297,7 +312,7 @@ const THEME_MAX_BUFFER = 64 * 1024 * 1024;
 
 // FIX 2: graphicsCapability returns NONE for a plain TERM and for a tmux pane
 // whose probe refuses (src/render/term/capability.js). The verb's entire value is the
-// art, so a human looking at a bare slot listing in tmux needs to be told
+// art, so a human looking at a bare member listing in tmux needs to be told
 // that is not the full view — one stderr line naming the capability.
 test('familiar theme show without graphics names the capability on stderr', () => {
   const result = runTty(['theme', 'show'], {
@@ -319,39 +334,53 @@ test('familiar theme show WITH graphics prints no capability notice', () => {
   assert.equal(result.stderr, '');
 });
 
-test('familiar theme show prints one row per slot for the active theme', () => {
+test('familiar theme show prints one row per member, with its roles, for the active theme', () => {
   const result = runTty(['theme', 'show'], {
     encoding: 'utf8', env: cliEnv(GRAPHICAL), maxBuffer: THEME_MAX_BUFFER,
   });
   assert.equal(result.status, 0, result.stderr);
-  for (let slot = 0; slot < SLOT_COUNT; slot++) {
-    assert.match(result.stdout, new RegExp(`^\\s*${slot}\\s`, 'm'), `slot ${slot} missing`);
-  }
+  assert.match(result.stdout, /^ {2}Pip {17}pip {2}default\r?$/m);
+});
+
+test('familiar theme show walks the members in declaration order, default first in each row', () => {
+  const src = mkdtempSync(join(tmpdir(), 'familiar-order-theme-'));
+  writeTwoMemberTheme(src);
+  writeFileSync(join(src, 'theme.yaml'), readFileSync(join(src, 'theme.yaml'), 'utf8')
+    .replace("roles: [default]", "roles: [reviewer, default]"));
+  const result = spawnSync(process.execPath, [bin, 'theme', 'show', 'broken'], {
+    encoding: 'utf8', env: cliEnv({ userThemes: { broken: src } }),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const rows = result.stdout.split('\n').filter((line) => /^ {2}(Able|Baker) /.test(line));
+  assert.deepEqual(rows, [
+    '  Able                able   default, reviewer',
+    '  Baker               baker  (pin only)',
+  ]);
 });
 
 // THE LOAD-BEARING ASSERTION, and the one an earlier draft of this plan omitted.
 // Slot numbers are text; a version of this verb that printed twelve labels and
 // no art would satisfy every other test here while being useless as the cohesion
 // decision surface. Assert the kitty transmissions themselves.
-test('familiar theme show transmits one image per slot', () => {
+test('familiar theme show transmits one image per member', () => {
   const result = runTty(['theme', 'show'], {
     encoding: 'utf8', env: cliEnv(GRAPHICAL), maxBuffer: THEME_MAX_BUFFER,
   });
   assert.equal(result.status, 0, result.stderr);
-  // transmit() opens every image with the APC graphics introducer and a=T.
+  // transmit() opens every image with the APC graphics introducer and a=T. The
+  // active fixture has one member.
   const transmissions = result.stdout.match(/\x1b_Ga=T,/g) ?? [];
-  assert.equal(transmissions.length, SLOT_COUNT);
+  assert.equal(transmissions.length, 1);
 });
 
-// FIX 1: the build workflow writes all twelve member blocks up front and fills
+// FIX 1: the build workflow writes every member block up front and fills
 // sprites one at a time, so every intermediate state of a theme under
-// construction has twelve members and fewer than twelve sprite sets. A single
-// faulted member (here: baker's whole sprite directory removed, which
-// loadThemePackSync records as an assetRootFault) must not abort the view —
-// the other eleven slots still have to draw. The engine fixture is
-// single-member and cannot prove fault ISOLATION across members, so this
-// uses its own two-member pack instead of either the fixture or real cats.
-test('a theme with one members sprite directory removed still renders the other eleven slots', () => {
+// construction has more members than sprite sets. A single faulted member
+// (here: baker's whole sprite directory removed, which loadThemePackSync records
+// as an assetRootFault) must not abort the view — the other members still have
+// to draw. The engine fixture is single-member and cannot prove fault ISOLATION
+// across members, so this uses its own two-member pack instead.
+test('a theme with one members sprite directory removed still renders the other members', () => {
   const brokenSrc = mkdtempSync(join(tmpdir(), 'familiar-broken-theme-'));
   writeTwoMemberTheme(brokenSrc);
   rmSync(join(brokenSrc, 'sprites', 'baker'), { recursive: true, force: true });
@@ -362,24 +391,30 @@ test('a theme with one members sprite directory removed still renders the other 
   });
 
   assert.equal(result.status, 0, result.stderr);
-  for (let slot = 0; slot < SLOT_COUNT; slot++) {
-    assert.match(result.stdout, new RegExp(`^\\s*${slot}\\s`, 'm'), `slot ${slot} missing`);
-  }
-  // baker is slot 11 — its row must name the fault, not silently vanish or crash.
-  assert.match(result.stdout, /baker/);
-  // Eleven good slots still transmit their art; the broken one does not.
+  assert.match(result.stdout, /^ {2}Able {16}able {3}default\r?$/m);
+  // baker's row must name the fault, not silently vanish or crash.
+  assert.match(result.stdout, /^ {2}Baker {15}baker {2}\(pin only\) {2}\S.*baker/m);
+  // The good member still transmits its art; the broken one does not.
   const transmissions = result.stdout.match(/\x1b_Ga=T,/g) ?? [];
-  assert.equal(transmissions.length, SLOT_COUNT - 1);
+  assert.equal(transmissions.length, 1);
 });
 
-test('each slot row carries a coloured hue swatch', () => {
-  // --color's own default is 'never'; FAMILIAR_COLOR=auto opts back into the
-  // TTY-sensing this test is about.
-  const result = runTty(['theme', 'show'], {
-    encoding: 'utf8', env: { ...cliEnv(GRAPHICAL), FAMILIAR_COLOR: 'auto' }, maxBuffer: THEME_MAX_BUFFER,
+test('familiar theme show --json lists every member with its roles and asset fault', () => {
+  const brokenSrc = mkdtempSync(join(tmpdir(), 'familiar-broken-theme-'));
+  writeTwoMemberTheme(brokenSrc);
+  rmSync(join(brokenSrc, 'sprites', 'baker'), { recursive: true, force: true });
+  const result = spawnSync(process.execPath, [bin, '--json', 'theme', 'show', 'broken'], {
+    encoding: 'utf8', env: cliEnv({ userThemes: { broken: brokenSrc } }),
   });
-  // sgr.fg() emits a 24-bit foreground sequence; the swatch is a block glyph in it.
-  assert.match(result.stdout, /\x1b\[38;2;\d+;\d+;\d+m█/);
+  assert.equal(result.status, 0, result.stderr);
+  const shown = JSON.parse(result.stdout);
+  assert.deepEqual(shown.members.map(({ id, label, roles }) => ({ id, label, roles })), [
+    { id: 'able', label: 'Able', roles: ['default'] },
+    { id: 'baker', label: 'Baker', roles: [] },
+  ]);
+  assert.equal(shown.members[0].fault, null);
+  assert.match(shown.members[1].fault, /baker/);
+  assert.equal(Object.hasOwn(shown, 'slots'), false);
 });
 
 test('--rows lowers the render height so more of the roster fits', () => {
@@ -400,8 +435,7 @@ test('redirected theme output is plain and quiet', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /\x1b(?:\[|_G)/);
   assert.doesNotMatch(result.stderr, /graphics|art was drawn/i);
-  assert.match(result.stdout, /#[0-9a-f]{6}/i);
-  assert.match(result.stdout, /Pip/);
+  assert.match(result.stdout, /Pip {17}pip {2}default/);
 });
 
 test('CLI color requires a TTY and honours NO_COLOR', () => {
@@ -414,14 +448,26 @@ test('CLI color requires a TTY and honours NO_COLOR', () => {
 });
 
 test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
-  const env = cliEnv(GRAPHICAL);
-  env.FAMILIAR_COLOR = 'auto';   // opt into TTY/NO_COLOR sensing; the flag's own default is 'never'
-  env.NO_COLOR = '1';
-  delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
-  const result = runTty(['theme', 'show'], { encoding: 'utf8', env, maxBuffer: THEME_MAX_BUFFER });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal((result.stdout.match(/\x1b_Ga=T,/g) ?? []).length, SLOT_COUNT);
-  assert.doesNotMatch(result.stdout, /\x1b\[/);
+  const sense = (noColor) => {
+    const env = cliEnv(GRAPHICAL);
+    env.FAMILIAR_COLOR = 'auto';   // opt into TTY/NO_COLOR sensing; the flag's own default is 'never'
+    if (noColor) env.NO_COLOR = '1';
+    delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
+    return env;
+  };
+  // `theme show` paints no swatch; its claim here is the kitty art.
+  const show = runTty(['theme', 'show'], { encoding: 'utf8', env: sense(true), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(show.status, 0, show.stderr);
+  assert.equal((show.stdout.match(/\x1b_Ga=T,/g) ?? []).length, 1);
+  const projectDir = mkdtempSync(join(tmpdir(), 'familiar-nocolor-'));
+  // `projects` still paints an SGR swatch: the control proves the assertion can fail.
+  const painted = runTty(['projects', projectDir], { encoding: 'utf8', env: sense(false), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(painted.status, 0, painted.stderr);
+  assert.match(painted.stdout, /\x1b\[38;2;/);
+  const plain = runTty(['projects', projectDir], { encoding: 'utf8', env: sense(true), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.match(plain.stdout, /\x1b_Ga=T,/);
+  assert.doesNotMatch(plain.stdout, /\x1b\[[0-9;]*m/);   // cursor-move CSI around the art is not SGR
 });
 
 // FIX 4: `--rows` bounds must come from familiar-theme's ROW_MIN/ROW_MAX, not
@@ -517,7 +563,7 @@ test('preview accepts a theme that is not active', () => {
     { encoding: 'utf8', env },
   );
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Pip · spare · slots 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11/);
+  assert.match(result.stdout, /Pip · spare · roles default/);
 });
 
 test('preview --state shows exactly the named state', () => {

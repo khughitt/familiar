@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertId } from 'familiar-theme';
-import { STAGING_DIR_NAME } from './add.js';
+import { BACKUP_DIR_NAME, STAGING_DIR_NAME } from './add.js';
 
 // Enumeration lives here and not in config.js, which resolves exactly ONE id
 // (themeDirFor) and otherwise reads config files. This module walks directories
@@ -27,9 +27,9 @@ function idsIn(dir, { readdir, exists }, reserved = new Set()) {
 export function listThemes(paths, { readdir = readdirSync, exists = existsSync } = {}) {
   const io = { readdir, exists };
   const shipped = idsIn(paths.themesDir, io);
-  // .staging is the installer's one reserved name; its state is reported by
-  // stagingStatus, not misread as a theme id.
-  const user = idsIn(paths.userThemesDir, io, new Set([STAGING_DIR_NAME]));
+  // .staging and .replace-backup are the installer's reserved names; their state is
+  // reported by stagingStatus and replacementBackups, not misread as theme ids.
+  const user = idsIn(paths.userThemesDir, io, new Set([STAGING_DIR_NAME, BACKUP_DIR_NAME]));
 
   // Validate BEFORE joining, exactly as themeDirFor does — a name that cannot
   // be a theme id is reported by name rather than skipped, because a skipped
@@ -69,4 +69,28 @@ export function stagingStatus(paths, { lstat = lstatSync, readdir = readdirSync 
   }
   if (!st.isDirectory()) return 'not-a-directory';
   return readdir(dir).length > 0 ? 'occupied' : 'empty';
+}
+
+// A backup is named <id>-<ISO instant> by theme add --replace.
+const BACKUP_ENTRY = /^(.+)-(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/;
+
+// Every replacement backup that survived a failed restore: the only copy of a theme a
+// replacement was about to lose, so `theme list` names each one until a person restores
+// or removes it. Read with lstat first, as staging is; an entry is only named, never
+// opened. A backup root that is not a directory is reported, as staging's is.
+export function replacementBackups(paths, { lstat = lstatSync, readdir = readdirSync } = {}) {
+  const root = join(paths.userThemesDir, BACKUP_DIR_NAME);
+  let st;
+  try {
+    st = lstat(root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { root, notADirectory: false, backups: [] };
+    throw error;
+  }
+  if (!st.isDirectory()) return { root, notADirectory: true, backups: [] };
+  const backups = readdir(root).sort().map((entry) => ({
+    id: BACKUP_ENTRY.exec(entry)?.[1] ?? entry,
+    path: join(root, entry),
+  }));
+  return { root, notADirectory: false, backups };
 }

@@ -2,11 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, writeFileSync, readFileSync, openSync, closeSync, writeSync, cpSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, openSync, closeSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wrapForTmux } from '../src/render/term/tmux.js';
+import { writeTheme } from './helpers/themes.js';
 
 // Capture the attached client's PTY: these are the bytes an outer terminal receives.
 const has = (binary) => spawnSync('sh', ['-c', `command -v ${binary}`], { stdio: 'ignore' }).status === 0;
@@ -95,7 +96,7 @@ test('familiar theme preview inside a passthrough-all pane paints the client', {
   const state = mkdtempSync(join(tmpdir(), 'state-'));
   const config = mkdtempSync(join(tmpdir(), 'config-'));
   const themes = mkdtempSync(join(tmpdir(), 'themes-'));
-  cpSync(fileURLToPath(new URL('fixtures/theme-pack', import.meta.url)), join(themes, 'cats'), { recursive: true });
+  writeTheme(themes, 'cats');
   const go = join(state, 'go');
   const paneEnv = { FAMILIAR_STATE_DIR: state, FAMILIAR_CONFIG_DIR: config, FAMILIAR_THEMES_DIR: themes };
   assert.equal(spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { env: { ...process.env, ...paneEnv } }).status, 0);

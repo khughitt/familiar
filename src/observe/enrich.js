@@ -1,7 +1,38 @@
 import { sameBasis, sessionIdOf } from '../bus/sessions.js';
 import { gitContext as defaultGitContext, projectKeyFor, displayProject } from '../bus/identity.js';
-import { NO_PROJECT, lookupProjectColor as defaultLookupProjectColor } from '../bus/project-color.js';
+import { lookupProjectColor as defaultLookupProjectColor } from '../bus/project-color.js';
+import { lookupFamily as defaultLookupFamily } from '../bus/family.js';
+import { assertId, RESERVED_ROLE } from '../bus/id.js';
 import { noTerminalMessage } from '../render/harness.js';
+
+// The session's role, from the hook's environment: the one source in this piece (spec
+// §5.5). Unset or empty is no role. Anything else must be an id, and an invalid value is
+// an error, never null: a misspelled role that silently showed the default is the
+// anti-goal. `default` is reserved for an agent with no role.
+export function roleFromEnv(env) {
+  const value = env.FAMILIAR_ROLE;
+  if (value === undefined || value === '') return null;
+  assertId(value, 'FAMILIAR_ROLE', 'reviewer');
+  if (value === RESERVED_ROLE) {
+    throw new Error(`FAMILIAR_ROLE "${RESERVED_ROLE}" is reserved for an agent with no role — unset FAMILIAR_ROLE instead`);
+  }
+  return value;
+}
+
+// The colour and family of a checkout, reused from the session's own record while it is
+// in the same checkout and owns both, so the hook pays for `tasks resolve` and the family
+// file once per session and checkout (spec §3, §5.3). A record that owns a colour but no
+// family (written before the family existed) is looked up afresh, both together.
+async function projectFacts(old, repoRoot, lookupProjectColor, lookupFamily) {
+  if (repoRoot === null) return { color: null, family: null, warnings: [] };
+  if (old && old.repoRoot === repoRoot && Object.hasOwn(old, 'projectColor') && Object.hasOwn(old, 'family')) {
+    return { color: old.projectColor, family: old.family, warnings: [] };
+  }
+  const { color, root, warnings } = await lookupProjectColor(repoRoot);
+  // A null registered root (unregistered, or tasks absent) has no family file to read.
+  const family = root === null ? null : await lookupFamily(root);
+  return { color, family, warnings };
+}
 
 const PROCESS_READ_FAILURES = ['PROCESS_UNREADABLE', 'PROCESS_UNAVAILABLE'];
 
@@ -19,13 +50,21 @@ function terminalHolder({ chain, pid, renderProcess }) {
 export async function prepareEnrichment({
   envelope, snapshot, prior, relayProcess, renderProcess, adapterFor,
   gitContext = defaultGitContext, lookupProjectColor = defaultLookupProjectColor,
-  startPid = process.pid,
+  lookupFamily = defaultLookupFamily, env = process.env, startPid = process.pid,
 }) {
   const event = envelope.event;
   let sessionId = sessionIdOf(event.root ?? event.agentId);
+  const refused = (exitCode, reason) => ({ ok: false, sessionId, exitCode, reason });
+  // First, before any process or git work: the hook prints why and writes nothing, so the
+  // session keeps its previous record (Review Focus 3).
+  let role;
+  try {
+    role = roleFromEnv(env);
+  } catch (error) {
+    return refused(0, error.message);
+  }
   const agent = snapshot?.agents[event.agentId];
   const row = agent?.root ? snapshot.agents[agent.root] : agent;
-  const refused = (exitCode, reason) => ({ ok: false, sessionId, exitCode, reason });
   if (!row) return { ...refused(0, 'no registry row for this session'), absent: true };
   sessionId = row.sessionId;
   if (envelope.registry.generation !== snapshot.generation) return refused(0, 'obsolete envelope');
@@ -63,18 +102,15 @@ export async function prepareEnrichment({
   const holder = terminalHolder({ chain: relayProcess.ancestors(startPid), pid, renderProcess });
 
   const context = await gitContext(row.cwd);
-  const old = prior.sessions[sessionId];
-  const carried = old && old.repoRoot === context.repoRoot && Object.hasOwn(old, 'projectColor');
-  const color = context.repoRoot === null ? NO_PROJECT : carried
-    ? { color: old.projectColor, warnings: [] } : await lookupProjectColor(context.repoRoot);
+  const facts = await projectFacts(prior.sessions[sessionId], context.repoRoot, lookupProjectColor, lookupFamily);
   return {
     ok: true, sessionId, basis, terminal: { pid, starttime }, holder,
     context: {
       cwd: row.cwd, projectKey: projectKeyFor({ ...context, cwd: row.cwd }),
       project: displayProject({ ...context, cwd: row.cwd }),
       remote: context.remote, repoRoot: context.repoRoot, repositoryRoot: context.repositoryRoot,
-      projectColor: color.color,
+      projectColor: facts.color, family: facts.family, role,
     },
-    warnings: color.warnings,
+    warnings: facts.warnings,
   };
 }

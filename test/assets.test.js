@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseIdentities } from '../src/bus/pins.js';
+import { preloadedThemes } from './helpers/themes.js';
 import { makePrepareSprites } from '../bin/familiar-commands.js';
 import { assetsFor, parseThemePack, STATES } from 'familiar-theme';
 
@@ -17,7 +18,7 @@ const pack = {
   dir: '/themes/cats',
   rows: ROWS,
   members: new Map([['ginger-tabby', {
-    slots: [3],
+    roles: ['default'],
     label: 'Ginger',
     assetRoot: 'prior/static-v1/sprites/ginger-tabby',
     assetDir: '/themes/cats/prior/static-v1/sprites/ginger-tabby',
@@ -187,7 +188,7 @@ test('the DEFAULT exists() reads the real filesystem — no injection', (t) => {
     dir,
     rows: ROWS,
     members: new Map([['ginger-tabby', {
-      slots: [3],
+      roles: ['default'],
       label: 'Ginger',
       assetRoot: 'sprites/ginger-tabby',
       assetDir: join(dir, 'sprites', 'ginger-tabby'),
@@ -213,14 +214,14 @@ function admissionFixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-animation-admission-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const pack = parseThemePack(`
-spec-version: 1
+spec-version: 2
 id: cats
 label: Cats
 members:
   - id: healthy-cat
     asset-root: sprites/healthy-cat
     label: Healthy Cat
-    slots: [3]
+    roles: [default]
     persona: Healthy.
     animation: { kind: clips }
     poses:
@@ -228,7 +229,7 @@ ${ADMISSION_POSES}
   - id: broken-cat
     asset-root: sprites/broken-cat
     label: Broken Cat
-    slots: [9]
+    roles: []
     persona: Broken.
     animation: { kind: clips }
     poses:
@@ -236,7 +237,7 @@ ${ADMISSION_POSES}
   - id: static-cat
     asset-root: sprites/static-cat
     label: Static Cat
-    slots: [0, 1, 2, 4, 5, 6, 7, 8, 10, 11]
+    roles: []
     persona: Still.
     animation: { kind: static }
     poses:
@@ -256,10 +257,12 @@ identities:
     slot: 3
   - project: broken
     slot: 9
+    members: { cats: broken-cat }
   - project: still
     slot: 0
+    members: { cats: static-cat }
 `);
-  return { dir, pack, catalog, tone: { mode: 'dark', satScale: 1 } };
+  return { dir, catalog, tone: { mode: 'dark', satScale: 1 }, themes: preloadedThemes({ cats: pack }) };
 }
 
 function admissionRecord(sessionId, project) {
@@ -271,6 +274,8 @@ function admissionRecord(sessionId, project) {
     repoRoot: `/repos/${project}`,
     repositoryRoot: `/repos/${project}`,
     projectColor: null,
+    family: null,
+    role: null,
     cwd: `/repos/${project}`,
     pid: 100,
     state: 'working',
@@ -308,8 +313,8 @@ test('animation admission validates and preflights one clips member once for eve
   assert.equal(preflighted.length, 1);
   assert.strictEqual(preflighted[0].animationSet, set);
   assert.deepEqual(Object.keys(preflighted[0].options.roots), STATES);
-  assert.strictEqual(prepared.animationFor('healthy-cat'), ref);
-  assert.strictEqual(prepared.animationSetFor('healthy-cat'), set);
+  assert.strictEqual(prepared.animationFor('cats', 'healthy-cat'), ref);
+  assert.strictEqual(prepared.animationSetFor('cats', 'healthy-cat'), set);
   assert.equal(prepared.faults.size, 0);
 });
 
@@ -346,9 +351,9 @@ test('a malformed animation faults only its member even for Ghostty; static is e
   assert.deepEqual(loaded.sort(), ['broken-cat', 'healthy-cat', 'static-cat']);
   assert.deepEqual([...prepared.identities.keys()].sort(), ['good', 'still']);
   assert.match(prepared.faults.get('bad'), /unknown role "wobble"/);
-  assert.deepEqual(prepared.animationFor('static-cat'), { kind: 'static' });
+  assert.deepEqual(prepared.animationFor('cats', 'static-cat'), { kind: 'static' });
   assert.throws(
-    () => prepared.animationFor('broken-cat'),
-    /no animation for member "broken-cat"/,
+    () => prepared.animationFor('cats', 'broken-cat'),
+    /no animation for member "cats\/broken-cat"/,
   );
 });

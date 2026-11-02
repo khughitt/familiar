@@ -20,14 +20,19 @@ have since been fixed but not yet re-tested on hardware.
 | terminal | Relay lifecycle events through `familiar observe` | Kitty-graphics-capable terminals receive the current full-colour image. |
 | Claude Code | Relay lifecycle hooks and `familiar statusline` | The status line owns the cells; Familiar's observer replaces the image beneath them on state changes. |
 | agy | Relay lifecycle hooks and `familiar statusline` | As for Claude Code: agy's custom status line passes the cells through intact (it rewrites `ESC[39m` as `ESC[m`, which does not touch them). agy's settings are hq's, so pointing its `statusLine` at `familiar statusline` is wired there, not by Familiar's installer. |
-| Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
+| Codex | Codex native pet state | `familiar install pets` writes every configured theme as Codex pets; Codex selects its native animation track. |
 | OpenCode | Relay server plugin and Familiar TUI plugin | Relay supplies lifecycle events; Familiar's observer publishes presentation state and its TUI plugin draws the full-colour graphic. |
 | Niri desktop moments | `attention.json` | `integrations/niri-desktop` plays one click-through moment per reserved input, approval, error or finished-turn episode on the focused output. |
 | Noctalia workspace pills | `attention.json`, `niri-workspaces.json` | `integrations/noctalia-plugin` marks each workspace with its agents' attention and dismisses it on request (`docs/attention.md`). |
 | Niri window signals | `intent.json` | `familiar-niri watch` lights each terminal's niri-material glass in its session's identity hue. |
 
-The sprite contract is six full-colour state images plus `rows`. The same contract is
-used by terminal, status-line, Codex, OpenCode, and desktop surfaces.
+The sprite contract is six full-colour state images plus `rows` for each member of a
+theme, which also declares each member's roles and one `default` member. A theme may add
+a world: one image per locale, all one `size`, each with the `places` (floor positions in
+image pixels, in fill order) where members stand. Every session shows the `home` locale.
+The same contract is used by terminal, status-line, Codex, OpenCode, and desktop
+surfaces. Terminals draw the one resolved member; a world is carried on the identity in
+`intent.json` for composed surfaces, which place agents by their `admitted` order.
 
 ## Terminal and status-line ownership
 
@@ -42,13 +47,17 @@ Claude Code polls the status line every `refreshInterval` for every open session
 `familiar statusline` caches each session's rendered line under
 `$FAMILIAR_STATE_DIR/statusline-render/`. A poll whose inputs are unchanged (the HUD
 fields from the payload, git, the claimed or retained task and its stage; the session's
-bus record, which carries the agent count; `config.yaml`, `scheme.json` and
-`identities.yaml`; the session's transmit ledger) prints the cached line
+bus record, which carries the agent count, the family and the role; `config.yaml`, with its
+`families:`, `scheme.json` and `identities.yaml`; every installed theme's `theme.yaml`, in the
+user and shipped theme directories, so adding, replacing or removing a theme or editing a
+pack's roles, rows or world is a miss; the session's transmit ledger) prints the cached line
 without loading the renderer. An entry also expires when a `done` or `error` intent decays,
 and after 30 s in any case, which bounds how long the inputs the key does not cover take to
-reach the line: the theme pack's files, familiar's own code, symlinks under a pinned or
-recorded path, and another session's malformed entry in the sessions file. `--with` output, a
-faulted line, an image still awaiting its settle, and a payload with no `session_id` are
+reach the line: a pack's sprites and world images (a world image deleted under a cached line
+faults within 30 s), familiar's own code, symlinks under a pinned or recorded path, and
+another session's malformed entry in the sessions file. `--with` output, a
+faulted line (a world that fails proof included), an image still awaiting its settle, and a
+payload with no `session_id` are
 never cached; `familiar reap` removes the entries of sessions no longer on
 the bus. Anything new the HUD shows must reach it through `readFields`
 (`src/render/term/statusfields.js`), which the key covers, or it stays stale for up to 30 s.
@@ -86,8 +95,8 @@ addressed.
 
 ## Codex
 
-Codex provides its own pet renderer. Familiar installs one pet per current theme
-member and supplies the full-colour spritesheet; Codex drives the visible pet from
+Codex provides its own pet renderer. Familiar installs one pet per member of every
+configured theme and supplies the full-colour spritesheet; Codex drives the visible pet from
 its own state. Relay owns Codex's lifecycle hooks and invokes `familiar observe`
 to update Familiar's shared intent. Codex alone draws the pet.
 
@@ -100,17 +109,25 @@ measured on Codex 0.146 and reproduced on 0.149 on 2026-08-22 with an app-server
 `config/read` probe: the effective value was `custom:project-specific`, and its
 reported origin was the project `.codex` directory.
 
-Familiar writes one stable `custom:familiar-<member>` pet id per theme member.
-`familiar install pets` compiles that roster, stamping each pet with a hash of the
-sheet it compiled so a later session can tell whether the art belongs to the
-active theme.
+Familiar writes one stable `custom:familiar-<theme>--<member>` pet id per member of
+each configured theme. The double hyphen separates the two because an id never holds
+one, so every pair has its own id (`forest-cats`/`ginger` and `forest`/`cats-ginger`
+differ); Codex 0.166.0 loads and draws a pet so named, probed on 2026-11-02 by the
+§6.1 rendering method. `familiar install pets` compiles that roster, stamping each
+pet with a hash of the sheet it compiled so a later session can tell whether the art
+belongs to the session's theme. The managed config is recognised by that per-theme text
+only: a file naming a single-theme `custom:familiar-<member>` id is refused like any
+unmanaged file (see [Codex pets](install.md#codex-pets) for the one-time removal).
 
 The project's selection is then **maintained automatically**, with
 [relay hooks and terminal ownership](install.md#codex-lifecycle-hooks) set up;
 daemon-hosted hooks require launching `codex --no-daemon`. On relay's Codex
-`session-start` event, `familiar observe` compares the member it resolved against
-the repository's managed `.codex/config.toml` and rewrites that one file when
-they disagree.
+`session-start` event, `familiar observe` compares the theme and member it resolved
+against the repository's managed `.codex/config.toml` and rewrites that one file
+when they disagree. That file is the repository's face, read by every later launch,
+so only a session with no role converges it: a session started with `FAMILIAR_ROLE`
+prints `codex: session role "<role>" set — repository pet selection left unchanged`
+and writes nothing.
 
 In a Git worktree that file is the worktree's own, never the main checkout's,
 and the member is the one its repository's pins choose: a worktree inherits the

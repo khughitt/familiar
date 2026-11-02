@@ -11,7 +11,6 @@ import { createProcessOps } from 'relay';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { readJson, writeJsonAtomic } from '../src/bus/store.js';
 import { readSessions } from '../src/bus/sessions.js';
-import { loadConfig } from '../src/config.js';
 import { loadContext } from '../src/observe/context.js';
 import { currentEpoch } from '../src/attention/store.js';
 import { mapSessionsToWindows, niriWindowsPath } from '../integrations/niri/window.js';
@@ -38,6 +37,9 @@ const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not n
 const processOps = createProcessOps();
 
 let lastWritten = null;
+// Diagnostics already written, so a resync loop names a skipped record once.
+const diagnosticsSaid = new Set();
+
 // What this process last told niri, per window and per session. See planWindowSignals.
 let sent = new Map();
 let states = new Map();
@@ -66,13 +68,18 @@ async function syncWindows(windows) {
     }
     return;
   }
+  // Each record's tag names its own theme (sessionSlot): nothing here reads config.
   const intent = (await readJson(paths.intentPath)) ?? {};
-  const { themeId } = await loadConfig({ paths });
   const plan = planWindowSignals({
-    intent, sessions, sessionWindows: map, windows, sent, states, themeId, now: Date.now(),
+    intent, sessions, sessionWindows: map, windows, sent, states, now: Date.now(),
   });
   sent = plan.sent;
   states = plan.states;
+  for (const line of plan.diagnostics) {
+    if (diagnosticsSaid.has(line)) continue;
+    diagnosticsSaid.add(line);
+    process.stderr.write(`${line}\n`);
+  }
   for (const { windowId, args } of plan.commands) {
     try {
       await exec('niri', ['msg', ...args]);
