@@ -94,7 +94,9 @@ fi
 if [ -e "$B/receipt.json" ]; then
   mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
 fi
-rmdir "$B" ~/.config/familiar/themes/.replace-backup 2>/dev/null   # the root too, once empty
+rmdir "$B"
+# The root too, once no backup is left in it; only its ENOTEMPTY is silenced.
+rmdir ~/.config/familiar/themes/.replace-backup 2>/dev/null || true
 familiar theme list                                          # the theme is back, the notice gone
 ```
 
@@ -270,14 +272,41 @@ them, and the window between steps 1 and 2 is the time it takes to type them.
 
    Then restart `familiar-niri watch`, which keeps the code and theme it started with
    in memory: its attention art is lost and its window tags follow the old config until
-   it restarts. It is started by `spawn-sh-at-startup "familiar-niri watch"` in the Niri
-   config ([Niri workspace awareness](#niri-workspace-awareness-desktop-attention-and-moments)),
-   so stop it and start it again the same way:
+   it restarts. Stop it and wait for it to exit before starting the new one, which
+   refuses to start while the old one holds `attention-coordinator.lock`. Define this
+   helper once in the shell you run the restart in; it stops one pid (refusing an empty
+   or multi-pid argument) and waits up to 10 s for it to be gone:
 
    ```sh
-   pkill -f '[f]amiliar-niri watch'
+   stop_and_wait() {  # stop_and_wait <pid>
+     case "$1" in
+       ''|*[!0-9]*) echo "stop_and_wait: need exactly one positive pid, got: '$1'" >&2; return 1 ;;
+     esac
+     [ "$1" -gt 0 ] || { echo "stop_and_wait: pid must be positive" >&2; return 1; }
+     kill "$1" || { echo "could not stop pid $1" >&2; return 1; }
+     for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
+     echo "pid $1 still running after 10 s" >&2; return 1
+   }
+   ```
+
+   Where the supervised `familiar-attention` user unit runs the watcher
+   ([Niri workspace awareness](#niri-workspace-awareness-desktop-attention-and-moments)),
+   restart the unit; a plain stop is a clean exit that nothing restarts:
+
+   ```sh
+   systemctl --user restart familiar-attention
+   ```
+
+   Where Niri starts it (`spawn-sh-at-startup "familiar-niri watch"` in the Niri
+   config), stop it and relaunch it through Niri:
+
+   ```sh
+   stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
    niri msg action spawn-sh -- "familiar-niri watch"
    ```
+
+   The anchored pattern matches only the watcher's own command line. The same
+   procedure, with the unit's creation, is in `docs/runbooks/desktop-attention-rollout.md`.
 
 3. Check the result. The member of the default role shows with source `default`:
 
@@ -293,9 +322,10 @@ them, and the window between steps 1 and 2 is the time it takes to type them.
    each session's next hook rewrites its record. Pins and `identities.yaml` are untouched.
 
 **Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
-after familiar does, and nothing is removed before its replacement is at hand. Check out
-the previous build in the checkout `familiar` resolves to and run `npm ci` there (the
-previous build has no `theme remove`). Then, in order:
+after familiar does, and nothing is removed before its replacement is at hand. Do the
+first two steps while the new build is still checked out, so the time the host spends
+on the previous build with the spec-version 2 pack installed is only step 4's wait for
+`theme add`:
 
 1. If a `theme add` left an empty backup root, remove it, since the previous build
    rejects it as an invalid theme id and `theme list`, `theme show` and `theme preview`
@@ -316,15 +346,23 @@ previous build has no `theme remove`). Then, in order:
 
    An `https` source cannot be added at a commit directly: `theme add <url>` clones the
    default branch, which may already be spec-version 2.
-3. Delete the installed spec-version 2 pack and its receipt, then add the v1 pack:
+3. Check out the previous build in the checkout `familiar` resolves to and run `npm ci`
+   there (the previous build has no `theme remove`). From here until step 4 completes,
+   the previous build faults on the installed spec-version 2 pack.
+4. Delete the installed spec-version 2 pack and its receipt, then add the v1 pack. Set
+   `keep` again to the directory the upgrade used (or use `<dir>` from the clone); the
+   removal runs only when that directory holds a v1 pack:
 
    ```sh
-   rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json
-   familiar theme add "$keep/<id>"    # or <dir> from the clone
+   keep=~/familiar-v1-themes
+   test -f "$keep/<id>/theme.yaml" &&
+   rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json &&
+   familiar theme add "$keep/<id>"
    ```
 
-4. Restart `familiar-niri watch` as in step 2 of the upgrade, so it runs the previous
-   build and reads the restored theme.
+5. Restart `familiar-niri watch` as in step 2 of the upgrade (the unit or the Niri
+   relaunch, with `stop_and_wait`), so it runs the previous build and reads the
+   restored theme.
 
 Codex: the previous build recognises a managed `.codex/config.toml` by a `pet` value of
 `custom:familiar-` followed by letters, digits and hyphens, so it treats a per-theme
