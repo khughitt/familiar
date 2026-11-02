@@ -23,6 +23,7 @@ import { CAPS, truncEnd } from '../src/render/term/hud.js';
 import { displayProject } from '../src/bus/identity.js';
 import { paths } from '../src/bus/paths.js';
 import { ledgerPaths } from '../src/render/term/ledger.js';
+import { RENDER_TTL_MS, renderCacheDir, renderCachePath } from '../src/render/term/render-cache.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { startTimeOf } from '../src/bus/proc.js';
@@ -430,7 +431,7 @@ test('reap prunes a dead relay agent and reconciles even when nothing was pruned
   await f.admit();
   await f.publish(f.event('prompt'));
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'idle');
-  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0, lines: [] });
+  assert.deepEqual(await f.run(), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0, lines: [] });
   assert.equal(JSON.parse(readFileSync(f.p.intentPath))['reap-session'].current.state, 'working');
   await f.publish(f.event('prompt'), { ...f.handle, start: String(BigInt(f.handle.start) + 1n) });
   const result = await f.run();
@@ -447,7 +448,7 @@ test('reap lists registry agents awaiting their first event in JSON and pretty o
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, '');
     if (args[0] === '--json') assert.deepEqual(JSON.parse(result.stdout), {
-      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, swept: 0,
+      reaped: [], awaiting: ['reap-session'], ended: [], pruned: 0, renders: 0, swept: 0,
     });
     else assert.equal(result.stdout, 'awaiting reap-session\n');
   }
@@ -588,7 +589,7 @@ test('reap accepts an absent relay directory and reconciles to no sessions', asy
   const result = spawnSync(process.execPath, [bin, '--json', 'reap'], { encoding: 'utf8', env: f.e });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, swept: 0 });
+  assert.deepEqual(JSON.parse(result.stdout), { reaped: [], awaiting: [], ended: [], pruned: 0, renders: 0, swept: 0 });
   assert.deepEqual((await readSessions(f.p.sessionsPath)).sessions, {});
 });
 
@@ -1651,6 +1652,163 @@ for (const state of ['done', 'error']) {
     assert.doesNotMatch(result.stdout, new RegExp(state));
   });
 }
+
+// --- the render cache --------------------------------------------------------
+//
+// A poll whose inputs have not changed prints the cached line without loading the renderer.
+// The SENTINEL proves a hit: it is written over the cached output under the same key, and only
+// a hit can print it.
+
+const SENTINEL = 'served from the render cache\n';
+function plantSentinel(e, sessionId) {
+  const path = renderCachePath(paths(e).stateDir, sessionId);
+  const entry = JSON.parse(readFileSync(path, 'utf8'));
+  writeFileSync(path, JSON.stringify({ ...entry, output: SENTINEL }));
+}
+const atClock = (e, ms) => ({ ...e, FAMILIAR_NOW_MS: String(ms) });
+
+test('an unchanged poll is served from the render cache, and a changed input renders afresh', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, 'cached');
+  const payload = { session_id: 'cached', cwd: process.cwd(), context_window: { used_percentage: 22 } };
+  const first = statusline(e, [], payload);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(strip(first.stdout), /22%/);
+
+  plantSentinel(e, 'cached');
+  assert.equal(statusline(e, [], payload).stdout, SENTINEL);
+
+  const moved = statusline(e, [], { ...payload, context_window: { used_percentage: 23 } });
+  assert.match(strip(moved.stdout), /23%/, 'a payload field the HUD shows is part of the key');
+
+  plantSentinel(e, 'cached');
+  await seedBus(e, 'cached', { state: 'idle' });
+  const record = statusline(e, [], { ...payload, context_window: { used_percentage: 23 } });
+  assert.match(strip(record.stdout), /idle/, 'this session\'s bus record is part of the key');
+
+  plantSentinel(e, 'cached');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'motion: off\n');
+  const config = statusline(e, [], { ...payload, context_window: { used_percentage: 23 } });
+  assert.notEqual(config.stdout, SENTINEL, 'config.yaml is part of the key');
+  assert.ok(!config.stdout.includes(PLACEHOLDER), 'motion off drops the cells');
+});
+
+test('a cached line outlives neither the TTL nor its intent\'s decay', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, 'decaying', { state: 'done' });
+  const payload = { session_id: 'decaying', cwd: process.cwd() };
+  const at = Date.now();
+  assert.match(strip(statusline(atClock(e, at), [], payload).stdout), /done/);
+  plantSentinel(e, 'decaying');
+  assert.equal(statusline(atClock(e, at + 1000), [], payload).stdout, SENTINEL);
+  const decayed = statusline(atClock(e, at + 9000), [], payload);
+  assert.match(strip(decayed.stdout), /idle/, 'done decays at 8 s, cache or no cache');
+
+  const later = at + 9000;
+  plantSentinel(e, 'decaying');
+  assert.equal(statusline(atClock(e, later + RENDER_TTL_MS - 1), [], payload).stdout, SENTINEL);
+  assert.notEqual(statusline(atClock(e, later + RENDER_TTL_MS), [], payload).stdout, SENTINEL,
+    'past the TTL the line renders again, for inputs the key does not cover');
+});
+
+test('--with output, a faulted line and a session-less payload are never cached', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, 'uncached');
+  const cacheDir = renderCacheDir(paths(e).stateDir);
+  assert.equal(statusline(e, ['--with', 'printf custom'], { session_id: 'uncached', cwd: process.cwd() }).status, 0);
+  assert.equal(statusline(e, [], { session_id: '', cwd: process.cwd() }).status, 0);
+  assert.equal(existsSync(cacheDir), false);
+
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'),
+    `identities:\n  - path: ${JSON.stringify(process.cwd())}\n    slot: 0\n    members: { fixture: missing-cat }\n`);
+  for (let i = 0; i < 2; i++) {
+    const faulted = statusline(e, [], { session_id: 'uncached', cwd: process.cwd() });
+    assert.match(faulted.stderr, /missing-cat/, 'the fault is said on every poll');
+  }
+  assert.equal(existsSync(cacheDir), false);
+});
+
+// settle() answers noop for provisional evidence it cannot settle yet (another tmux client, tmux
+// gone): the next poll must try again, as it did before the cache.
+test('a line whose image is still provisional is rendered again on every poll', async () => {
+  const e = statuslineEnv();
+  const record = await seedBus(e, 'provisional');
+  const { entryPath } = ledgerPaths(paths(e).transmitDir, 'provisional');
+  mkdirSync(dirname(entryPath), { recursive: true });
+  const ledger = JSON.stringify({ seq: 1, pid: record.pid, starttime: record.starttime, ended: false,
+    presented: 'working', held: { provisional: true, transport: 'tmux:not-this-terminal' } });
+  writeFileSync(entryPath, ledger);
+  // This session owns its terminal, so the settle is not superseded; the made-up transport
+  // keeps it from writing to the runner's terminal. The requirement under test is only that a
+  // provisional ledger is never cached, whichever noop the settle answers.
+  const owner = terminalOwnerPaths(paths(e).transmitDir, record);
+  mkdirSync(dirname(owner.entryPath), { recursive: true });
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'provisional', seq: 1 }));
+  const payload = { session_id: 'provisional', cwd: process.cwd() };
+  for (let i = 0; i < 2; i++) {
+    const result = statusline(e, [], payload);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '');
+  }
+  assert.equal(readFileSync(entryPath, 'utf8'), ledger, 'the settle was a noop');
+  assert.equal(existsSync(renderCachePath(paths(e).stateDir, 'provisional')), false);
+});
+
+// THE POINT OF THE CACHE: a hit prints without the renderer, the theme contract or YAML.
+test('a cache hit loads neither the renderer nor the theme contract nor YAML', { skip: traceSkip }, async (t) => {
+  const e = statuslineEnv();
+  await seedBus(e, 'light');
+  const payload = { session_id: 'light', cwd: process.cwd() };
+  assert.equal(statusline(e, [], payload).status, 0);
+  plantSentinel(e, 'light');
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-imports-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const trace = join(dir, 'trace.txt');
+  writeFileSync(trace, '');
+  const result = spawnSync(process.execPath, ['--import', traceHook, bin, 'statusline'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      HOME: dir,
+      FAMILIAR_CONFIG_DIR: e.FAMILIAR_CONFIG_DIR,
+      FAMILIAR_STATE_DIR: e.FAMILIAR_STATE_DIR,
+      FAMILIAR_THEMES_DIR: e.FAMILIAR_THEMES_DIR,
+      RELAY_STATE_DIR: e.RELAY_STATE_DIR,
+      FAMILIAR_TRACE_IMPORTS: trace,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, SENTINEL);
+  const loaded = readFileSync(trace, 'utf8').split('\n').filter(Boolean);
+  assert.ok(loaded.some((url) => url.endsWith('/src/render/term/render-cache.js')), 'the trace saw the hit path');
+  assert.deepEqual(loaded.filter((url) => heavyModule(url)
+    || url.endsWith('/src/render/term/statusline.js') || /\/node_modules\/relay\//.test(url)), []);
+});
+
+// A session that joins the bus after a HUD-only line was cached gets its cat on the next poll.
+test('a session that joins the bus after its line was cached gets its cells next poll', async () => {
+  const e = statuslineEnv();
+  const payload = { session_id: 'joins', cwd: process.cwd() };
+  assert.ok(!statusline(e, [], payload).stdout.includes(PLACEHOLDER));
+  plantSentinel(e, 'joins');
+  assert.equal(statusline(e, [], payload).stdout, SENTINEL, 'the HUD-only line was cached');
+  await seedBus(e, 'joins');
+  assert.ok(statusline(e, [], payload).stdout.includes(PLACEHOLDER));
+});
+
+test('reap prunes the cached line of a session no longer on the bus', async () => {
+  const e = statuslineEnv();
+  await seedBus(e, 'kept');
+  for (const sid of ['kept', 'gone']) {
+    assert.equal(statusline(e, [], { session_id: sid, cwd: process.cwd() }).status, 0);
+  }
+  const result = spawnSync(process.execPath, [bin, 'reap'], { encoding: 'utf8', env: e });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^pruned 1 cached status line\(s\)$/m);
+  assert.ok(existsSync(renderCachePath(paths(e).stateDir, 'kept')));
+  assert.equal(existsSync(renderCachePath(paths(e).stateDir, 'gone')), false);
+});
 
 // WHAT THIS GUARDS, and why it stopped being a stopwatch:
 //
