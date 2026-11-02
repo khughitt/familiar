@@ -21,7 +21,8 @@ export const REFRESH_TIMEOUT_MS = 5000;
 export const LOCK_STALE_MS = 30_000;
 export const REFRESHER_PATH = fileURLToPath(import.meta.url);
 
-const TASK_ID = /^[a-z][a-z0-9-]*-[0-9a-f]{6}$/;
+// A canonical tasks id: what cachePaths accepts, and what the render records or reads back.
+export const TASK_ID = /^[a-z][a-z0-9-]*-[0-9a-f]{6}$/;
 const PREFIX = /^[a-z][a-z0-9-]*$/;
 
 // tasks' ClaimStore::path_with (tasks src/claims.rs): XDG_STATE_HOME when set, even empty

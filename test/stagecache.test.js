@@ -255,3 +255,32 @@ test('a session file of the wrong shape warns and is no task', () => fixture((f)
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /session file/);
 }));
+
+test('a session file whose taskId is not a task id warns and is no task', () => fixture((f) => {
+  const path = sessionFilePath(f.stateDir, SID);
+  mkdirSync(join(path, '..'), { recursive: true });
+  for (const taskId of ['BAD_ID', '../../etc', 'fam-8f0f2', '']) {
+    writeFileSync(path, JSON.stringify({ taskId, worktree: A, seenAt: new Date(NOW).toISOString() }));
+    const warnings = [];
+    assert.equal(recall(f, null, warnings), null, taskId);
+    assert.equal(warnings.length, 1, taskId);
+    assert.match(warnings[0], /session file .*not the \{ taskId, worktree, seenAt \} shape/);
+  }
+}));
+
+test('a live claim whose id is not a task id is shown but never recorded', () => fixture((f) => {
+  const claim = { id: 'BAD_ID', others: 0, worktree: A };
+  assert.deepEqual(recall(f, claim), claim);
+  assert.throws(() => readFileSync(sessionFilePath(f.stateDir, SID)), { code: 'ENOENT' });
+}));
+
+test('a task whose id is not a task id is a fault naming it, and starts nothing', () => fixture((f) => {
+  for (const id of ['BAD_ID', '../x', '']) {
+    const out = read(f, { task: { id, others: 0, worktree: A } });
+    assert.equal(out.stage, '—');
+    assert.ok(out.fault.includes(JSON.stringify(id)), out.fault);
+  }
+  const out = read(f, { task: { id: ID, others: 0, worktree: '' } });
+  assert.deepEqual([out.stage, /not a worktree path/.test(out.fault)], ['—', true]);
+  assert.equal(f.spawns.length, 0);
+}));

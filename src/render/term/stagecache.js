@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ABSENT } from './hud.js';
 import { ledgerName } from './ledger.js';
-import { REFRESHER_PATH, cachePaths, lockHeld, mtimeStamp } from './stagerefresh.js';
+import { REFRESHER_PATH, TASK_ID, cachePaths, lockHeld, mtimeStamp } from './stagerefresh.js';
 
 export const STAGE_CEILING_MS = 600_000;
 export const FAILED_RETRY_MS = 30_000;
@@ -41,7 +41,11 @@ function writeSync(path, value) {
   }
 }
 
+const isTaskId = (value) => typeof value === 'string' && TASK_ID.test(value);
+
 // The task the line shows: the live claim (recorded when it changed), else the one recorded.
+// Only a canonical task id is recorded or read back; a live claim with another id is still
+// shown, and readStage reports it as a fault.
 export function taskForSession({ stateDir, sessionId, claim, now, warn }) {
   if (!sessionId) return claim;
   const path = sessionFilePath(stateDir, sessionId);
@@ -52,10 +56,10 @@ export function taskForSession({ stateDir, sessionId, claim, now, warn }) {
     warn(`session file ${path}: ${error.message}`);
   }
   const valid = recorded !== null && typeof recorded === 'object'
-    && typeof recorded.taskId === 'string' && typeof recorded.worktree === 'string';
+    && isTaskId(recorded.taskId) && typeof recorded.worktree === 'string';
   if (recorded !== null && !valid) warn(`session file ${path}: not the { taskId, worktree, seenAt } shape`);
   if (!claim) return valid ? { id: recorded.taskId, others: 0, worktree: recorded.worktree } : null;
-  if (!valid || recorded.taskId !== claim.id || recorded.worktree !== claim.worktree) {
+  if (isTaskId(claim.id) && (!valid || recorded.taskId !== claim.id || recorded.worktree !== claim.worktree)) {
     try {
       writeSync(path, { taskId: claim.id, worktree: claim.worktree, seenAt: new Date(now).toISOString() });
     } catch (error) {
@@ -86,7 +90,14 @@ function loadCache(file) {
 }
 
 export function readStage({ stateDir, task, cwd, now, spawnRefresher = defaultSpawnRefresher, pidAlive }) {
-  const { file, lock } = cachePaths(stateDir, task.id, task.worktree);
+  let file;
+  let lock;
+  try {
+    ({ file, lock } = cachePaths(stateDir, task.id, task.worktree));
+  } catch (error) {
+    // A claim id that is not a task id has no cache and nothing a refresher could ask tasks.
+    return { stage: ABSENT, fault: error.message };
+  }
   const { cache, corrupt } = loadCache(file);
   let result;
   let stale;

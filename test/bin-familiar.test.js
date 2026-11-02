@@ -69,6 +69,35 @@ function env(over = {}) {
   };
 }
 
+// A status line render can start the detached stage refresher, which runs `tasks` and
+// flow-state (under HOME) with the render's own environment. So every statusline test runs
+// with an env built key by key, never a copy of process.env: HOME and XDG_STATE_HOME are
+// test-owned, git is kept off the host's config, and `tasks` is a fake (the suite's own,
+// unless a test brings its own bin dir). Node's directory is on PATH for that fake's shebang.
+const suiteFakeTasks = fileURLToPath(new URL('fixtures/fake-tasks', import.meta.url));
+function isolatedEnv({ root = mkdtempSync(join(tmpdir(), 'familiar-isolated-')), bin: fakeBin = suiteFakeTasks } = {}) {
+  const dirs = { home: join(root, 'home'), xdgState: join(root, 'xdg-state'), config: join(root, 'config'), state: join(root, 'state') };
+  for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
+  return {
+    PATH: `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`, HOME: dirs.home, XDG_STATE_HOME: dirs.xdgState,
+    FAMILIAR_CONFIG_DIR: dirs.config, FAMILIAR_STATE_DIR: dirs.state, RELAY_STATE_DIR: join(dirs.state, 'relay'),
+    FAMILIAR_THEMES_DIR: shippedThemesFixture, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+  };
+}
+
+// Waits (at most 5 s) until every refresher a render started is done: each expected cache is
+// written and no refresher lock remains. A test that lets one run calls this before teardown.
+async function awaitRefreshers(stateDir, tasks) {
+  const files = tasks.map(([id, worktree]) => cachePaths(stateDir, id, worktree).file);
+  const locksDir = join(stateDir, 'statusline', 'tasks');
+  const done = () => files.every((file) => existsSync(file))
+    && !(existsSync(locksDir) && readdirSync(locksDir).some((name) => name.endsWith('.lock')));
+  for (let waited = 0; !done() && waited < 5000; waited += 50) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.ok(done(), `a refresher is still running under ${stateDir}`);
+}
+
 test('setup claude-code prints exact JSON without reading configuration', () => {
   const runEnv = env();
   const result = spawnSync(process.execPath, [bin, 'setup', 'claude-code'], {
@@ -315,7 +344,7 @@ test('removed hook and setup codex commands are usage errors before state work',
 
 test('statusline keeps malformed input cosmetic', () => {
   const result = spawnSync(process.execPath, [bin, 'statusline'], {
-    input: '{not json', encoding: 'utf8', env: env(),
+    input: '{not json', encoding: 'utf8', env: isolatedEnv(),
   });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
@@ -540,6 +569,26 @@ test('reap removes statusline files of sessions that are gone', async (t) => {
   assert.match(cli.stdout, /^pruned 1 status line file\(s\)$/m);
 });
 
+test('reap sweeps a dead writer\'s temps from the status line\'s session and cache dirs', async (t) => {
+  const f = reapFixture(t);
+  const dead = 999_999_999;
+  f.deps.renderProcess.pidExists = (pid) => pid !== dead;
+  const uuid = '0b6f6c1e-8a3e-4d2a-9a51-3c1f0e2b7d44';
+  const session = `${sessionFilePath(f.p.stateDir, 'some-session')}.tmp.${dead}.${uuid}`;
+  const cache = `${cachePaths(f.p.stateDir, 'fam-aaaaaa', '/w').file}.tmp.${dead}.${uuid}`;
+  const live = `${cachePaths(f.p.stateDir, 'fam-bbbbbb', '/w').file}.tmp.${process.pid}.${uuid}`;
+  for (const path of [session, cache, live]) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '');
+  }
+  const result = await f.run();
+  assert.equal(result.swept, 2);
+  assert.equal(result.statusline, 0, 'a temp is not a session file or a cache');
+  assert.equal(existsSync(session), false);
+  assert.equal(existsSync(cache), false);
+  assert.equal(existsSync(live), true, 'a live writer\'s fresh temp stays');
+});
+
 // A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
 // default outer timeout), and most of a cold `familiar observe` was module loading. A
 // teardown drops presentation state and resets the terminal: it never resolves a theme,
@@ -718,7 +767,7 @@ test('statusline with --with and NO intent prints the wrapped output in full —
   // is the wrapped status line ALONE and IN FULL: there is no cat to fit it against, so
   // nothing is dropped. The old code fitted it to a 4-row cat that did not exist, truncating
   // at line 4.
-  const e = env();
+  const e = isolatedEnv();
   // Without a scheme, context() throws before we reach the no-intent branch — seed it, exactly
   // as the preview tests do.
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
@@ -751,7 +800,7 @@ test('statusline with --with and NO intent prints the wrapped output in full —
 // never once locally. A megabyte makes the parent lose the race every time, so this pins
 // the contract instead of sampling it.
 test('statusline --with renders a wrapped command that never reads its stdin', () => {
-  const e = env();
+  const e = isolatedEnv();
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
   assert.equal(seed.status, 0, seed.stderr);
 
@@ -773,7 +822,7 @@ test('statusline --with renders a wrapped command that never reads its stdin', (
 // is a COSMETIC command, so the report is one stderr line and an exit-zero protocol kept
 // intact; what must not happen is the failure passing silently, or being named EPIPE.
 test('statusline --with reports a failing wrapped command, not its undrained stdin', () => {
-  const e = env();
+  const e = isolatedEnv();
   const seed = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
   assert.equal(seed.status, 0, seed.stderr);
 
@@ -795,7 +844,7 @@ test('statusline --with reports a failing wrapped command, not its undrained std
 });
 
 test('off statusline renders the HUD without familiar cells and gives wrapped text the full surface', async () => {
-  const e = env();
+  const e = isolatedEnv();
   mkdirSync(e.FAMILIAR_CONFIG_DIR, { recursive: true });
   mkdirSync(e.FAMILIAR_STATE_DIR, { recursive: true });
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
@@ -1418,7 +1467,7 @@ test('pets writes explicit Codex tracks without changing either Codex selection'
 // ONE env for both commands. env() mints a fresh temp config dir per call, so calling it
 // twice would write the scheme into a directory the status line never reads.
 function statuslineEnv() {
-  const e = env();
+  const e = isolatedEnv();
   const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], {
     encoding: 'utf8', env: e,
   });
@@ -1585,6 +1634,7 @@ test('statusline names the task its session has claimed, on and off the bus', as
   assert.match(render('claimed'), /\(fam-ff5351 \+1\)/);
   assert.match(render('not-on-the-bus'), /\(fam-bbbbbb\)/);
   assert.doesNotMatch(render('nobody'), /\(fam-/);
+  await awaitRefreshers(e.FAMILIAR_STATE_DIR, [['fam-ff5351', '/w'], ['fam-bbbbbb', '/w']]);
 });
 
 // agy 1.4.12's status line, as recorded by fam-93c939: Claude Code's shape, with the
@@ -1642,6 +1692,7 @@ test('agy\'s status line names the task its conversation has claimed', async () 
   // The same UUID from Claude Code (no product) is a different session's claim.
   assert.match(render({ session_id: payload.session_id, cwd: process.cwd() }), /\(fam-aaaaaa\)/);
   assert.doesNotMatch(render(agyStdin({ session_id: '', conversation_id: '' })), /\(fam-/);
+  await awaitRefreshers(e.FAMILIAR_STATE_DIR, [['fam-de2ffc', '/w'], ['fam-aaaaaa', '/w']]);
 });
 
 test('statusline still honours --with, unchanged', () => {
@@ -1716,21 +1767,17 @@ function stageFixture(t) {
   const flowDir = join(dirs.home, '.agents', 'bin');
   for (const dir of [...Object.values(dirs), flowDir]) mkdirSync(dir, { recursive: true });
   t.after(() => {
-    chmodSync(dirs.state, 0o755);
+    for (const dir of [dirs.state, join(dirs.state, 'statusline')]) if (existsSync(dir)) chmodSync(dir, 0o755);
     rmSync(root, { recursive: true, force: true });
   });
   writeFileSync(join(dirs.bin, 'tasks'), stageFakeTasks(root), { mode: 0o755 });
   writeFileSync(join(flowDir, 'flow-state'), stageFakeFlow(root), { mode: 0o755 });
   writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [] }));
-  const e = {
-    PATH: `${dirs.bin}:/usr/bin:/bin`, HOME: dirs.home, XDG_STATE_HOME: dirs.xdgState,
-    FAMILIAR_CONFIG_DIR: dirs.config, FAMILIAR_STATE_DIR: dirs.state, RELAY_STATE_DIR: join(dirs.state, 'relay'),
-    FAMILIAR_THEMES_DIR: shippedThemesFixture, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
-  };
+  const e = isolatedEnv({ root, bin: dirs.bin });
   const seeded = spawnSync(process.execPath, [bin, 'scheme', 'set', 'dark'], { encoding: 'utf8', env: e });
   assert.equal(seeded.status, 0, `scheme set failed: ${seeded.stderr}`);
-  const claim = (session) => writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [
-    { id: STAGE_ID, session, started: '2026-11-01T00:00:00Z', worktree: dirs.worktree, live: true },
+  const claim = (session, id = STAGE_ID) => writeFileSync(join(root, 'claims.json'), JSON.stringify({ claims: [
+    { id, session, started: '2026-11-01T00:00:00Z', worktree: dirs.worktree, live: true },
   ] }));
   const cache = cachePaths(dirs.state, STAGE_ID, dirs.worktree);
   const writeFreshCache = (stage) => {
@@ -1800,10 +1847,7 @@ test('a stale cache is refreshed in the background', async (t) => {
   const first = f.render('refreshing');
   assert.equal(first.stderr, '');
   assert.ok(first.stateRow.endsWith(' · —'), JSON.stringify(first.stateRow));
-  for (let waited = 0; !existsSync(f.cache.file) && waited < 5000; waited += 50) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  assert.ok(existsSync(f.cache.file), `no cache after 5 s; tasks log:\n${f.log().join('\n')}`);
+  await awaitRefreshers(f.dirs.state, [[STAGE_ID, f.dirs.worktree]]);
   const second = f.render('refreshing');
   assert.equal(second.stderr, '');
   assert.ok(second.stateRow.endsWith(' · doing'), JSON.stringify(second.stateRow));
@@ -1811,15 +1855,38 @@ test('a stale cache is refreshed in the background', async (t) => {
 });
 
 // Review Focus 2, end to end: the session file cannot be written, the line still paints.
+// A refresher lock this test process holds keeps the render from starting one, so nothing
+// can still be running when the fixture is torn down.
 test('an unwritable state dir still paints the claim and warns', async (t) => {
   const f = stageFixture(t);
   f.claim('read-only');
+  mkdirSync(dirname(f.cache.lock), { recursive: true });
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`;
+  writeFileSync(f.cache.lock, held);
+  chmodSync(join(f.dirs.state, 'statusline'), 0o555);
   chmodSync(f.dirs.state, 0o555);
   const { stdout, stateRow, stderr } = f.render('read-only');
+  assert.equal(readFileSync(f.cache.lock, 'utf8'), held, 'no refresher took the lock');
+  assert.equal(existsSync(f.cache.file), false);
   assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
   assert.equal(stateRow, '▎ — · —');
   assert.match(stderr, /^familiar: statusline: session file .*EACCES/m);
   assert.equal(stderr.trimEnd().split('\n').every((line) => line.startsWith('familiar: statusline: ')), true, stderr);
+});
+
+test('a claim whose id is not a task id still paints, with a warning and no refresher', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'odd-claim');
+  for (const sid of ['odd-claim', 'not-on-the-bus']) {
+    f.claim(sid, 'BAD_ID');
+    rmSync(join(f.root, 'tasks.log'), { force: true });
+    const { stdout, stateRow, stderr } = f.render(sid);
+    assert.match(stdout, /\(BAD_ID\)/);
+    assert.ok(stateRow.endsWith(' · —'), JSON.stringify(stateRow));
+    assert.equal(stderr, 'familiar: statusline: stage cache: not a task id: "BAD_ID"\n');
+    assert.deepEqual(f.log(), ['claims --json']);
+  }
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'nothing recorded, nothing cached');
 });
 
 // --- decay -----------------------------------------------------------------
@@ -2100,7 +2167,10 @@ test('the observer writes tasks warnings to stderr and still records the session
 });
 
 test('the status line paints the label in the colour its record carries', async () => {
-  const e = pinned('identities: []\n');
+  const e = isolatedEnv();
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'identities: []\n');
   e.FAKE_TASKS_LOG = join(e.FAMILIAR_STATE_DIR, 'tasks.log');
   await seedBus(e, 's1', { cwd: '/tmp/api', projectColor: '#317d01' });
   const r = spawnSync(process.execPath, [bin, 'statusline'], {

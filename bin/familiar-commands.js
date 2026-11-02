@@ -216,7 +216,11 @@ export async function reap({ deps: given }) {
     pidAlive: (pid) => renderProcess.pidExists(pid),
   });
   const { removed: swept } = await sweepTemps({
-    dirs: [paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals')],
+    dirs: [
+      paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals'),
+      // The status line's session files (a render cancelled mid-write) and stage caches.
+      join(paths.stateDir, 'statusline'), join(paths.stateDir, 'statusline', 'tasks'),
+    ],
     pidExists: renderProcess.pidExists, now,
   });
   return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length, statusline,
