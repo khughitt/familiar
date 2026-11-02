@@ -1802,20 +1802,48 @@ function stageFixture(t) {
   return { root, dirs, e, claim, cache, writeFreshCache, log, render };
 }
 
-test('statusline shows the cached stage and runs nothing but tasks claims', async (t) => {
+// Each render runs twice: a miss (no line cached yet) and then a hit (the render cache's
+// SENTINEL, planted under the same key, is what prints). The stage and the refresher are read
+// in the front door, before the render cache is looked up, so both paths obey the same rules.
+test('statusline shows the cached stage and runs nothing but tasks claims, on a render-cache miss and hit', async (t) => {
   const f = stageFixture(t);
   await seedBus(f.e, 'staged');
   f.claim('staged');
   f.writeFreshCache('designed');
   for (const sid of ['staged', 'not-on-the-bus']) {
     if (sid === 'not-on-the-bus') f.claim(sid);
-    rmSync(join(f.root, 'tasks.log'), { force: true });
-    const { stateRow, stdout, stderr } = f.render(sid);
-    assert.equal(stderr, '');
-    assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
-    assert.ok(stateRow.endsWith(' · designed'), JSON.stringify(stateRow));
-    assert.deepEqual(f.log(), ['claims --json'], 'a fresh cache starts no refresher');
+    for (const path of ['miss', 'hit']) {
+      if (path === 'hit') plantSentinel(f.e, sid);
+      rmSync(join(f.root, 'tasks.log'), { force: true });
+      const { stateRow, stdout, stderr } = f.render(sid);
+      assert.equal(stderr, '');
+      if (path === 'miss') {
+        assert.match(stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+        assert.ok(stateRow.endsWith(' · designed'), JSON.stringify(stateRow));
+      } else {
+        assert.equal(stdout, SENTINEL, `${sid}: the second poll is a hit`);
+      }
+      assert.deepEqual(f.log(), ['claims --json'], `${sid} ${path}: a fresh cache starts no refresher`);
+    }
   }
+});
+
+// Review C1: a stage that changes between two polls, with every other input unchanged, is a
+// changed key and so a changed line, never the cached one.
+test('a stage change between two polls changes the line on what would be a render-cache hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'changing');
+  f.claim('changing');
+  f.writeFreshCache('designed');
+  assert.ok(f.render('changing').stateRow.endsWith(' · designed'));
+  plantSentinel(f.e, 'changing');
+  assert.equal(f.render('changing').stdout, SENTINEL, 'an unchanged poll is a hit');
+  f.writeFreshCache('reviewed');
+  const { stateRow, stdout, stderr } = f.render('changing');
+  assert.equal(stderr, '');
+  assert.notEqual(stdout, SENTINEL);
+  assert.ok(stateRow.endsWith(' · reviewed'), JSON.stringify(stateRow));
+  assert.deepEqual(f.log(), ['claims --json', 'claims --json', 'claims --json'], 'no refresher on any poll');
 });
 
 test('statusline with no claim, no cache and no agents is unchanged', async (t) => {
@@ -1839,9 +1867,30 @@ test('a seeded session\'s reported agents reach the line', async (t) => {
   const { stateRow, stderr } = f.render('busy');
   assert.equal(stderr, '');
   assert.ok(stateRow.endsWith('⚡ working · 2 agents'), JSON.stringify(stateRow));
+  // The count rides on the bus record, which the render key holds raw: a new count is a miss.
+  plantSentinel(f.e, 'busy');
+  assert.equal(f.render('busy').stdout, SENTINEL, 'an unchanged poll is a hit');
+  value.sessions.busy.agents = 3;
+  await writeSessions(sessionsPath, value);
+  const changed = f.render('busy');
+  assert.equal(changed.stderr, '');
+  assert.ok(changed.stateRow.endsWith('⚡ working · 3 agents'), JSON.stringify(changed.stateRow));
 });
 
-test('a stale cache is refreshed in the background', async (t) => {
+// The refresher a stale stage cache starts, on a render-cache miss and on a hit. On the hit the
+// stage cache already exists, so this waits for the refresher to rewrite it (a new refreshedAt)
+// and release its lock.
+async function awaitRewrite(f, before) {
+  const locksDir = dirname(f.cache.lock);
+  const done = () => JSON.parse(readFileSync(f.cache.file, 'utf8')).refreshedAt !== before
+    && !readdirSync(locksDir).some((name) => name.endsWith('.lock'));
+  for (let waited = 0; !done() && waited < 5000; waited += 50) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  assert.ok(done(), 'the refresher did not rewrite the stage cache');
+}
+
+test('a stale cache is refreshed in the background, on a render-cache miss and hit', async (t) => {
   const f = stageFixture(t);
   await seedBus(f.e, 'refreshing');
   f.claim('refreshing');
@@ -1853,6 +1902,19 @@ test('a stale cache is refreshed in the background', async (t) => {
   assert.equal(second.stderr, '');
   assert.ok(second.stateRow.endsWith(' · doing'), JSON.stringify(second.stateRow));
   assert.ok(f.log().includes(`flow-state ${STAGE_ID} --json --no-git`), 'the refresher found flow-state under HOME');
+
+  // The hit: a record write moves the tasks dir's stamp, the stage the cache holds is unchanged,
+  // so the render key is too. The cached line prints, and the refresher still starts.
+  plantSentinel(f.e, 'refreshing');
+  const before = JSON.parse(readFileSync(f.cache.file, 'utf8')).refreshedAt;
+  writeFileSync(join(f.dirs.tasksDir, 'fam-000000.md'), '');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const third = f.render('refreshing');
+  assert.equal(third.stderr, '');
+  assert.equal(third.stdout, SENTINEL, 'an unchanged stage is a render-cache hit');
+  await awaitRewrite(f, before);
+  assert.deepEqual(f.log(), ['claims --json', 'where --json', `show ${STAGE_ID} --json`, 'list --parked --json',
+    `flow-state ${STAGE_ID} --json --no-git`]);
 });
 
 // Review Focus 2, end to end: the session file cannot be written, the line still paints.
