@@ -25,8 +25,13 @@ have since been fixed but not yet re-tested on hardware.
 | Noctalia workspace pills | `attention.json`, `niri-workspaces.json` | `integrations/noctalia-plugin` marks each workspace with its agents' attention and dismisses it on request (`docs/attention.md`). |
 | Niri window signals | `intent.json` | `familiar-niri watch` lights each terminal's niri-material glass in its session's identity hue. |
 
-The sprite contract is six full-colour state images plus `rows`. The same contract is
-used by terminal, status-line, Codex, OpenCode, and desktop surfaces.
+The sprite contract is six full-colour state images plus `rows` for each member of a
+theme, which also declares each member's roles and one `default` member. A theme may add
+a world: one image per locale, all one `size`, each with the `places` (floor positions in
+image pixels, in fill order) where members stand. Every session shows the `home` locale.
+The same contract is used by terminal, status-line, Codex, OpenCode, and desktop
+surfaces. Terminals draw the one resolved member; a world is carried on the identity in
+`intent.json` for composed surfaces, which place agents by their `admitted` order.
 
 ## Terminal and status-line ownership
 

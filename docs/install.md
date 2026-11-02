@@ -236,6 +236,50 @@ This launch requirement applies to Familiar's presentation and automatic project
 selection. Codex's native pet renderer works independently, using the installed
 art and `[tui] pet` setting described [below](#codex-pets).
 
+### Moving a host to spec-version 2 themes
+
+A theme pack at spec-version 1 (members declare `slot` or `slots`, no `roles`) is
+refused by a build that reads spec-version 2, and every session on the host faults on
+it until the pack is replaced. A spec-version 2 pack declares `roles:` on its members
+with exactly one `default` holder. Run these per host, in order; each host's owner runs
+them, and the window between steps 1 and 2 is the time it takes to type them.
+
+1. Install the new familiar build (`npm install` and `npm link` in the checkout).
+2. Note each installed v1 theme's `source.url` and `source.commit` from
+   `~/.config/familiar/theme-receipts/<id>.json` (a rollback needs them; a local-path
+   source records `source.path` instead), then replace it from its spec-version 2 source:
+
+   ```sh
+   familiar theme add --replace <theme-url-or-directory>
+   ```
+
+3. Check the result. The member of the default role shows with source `default`:
+
+   ```sh
+   familiar whoami
+   ```
+
+4. If any pet is compiled for Codex, recompile and re-select:
+   `familiar install pets --sync-projects`. It refuses each repository whose managed
+   `.codex/config.toml` still names a single-theme pet id, naming the file; remove those
+   as [Single-theme pet ids](#codex-pets) describes, then run the command again.
+5. Records written by the previous build lack `family` and `role`. They fault once and
+   each session's next hook rewrites its record. Pins and `identities.yaml` are untouched.
+
+**Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
+after familiar does. Install the previous build, which has no `theme remove`, then
+delete both paths by hand and add the old pack at the commit its receipt names:
+
+```sh
+rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json
+familiar theme add <the v1 source, at the commit noted in step 2>
+```
+
+If a `theme add --replace` left a backup, follow [Rolling back from a surviving
+backup](#rolling-back-from-a-surviving-backup) before this. A managed Codex config
+already rewritten to a per-theme pet id is not recognised by the previous build:
+remove it and run that build's `install pets --sync-projects`.
+
 ## Project identity and Git worktrees
 
 A registered project's colour chooses its familiar as described below. Without
@@ -252,20 +296,6 @@ pin that wins is the first matching entry of the first tier that matches:
 4. `project:` naming the current checkout's directory;
 5. `project:` naming the main checkout's directory;
 6. otherwise, the hash.
-
-A project belongs to a family, and `config.yaml` maps families to themes:
-
-```yaml
-theme: cats
-families:
-  guild: cats
-  verifiably: plant-nooks
-motion: full
-```
-
-A family named under `families:` uses the theme it names; an unnamed family, or a
-project with no family, uses `theme:`. Config is not checked against the installed
-themes: a named theme that is not installed faults for that family's projects only.
 
 A matching `remote:` pin already covers every worktree and wins over any path
 pin. To give one worktree its own familiar, pin that worktree by path; a
@@ -288,9 +318,71 @@ and its `members:` map.
   `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
   `store` and is not always detectable: declare `core.worktree` there too.
 - **After upgrading.** Records from before the identity upgrades may lack a
-  repository anchor or `projectColor`. They leave the bus until each session's
+  repository anchor, `projectColor`, `family` or `role`. They leave the bus until each session's
   next hook re-admits it; a status line may show no identity until then. Pins
   are untouched.
+
+### Family, role and world
+
+A family is a named set of projects. A project declares its family in a family file at
+its registered root (the `root` that `tasks resolve` returns, so a worktree whose branch
+predates the file still has the family): `tools/family.toml`, else `family.toml`, the
+first that exists. Familiar reads one key, `name`, an id (lowercase letters and digits
+joined by single hyphens). A project with no family file has no family. A file that
+cannot be parsed, a `name` that is not an id, a file over 65536 bytes, or a symlink or
+path that leaves the root is an error: the hook prints one line and writes nothing.
+The family is read once per session and checkout, with the colour.
+
+The family selects the theme. `config.yaml` names the default theme and maps families to
+themes:
+
+```yaml
+theme: cats
+families:
+  guild: cats
+  verifiably: plant-nooks
+motion: full
+```
+
+A family named under `families:` uses the theme it names; an unnamed family, or a
+project with no family, uses `theme:`. Config is not checked against the installed
+themes: a named theme that is not installed faults for that family's projects only.
+A pin's `members:` map is keyed by theme id, so a pin applies to whichever theme the
+family resolves to, and an entry for another theme is inert.
+
+The theme's cast then gives the member. A member declares `roles:` in the pack, and one
+member holds the reserved role `default`. A session's role is the environment variable
+`FAMILIAR_ROLE`, an id, set by whatever launches the agent
+(`FAMILIAR_ROLE=reviewer claude`); unset or empty means no role. An invalid value, or
+`default` itself, is a refused event: the observer prints one error line, exits 0 and
+writes nothing, so the session keeps its previous record. The member is:
+
+| role | the theme holds the role | pin names a member of this theme | member | source shown |
+| --- | --- | --- | --- | --- |
+| none | not applicable | no | the `default` holder | `default` |
+| none | not applicable | yes | the pinned member | `pin` |
+| set | yes | either | the role's member | `role` |
+| set | no | no | the `default` holder | `unmapped` |
+| set | no | yes | the pinned member | `pin` |
+
+A pin replaces the `default` holder for its project and never overrides a role the theme
+covers. A role the theme does not cover is not a fault; `familiar whoami` shows
+`unmapped` so a theme author sees which roles the cast lacks. The hue is the project's,
+as in [Project colour](#project-colour); roles never change it.
+
+```text
+$ FAMILIAR_ROLE=reviewer familiar whoami
+<project>
+  family  guild · theme cats (family)
+  role    reviewer · member <label> (role)
+```
+
+`family` shows `—` when there is none and `role` shows `—` when unset. A theme may
+also carry a world: a background per locale, with places where members stand. Every
+session shows the `home` locale. `familiar theme validate <dir>` prints a theme's roles
+and the default member, and its world's locales with their place counts (or
+`world none`). The identity in `intent.json` carries the family, theme, role, member
+source and, when the theme has a world, the locale image and its places.
 
 ### Project colour
 
