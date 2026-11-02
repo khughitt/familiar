@@ -30,6 +30,7 @@ import { PLACEHOLDER } from '../src/render/term/placeholder.js';
 import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { preloadedThemes, writeTheme } from './helpers/themes.js';
+import { TINY_PNG } from './helpers/fixture.js';
 import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
 import { reportCommandError, reportCosmeticError } from '../bin/familiar.js';
 import { makePrepareSprites, settleStatusline, sheetRowCaptions } from '../bin/familiar-commands.js';
@@ -1474,6 +1475,37 @@ for (const wrapped of [false, true]) {
     } finally { closeSync(fd); }
     assert.equal(readFileSync(combined, 'utf8'), result.stdout + result.stderr,
       'the diagnostic must follow the complete rendered output');
+  });
+}
+
+// A theme whose world fails proof is the same visual fault as a missing sprite: the record
+// is not drawn, the HUD (or --with output) still reaches stdout, and the world fault reaches
+// stderr. The proof runs inside resolveAll, so a throw there must not escape to the command
+// error handler (empty stdout, non-zero exit).
+for (const wrapped of [false, true]) {
+  test(`statusline keeps ${wrapped ? '--with output unchanged' : 'the HUD'} when its theme's world fails proof`, async () => {
+    const shipped = mkdtempSync(join(tmpdir(), 'familiar-world-themes-'));
+    const dir = writeTheme(shipped, 'cats');
+    writeFileSync(join(dir, 'theme.yaml'), readFileSync(join(dir, 'theme.yaml'), 'utf8').replace('members:', [
+      'world:', '  asset-root: world', '  size: [1, 1]', '  locales:',
+      '    home: { image: home.png, places: [[0, 0]] }', 'members:',
+    ].join('\n')));
+    mkdirSync(join(dir, 'world'));
+    writeFileSync(join(dir, 'world', 'home.png'), TINY_PNG());
+    const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+    await seedBus(e, 'worldless');
+    rmSync(join(dir, 'world', 'home.png'));
+    const args = wrapped ? ['--with', "printf 'custom\\n\\nlast'"] : [];
+    const result = statusline(e, args, { session_id: 'worldless', cwd: process.cwd(), model: { display_name: 'Opus 4.8' } });
+    assert.equal(result.status, 0, result.stderr);
+    if (wrapped) assert.equal(result.stdout, 'custom\n\nlast');
+    else {
+      assert.match(result.stdout, /Opus 4\.8/);
+      assert.equal(result.stdout.trimEnd().split('\n').length, 4);
+    }
+    assert.doesNotMatch(result.stdout, /\x1b\[|\u{10EEEE}/u);
+    assert.match(result.stderr, /^familiar: statusline: session worldless: .*world: locale "home".*\n$/);
+    assert.equal(result.stderr.trimEnd().split('\n').length, 1);
   });
 }
 

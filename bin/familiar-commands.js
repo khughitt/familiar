@@ -398,17 +398,23 @@ export async function main({ command, args: rest, color, mode }) {
       if (faults.has(sessionId)) {
         visualFault = `session ${sessionId}: ${faults.get(sessionId)}`;
       } else {
-        // Keep the decay contract: polling must not show done/error forever.
-        const intentRecord = resolveAll({
-          agents: one,
-          identities,
-          tone: ctx.tone,
-          spriteFor,
-          animationFor,
-          worldFor,
-          motionPolicy: ctx.motionPolicy,
-        })[sessionId];
-        intent = displayedIntent(intentRecord, now());
+        // Keep the decay contract: polling must not show done/error forever. The theme's world
+        // is proven lazily inside resolveAll, so a broken world throws here: it is the same
+        // visual fault as a sprite failure (HUD on stdout, the fault on stderr), not a crash.
+        try {
+          const intentRecord = resolveAll({
+            agents: one,
+            identities,
+            tone: ctx.tone,
+            spriteFor,
+            animationFor,
+            worldFor,
+            motionPolicy: ctx.motionPolicy,
+          })[sessionId];
+          intent = displayedIntent(intentRecord, now());
+        } catch (error) {
+          visualFault = `session ${sessionId}: ${error.message}`;
+        }
       }
     }
 

@@ -544,3 +544,24 @@ test('a deleted home.png faults the record of that theme and no other', async (t
   assert.equal(Object.hasOwn(intent, 'b'), false);
   assert.equal(Object.hasOwn(intent, 'a'), true);
 });
+
+// The proven world is written into intent.json's identity, not only returned in memory.
+for (const withWorld of [true, false]) {
+  test(`the written intent.json carries identity.world ${withWorld ? 'as the proven home locale' : 'as null for a theme without a world'}`, async (t) => {
+    const f = await fixture(t);
+    await mkdir(f.paths.userThemesDir, { recursive: true });
+    await mkdir(f.paths.configDir ?? join(f.paths.userThemesDir, '..'), { recursive: true });
+    await writeFile(f.paths.schemePath, JSON.stringify({ mode: 'dark', satScale: 1 }));
+    writeTheme(f.paths.userThemesDir, 'cats', { member: 'ginger' });
+    const image = withWorld ? await addWorld(f.paths, 'cats') : null;
+    f.deps.loadContext = () => loadContext({ paths: f.paths });
+    await f.publish(event());
+    assert.deepEqual(await f.run(), { exitCode: 0, lines: [] });
+    const written = (await readJson(f.paths.intentPath)).s.current.identity;
+    if (withWorld) {
+      assert.deepEqual(written.world, { locale: 'home', image, size: { width: 1, height: 1 }, places: [{ x: 0, y: 0 }] });
+    } else {
+      assert.equal(written.world, null);
+    }
+  });
+}
