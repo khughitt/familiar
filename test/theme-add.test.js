@@ -520,3 +520,45 @@ test('a restoration that puts the pack back but not the receipt names only the r
   assert.equal(oldPackIntact(p), true);
   assert.deepEqual(readdirSync(backup), ['receipt.json']);
 });
+
+test('a replace whose backup cannot be deleted says the new theme is installed and names the backup', async () => {
+  const p = scratch();
+  await installOld(p);
+  const src = writePack();
+  const backup = join(backupRoot(p), `gate-fixture-${INSTANT}`);
+  const rm = (path, options) => {
+    if (path === backup) throw new Error('EACCES: permission denied');
+    rmSync(path, options);
+  };
+  await assert.rejects(
+    addTheme({ paths: p, source: src, replace: true, now: fixedNow, rm }),
+    (error) => error.message === `theme 'gate-fixture' installed; could not remove the replacement backup at ${backup}: EACCES: permission denied`
+      && error.cause?.message === 'EACCES: permission denied',
+  );
+  assert.equal(readFileSync(join(p.userThemesDir, 'gate-fixture', 'theme.yaml'), 'utf8'), DESCRIPTOR);
+  assert.equal(receiptSource(p).path, realpathSync(src));
+  assert.deepEqual(readdirSync(backup).sort(), ['pack', 'receipt.json']);
+});
+
+test('a restoration whose only failure is the backup directory says the theme is restored and names the directory', async () => {
+  const p = scratch();
+  await installOld(p);
+  const backup = join(backupRoot(p), `gate-fixture-${INSTANT}`);
+  await assert.rejects(
+    addTheme({
+      paths: p, source: writePack(), replace: true, now: fixedNow,
+      // A stray file in the backup leaves it non-empty after every move back succeeds.
+      writeReceiptFn: async () => {
+        writeFileSync(join(backup, 'stray'), 'x');
+        throw new Error('disk full');
+      },
+    }),
+    (error) => error.message.startsWith(`theme add: disk full — theme 'gate-fixture' is restored as it was, but its backup directory ${backup} could not be removed (`)
+      && error.message.endsWith('); remove it')
+      && !/restoring it failed/.test(error.message)
+      && error.cause?.message === 'disk full',
+  );
+  assert.equal(oldPackIntact(p), true);
+  assert.deepEqual(receiptSource(p), OLD_RECEIPT.source);
+  assert.deepEqual(readdirSync(backup), ['stray']);
+});

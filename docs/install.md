@@ -67,25 +67,51 @@ under way.
 
 If moving the old theme back fails too, the backup stays where it is and nothing
 deletes it: not a later `theme add`, whose staging sweep never reaches it, nor
-`theme remove`. The error and every `theme list` name it (`replacement backup of
-'<id>' at <path> — restore or remove it`). To restore it, move its two entries back
-to the two paths they came from (skip one the backup does not hold: a manual install
-has no receipt):
+`theme remove`. `theme list` names it as `replacement backup of '<id>' at <path> —
+restore or remove it`. The error names it too, together with the moves still to make:
+
+```text
+theme add: replacing '<id>' failed (<cause>) and restoring it failed (<error>) — the
+previous theme is kept at <path>: move its pack to <themes>/<id> and its receipt.json
+to <theme-receipts>/<id>.json, or remove it
+```
+
+It names only the entries still in the backup. If the old pack already went back and
+only its receipt did not, it names only `receipt.json`, and `themes/<id>` then holds
+the old pack: leave that directory alone. Make exactly the moves it names. The
+commands below make the same moves, each only when the backup still holds that entry:
 
 ```sh
 B=~/.config/familiar/themes/.replace-backup/<id>-<instant>   # the path theme list names
-ls ~/.config/familiar/themes/<id>                            # absent after a failed replace;
-                                                             # if present, it is the new copy:
-                                                             # familiar theme remove <id>
-mv "$B/pack" ~/.config/familiar/themes/<id>
-mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
+ls -A "$B"                                                   # pack, receipt.json, or both
+if [ -e "$B/pack" ]; then
+  # The old pack is still in the backup, so anything at themes/<id> is what is left of
+  # the new copy (usually nothing: a failed replace removes it first). Remove that
+  # leftover, then move the old pack back.
+  rm -rf ~/.config/familiar/themes/<id>
+  mv "$B/pack" ~/.config/familiar/themes/<id>
+fi
+if [ -e "$B/receipt.json" ]; then
+  mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
+fi
 rmdir "$B"
 familiar theme list                                          # the theme is back, the notice gone
 ```
 
-To keep the new theme instead, install it again and delete the backup
-(`rm -r "$B"`). With `FAMILIAR_CONFIG_DIR` set, every `~/.config/familiar` above is
-that directory.
+To keep neither, delete the backup (`rm -r "$B"`) and install the theme you want.
+
+Two other errors leave a backup directory that is not a rollback:
+
+- `theme add: <cause> — theme '<id>' is restored as it was, but its backup directory
+  <path> could not be removed (<error>); remove it`. The old theme is back in place,
+  and the backup no longer holds any of it: `rm -r "$B"`.
+- `theme '<id>' installed; could not remove the replacement backup at <path>: <error>`.
+  The replacement worked, and the backup holds the theme it replaced. Delete it
+  (`rm -r "$B"`) unless you want that theme back. To go back, `theme add --replace`
+  its source rather than following the steps above: those steps would leave the new
+  receipt in place when the old theme had none.
+
+With `FAMILIAR_CONFIG_DIR` set, every `~/.config/familiar` above is that directory.
 
 ### Relay observers and lifecycle hooks (operator cutover)
 

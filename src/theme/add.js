@@ -77,7 +77,7 @@ export async function removeTheme({ paths, id, lockOpts = {} }) {
 // directory. Returns null when there is nothing to keep. A move that fails puts back
 // what had moved and rethrows; if putting it back fails too, the backup stays where it
 // is and the error names it.
-function moveAside({ paths, id, target, receiptFile, rename, now }) {
+function moveAside({ paths, id, target, receiptFile, rename, rm, now }) {
   const hasPack = lstatOrNull(target) !== null;
   const hasReceipt = lstatOrNull(receiptFile) !== null;
   if (!hasPack && !hasReceipt) return null;
@@ -106,22 +106,24 @@ function moveAside({ paths, id, target, receiptFile, rename, now }) {
   } catch (cause) {
     // Restore exactly what moved: the pack if it did, never the receipt that did not.
     restore({ ...backup, pack: packMoved ? backup.pack : null, receipt: null },
-      { rename, promoted: false, cause });
+      { rename, rm, promoted: false, cause });
     throw cause;
   }
   return backup;
 }
 
 // Put the backed-up pack and receipt back where they were, then remove the empty
-// backup directory. Any failure here keeps the backup: it is the one copy of the
-// user's old theme, and only a person may restore or delete it.
-function restore(backup, { rename, promoted, cause }) {
+// backup directory. A failed move keeps the backup: it is the one copy of the user's
+// old theme, and only a person may restore or delete it. A failed removal of the
+// emptied directory leaves the theme restored and says so.
+function restore(backup, { rename, rm, promoted, cause }) {
+  const message = (error) => (error instanceof Error ? error.message : String(error));
   // What is still in the backup, so a failure names exactly the moves left to make.
   const left = { pack: backup.pack, receipt: backup.receipt };
   try {
     // A promoted new pack occupies the target, and a non-empty target blocks the
     // rename back. It is reproducible from its source; the old one is not.
-    if (promoted) rmSync(backup.target, { recursive: true });
+    if (promoted) rm(backup.target, { recursive: true });
     if (left.pack !== null) {
       rename(left.pack, backup.target);
       left.pack = null;
@@ -130,9 +132,7 @@ function restore(backup, { rename, promoted, cause }) {
       rename(left.receipt, backup.receiptFile);
       left.receipt = null;
     }
-    rmdirSync(backup.dir);
   } catch (restoreError) {
-    const message = (error) => (error instanceof Error ? error.message : String(error));
     const moves = [
       left.pack !== null && `its ${BACKUP_PACK} to ${backup.target}`,
       left.receipt !== null && `its ${BACKUP_RECEIPT} to ${backup.receiptFile}`,
@@ -140,7 +140,16 @@ function restore(backup, { rename, promoted, cause }) {
     throw new Error(
       `theme add: replacing '${backup.id}' failed (${message(cause)}) and restoring it failed `
       + `(${message(restoreError)}) — the previous theme is kept at ${backup.dir}: `
-      + (moves.length > 0 ? `move ${moves.join(' and ')}, or remove it` : 'it is empty; remove it'),
+      + `move ${moves.join(' and ')}, or remove it`,
+      { cause },
+    );
+  }
+  try {
+    rmdirSync(backup.dir);
+  } catch (rmdirError) {
+    throw new Error(
+      `theme add: ${message(cause)} — theme '${backup.id}' is restored as it was, but its backup `
+      + `directory ${backup.dir} could not be removed (${message(rmdirError)}); remove it`,
       { cause },
     );
   }
@@ -157,6 +166,7 @@ export async function addTheme({
   validate = validateThemePack,
   writeReceiptFn = writeReceipt,
   rename = renameSync,
+  rm = rmSync,
   now = () => new Date(),
 }) {
   const classified = classifySource(source);
@@ -185,7 +195,7 @@ export async function addTheme({
 
       let backup = null;
       if (replace) {
-        backup = moveAside({ paths, id: pack.id, target, receiptFile, rename, now });
+        backup = moveAside({ paths, id: pack.id, target, receiptFile, rename, rm, now });
       } else {
         if (lstatOrNull(target) !== null) {
           throw new Error(
@@ -213,12 +223,23 @@ export async function addTheme({
         // Without a backup there is nothing to restore: a fresh install whose receipt
         // write fails stays installed and unreceipted, never falsely receipted.
         if (backup === null) throw cause;
-        restore(backup, { rename, promoted, cause });
+        restore(backup, { rename, rm, promoted, cause });
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`theme add: ${message} — theme '${pack.id}' is restored as it was`, { cause });
       }
-      // Only now, with the new pack in and receipted, is the old one disposable.
-      if (backup !== null) rmSync(backup.dir, { recursive: true });
+      // Only now, with the new pack in and receipted, is the old one disposable. A
+      // backup that will not go is still an error, but one that says the replace worked.
+      if (backup !== null) {
+        try {
+          rm(backup.dir, { recursive: true });
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          throw new Error(
+            `theme '${pack.id}' installed; could not remove the replacement backup at ${backup.dir}: ${message}`,
+            { cause },
+          );
+        }
+      }
       return { id: pack.id, dir: target, members: pack.members.size, provenance };
     } finally {
       // After promotion the run holds only the discarded clone, if any; before

@@ -276,7 +276,10 @@ test('theme add --json reports a families: theme as active', () => {
   const r = run(env, '--json', 'theme', 'add', writePack());
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).active, true);
-  assert.doesNotMatch(run(env, 'theme', 'add', '--replace', writePack()).stdout, /activate with:/);
+  const replaced = run(env, 'theme', 'add', '--replace', writePack());
+  assert.equal(replaced.status, 0, replaced.stderr);
+  assert.match(replaced.stdout, /^installed theme 'gate-fixture' \(1 members\) at /);
+  assert.doesNotMatch(replaced.stdout, /activate with:/);
 });
 
 // Ruling 11 at the listing: a renamed directory renders nothing, so it lists as a fault.
