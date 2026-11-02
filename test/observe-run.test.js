@@ -219,6 +219,39 @@ test('agy start, tool and stop events admit and project its conversation', async
   assert.equal(sessions.g.state, 'done');
 });
 
+// agy is a harness like any other to the role and family pass: its record carries both and is
+// admitted once, and a refused FAMILIAR_ROLE is one line, exit 0, and no rewrite.
+test('an agy session records its family and role, is admitted once, and a refused role exits 0', async (t) => {
+  const f = await fixture(t);
+  f.deps.gitContext = async () => ({ remote: null, repoRoot: '/repo', repositoryRoot: '/repo' });
+  f.deps.lookupProjectColor = async () => ({ color: null, root: '/repo', warnings: [] });
+  f.deps.lookupFamily = async () => 'guild';
+  f.deps.env = { ...f.deps.env, FAMILIAR_ROLE: 'reviewer' };
+  const agy = (native) => normalizeEvent('agy', native, JSON.stringify({ conversationId: 'g', workspacePaths: ['/repo'] }));
+  for (const ev of [agy('SessionStart'), agy('Stop')]) {
+    await f.publish(ev);
+    assert.deepEqual(await f.run(ev), { exitCode: 0, lines: [] }, ev.nativeEvent);
+  }
+  const record = (await readSessions(f.paths.sessionsPath)).sessions.g;
+  assert.deepEqual([record.harness, record.family, record.role], ['agy', 'guild', 'reviewer']);
+  assert.ok(record.admitted < record.seq, 'admitted at its first event, kept on the next');
+  assert.equal((await readJson(f.paths.intentPath)).g.current.admitted, record.admitted);
+
+  const files = [f.paths.sessionsPath, f.paths.intentPath, f.paths.seqPath];
+  const before = await Promise.all(files.map((path) => readFile(path, 'utf8')));
+  f.emitted.length = 0;
+  f.deps.env = { ...f.deps.env, FAMILIAR_ROLE: 'default' };
+  const prompt = normalizeEvent('agy', 'PreToolUse', JSON.stringify({
+    conversationId: 'g', workspacePaths: ['/repo'], toolCall: { name: 'run_command', args: { CommandLine: 'ls' } },
+  }));
+  await f.publish(prompt);
+  assert.deepEqual(await f.run(prompt), { exitCode: 0, lines: [
+    'familiar: observe: FAMILIAR_ROLE "default" is reserved for an agent with no role — unset FAMILIAR_ROLE instead',
+  ] });
+  assert.deepEqual(await Promise.all(files.map((path) => readFile(path, 'utf8'))), before);
+  assert.deepEqual(f.emitted, []);
+});
+
 test('late session-end preserves a re-admitted live session and emits nothing', async (t) => {
   const f = await fixture(t); await f.publish(event()); await f.run();
   await f.publish(event('session-end')); await f.run(event('session-end'));
