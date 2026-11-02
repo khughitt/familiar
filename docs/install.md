@@ -58,7 +58,7 @@ another or it is installed again.
 and receipt into a backup directory,
 `~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `pack/` and
 `receipt.json`. It installs the new pack, writes its receipt, and only then deletes
-the backup. If the install fails after the old theme was moved aside, the new copy
+the backup and, when no other backup remains, the `.replace-backup` directory itself. If the install fails after the old theme was moved aside, the new copy
 is removed and the old pack and receipt are moved back; the error names the cause.
 `theme add` and `theme remove` share one lock, so neither runs while another is
 under way.
@@ -94,7 +94,7 @@ fi
 if [ -e "$B/receipt.json" ]; then
   mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
 fi
-rmdir "$B"
+rmdir "$B" ~/.config/familiar/themes/.replace-backup 2>/dev/null   # the root too, once empty
 familiar theme list                                          # the theme is back, the notice gone
 ```
 
@@ -244,13 +244,39 @@ it until the pack is replaced. A spec-version 2 pack declares `roles:` on its me
 with exactly one `default` holder. Run these per host, in order; each host's owner runs
 them, and the window between steps 1 and 2 is the time it takes to type them.
 
-1. Install the new familiar build (`npm install` and `npm link` in the checkout).
-2. Note each installed v1 theme's `source.url` and `source.commit` from
-   `~/.config/familiar/theme-receipts/<id>.json` (a rollback needs them; a local-path
-   source records `source.path` instead), then replace it from its spec-version 2 source:
+1. Install the new familiar build. When the checkout that `familiar` on `PATH` resolves
+   to is the one being updated (`readlink -f "$(command -v familiar)"` names a file in
+   it), pulling or merging into that checkout is the install moment: from then on every
+   hook exits with the launcher's missing-dependency line until `npm ci` has run there,
+   and every session faults on the spec-version 1 pack until step 2. Run `npm ci` in
+   that checkout immediately and go straight to step 2. A fresh install runs
+   `npm install` and `npm link` in the checkout instead.
+2. Keep a copy of each installed v1 theme and its receipt outside the themes directory,
+   for a rollback, then replace the theme from its spec-version 2 source. The copy holds
+   the pack as `<id>` and its receipt as `<id>.json`; the receipt's `source.url` and
+   `source.commit` (or `source.path` for a local source) say where the pack came from:
 
    ```sh
+   keep=~/familiar-v1-themes   # any directory outside ~/.config/familiar/themes
+   mkdir -p "$keep"
+   cp -a ~/.config/familiar/themes/<id> "$keep/<id>"
+   cp -a ~/.config/familiar/theme-receipts/<id>.json "$keep/<id>.json"
    familiar theme add --replace <theme-url-or-directory>
+   ```
+
+   A plain `familiar theme add` refuses an installed theme and names `--replace`;
+   `--replace` backs the installed pack up, installs the new one and removes the
+   backup once the new pack is receipted.
+
+   Then restart `familiar-niri watch`, which keeps the code and theme it started with
+   in memory: its attention art is lost and its window tags follow the old config until
+   it restarts. It is started by `spawn-sh-at-startup "familiar-niri watch"` in the Niri
+   config ([Niri workspace awareness](#niri-workspace-awareness-desktop-attention-and-moments)),
+   so stop it and start it again the same way:
+
+   ```sh
+   pkill -f '[f]amiliar-niri watch'
+   niri msg action spawn-sh -- "familiar-niri watch"
    ```
 
 3. Check the result. The member of the default role shows with source `default`:
@@ -267,17 +293,38 @@ them, and the window between steps 1 and 2 is the time it takes to type them.
    each session's next hook rewrites its record. Pins and `identities.yaml` are untouched.
 
 **Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
-after familiar does. Install the previous build, which has no `theme remove`, then
-delete both paths by hand and add the old pack at the commit noted in step 2. The first
-path is the installed spec-version 2 pack of the theme being rolled back:
+after familiar does, and nothing is removed before its replacement is at hand. Check out
+the previous build in the checkout `familiar` resolves to and run `npm ci` there (the
+previous build has no `theme remove`). Then, in order:
 
-```sh
-rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json
-familiar theme add <the v1 source, at the commit noted in step 2>
-```
+1. If a `theme add` left an empty backup root, remove it, since the previous build
+   rejects it as an invalid theme id and `theme list`, `theme show` and `theme preview`
+   fail while it exists. The command refuses a root that still holds a backup, which
+   [Rolling back from a surviving backup](#rolling-back-from-a-surviving-backup) covers:
 
-If a `theme add --replace` left a backup, follow [Rolling back from a surviving
-backup](#rolling-back-from-a-surviving-backup) before this.
+   ```sh
+   rmdir ~/.config/familiar/themes/.replace-backup
+   ```
+
+2. Have the v1 pack available as a local directory. The copy kept in step 2 of the
+   upgrade is `"$keep/<id>"`. With no copy, clone the source from the receipt and check
+   out the commit it records:
+
+   ```sh
+   git clone <source.url> <dir> && git -C <dir> checkout <source.commit>
+   ```
+
+   An `https` source cannot be added at a commit directly: `theme add <url>` clones the
+   default branch, which may already be spec-version 2.
+3. Delete the installed spec-version 2 pack and its receipt, then add the v1 pack:
+
+   ```sh
+   rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json
+   familiar theme add "$keep/<id>"    # or <dir> from the clone
+   ```
+
+4. Restart `familiar-niri watch` as in step 2 of the upgrade, so it runs the previous
+   build and reads the restored theme.
 
 Codex: the previous build recognises a managed `.codex/config.toml` by a `pet` value of
 `custom:familiar-` followed by letters, digits and hyphens, so it treats a per-theme
