@@ -1976,6 +1976,53 @@ test('a claim whose id is not a task id still paints, with a warning and no refr
   assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'nothing recorded, nothing cached');
 });
 
+// The spec's cold cost gate, as what a render-cache hit loads. A session with no live claim
+// and no session file loads stagesession.js and none of the stage reader's modules; one with
+// a task loads the stage reader, and never the refresher's graph or the HUD's.
+function tracedStatusline(t, e, payload) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-imports-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const trace = join(dir, 'trace.txt');
+  writeFileSync(trace, '');
+  const result = spawnSync(process.execPath, ['--import', traceHook, bin, 'statusline'], {
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...e, FAMILIAR_TRACE_IMPORTS: trace },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return { result, loaded: readFileSync(trace, 'utf8').split('\n').filter(Boolean) };
+}
+const termModule = (name) => (url) => url.endsWith(`/src/render/term/${name}`);
+
+test('a render-cache hit with no task loads no stage module', { skip: traceSkip }, async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'taskless');
+  f.render('taskless');
+  plantSentinel(f.e, 'taskless');
+  const { result, loaded } = tracedStatusline(t, f.e, { session_id: 'taskless', cwd: f.dirs.worktree });
+  assert.equal(result.stdout, SENTINEL);
+  assert.equal(result.stderr, '');
+  const stage = ['stagecache.js', 'stagerefresh.js', 'stage.js', 'absent.js', 'hud.js'];
+  assert.deepEqual(loaded.filter((url) => stage.some((name) => termModule(name)(url))), []);
+  assert.ok(loaded.some(termModule('stagesession.js')), 'the trace saw the session-file check');
+  assert.equal(existsSync(join(f.dirs.state, 'statusline')), false, 'no task, no session file');
+});
+
+test('a render-cache hit with a task loads the stage reader, not the refresher or the HUD', { skip: traceSkip }, async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'tasked');
+  f.claim('tasked');
+  f.writeFreshCache('designed');
+  f.render('tasked');
+  plantSentinel(f.e, 'tasked');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const { result, loaded } = tracedStatusline(t, f.e, { session_id: 'tasked', cwd: f.dirs.worktree });
+  assert.equal(result.stdout, SENTINEL);
+  assert.equal(result.stderr, '');
+  const heavy = ['stagerefresh.js', 'stage.js', 'hud.js'];
+  assert.deepEqual(loaded.filter((url) => heavy.some((name) => termModule(name)(url))), []);
+  assert.ok(loaded.some(termModule('stagecache.js')), 'the trace saw the stage read');
+  assert.deepEqual(f.log(), ['claims --json'], 'a fresh cache starts no refresher');
+});
+
 // --- decay -----------------------------------------------------------------
 //
 // bin/familiar took `.current`, which discards expiresAt. That was survivable while the status
