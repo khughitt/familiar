@@ -523,8 +523,8 @@ async function observeCommand(args) {
 }
 
 // Claude Code polls this every refreshInterval for every open session, so its hit path loads
-// only the HUD fields and the render cache (src/render/term/render-cache.js says what the key
-// covers). The renderer, and with it the theme contract and YAML, loads on a miss. --with
+// only the HUD fields (with the task stage's cache, src/render/term/stagecache.js) and the
+// render cache (src/render/term/render-cache.js says what the key covers). The renderer, and with it the theme contract and YAML, loads on a miss. --with
 // output belongs to an arbitrary command that nothing can key, so it is never cached.
 async function statuslineCommand(args) {
   const { values } = parseLeaf(args, leafOptionsFor('statusline'));
