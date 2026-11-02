@@ -40,10 +40,10 @@ import { describeTmux, tmuxFacts, wrapForTmux } from '../src/render/term/tmux.js
 import { fileLedger, ledgerPaths, transmitLockOptions } from '../src/render/term/ledger.js';
 import { pruneLedgers } from '../src/render/term/ledger-prune.js';
 import { sweepTemps } from '../src/bus/temp-sweep.js';
+import { pruneRenders, renderCacheDir } from '../src/render/term/render-cache.js';
 import { composeForIntent } from '../src/render/term/statusline.js';
 import { hudLines } from '../src/render/term/hud.js';
-import { readFields } from '../src/render/term/statusfields.js';
-import { pruneStatusline, readStage, taskForSession } from '../src/render/term/stagecache.js';
+import { pruneStatusline } from '../src/render/term/stagecache.js';
 import { GRAPHICS_CAPABILITY, graphicsCapability } from '../src/render/term/capability.js';
 import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
@@ -54,10 +54,8 @@ import {
 } from 'familiar-theme';
 import { cliColor, cliSwatch, parseLeaf, leafOptionsFor, readStdin, usageError } from './familiar.js';
 import { commandAt } from '../src/commands.js';
+import { now } from '../src/clock.js';
 
-// A PINNABLE CLOCK, for the decay tests only. Nothing in production sets this; without it
-// testing the 8s done and 30s error expiries would require real sleeps.
-const now = () => (process.env.FAMILIAR_NOW_MS ? Number(process.env.FAMILIAR_NOW_MS) : Date.now());
 
 // THE WRAPPED COMMAND IS NOT OBLIGED TO READ THE PAYLOAD. It is handed the same stdin
 // claude-code sent us, because a status-line script may want the session id or the context
@@ -124,6 +122,98 @@ export async function settleStatusline({
       ownerAlive,
     });
   });
+}
+
+// THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
+// an id derived from the session). This renders the CELLS it lands in -- ordinary characters,
+// which claude-code's own layout engine places, wraps and scrolls. That is the whole reason
+// the cat stopped being an overlay: it is text now, and text cannot obscure text.
+//
+// It transmits nothing of its own. See src/render/term/statusline.js -- two processes
+// chunking graphics escapes into one fd is a corrupt escape stream. The one exception is
+// settling a provisional SessionStart image, which it does inside the hooks' own terminal
+// ownership and per-session transmit locks: `settle`, which the caller runs AFTER writing
+// `output`, so a failure there cannot blank the line.
+//
+// The front door (statuslineCommand in bin/familiar.js) owns stdin, the HUD fields and the
+// render cache; this is what runs on a cache miss. `fields` is null under --with, which
+// replaces the HUD and so never pays to build it. `at` is the render's instant.
+//
+// Returns { output, fault, expiresAt, settle }: `fault` is a one-line visual fault or null,
+// `expiresAt` the instant the displayed intent decays (null when it does not), and `settle`
+// null when there is nothing to settle.
+export async function renderStatusline({ stdin, payload, wrapped, fields, at }) {
+  const sessionId = payload.session_id;
+  const ctx = await context();
+  const { sessions } = await readSessions(ctx.paths.sessionsPath);
+  const record = sessionId ? sessions[sessionId] : undefined;
+  // The reported agents ride on the session's record, validated here; the front door's key
+  // holds that record raw, so a changed count is a miss.
+  if (fields !== null) fields = { ...fields, agents: record?.agents ?? null };
+
+  // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
+  // much of the wrapped text fits beside it. Resolve one session only: a broken config in
+  // ANOTHER project must not fault this status line.
+  let intent;
+  let fault = null;
+  let expiresAt = null;
+  if (record) {
+    const one = { [sessionId]: record };
+    const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
+    if (faults.has(sessionId)) {
+      fault = `session ${sessionId}: ${faults.get(sessionId)}`.replace(/[\r\n]+/g, ' ');
+    } else {
+      // Keep the decay contract: polling must not show done/error forever.
+      const intentRecord = resolveAll({
+        agents: one,
+        identities,
+        tone: ctx.tone,
+        spriteFor,
+        animationFor,
+        motionPolicy: ctx.motionPolicy,
+      })[sessionId];
+      intent = displayedIntent(intentRecord, at);
+      expiresAt = intentRecord.expiresAt ?? null;
+    }
+  }
+
+  const rawOutput = wrapped !== null ? runWrapped(wrapped, stdin) : null;
+
+  // NO CAT IS NOT A FALLBACK, IT IS THE TRUTH. A session not on the bus has no identity yet
+  // — the first hook has not fired, or it was evicted.
+  //
+  // BUT THE HUD STILL RENDERS. With no --with, printing `rawOutput ?? ''` here would be a
+  // BLANK STATUS LINE for every session until its first hook fires. No identity means no hue
+  // and no state — so the HUD renders uncoloured, with the state slot reading as absent, at
+  // the full four rows (there is no cat here to fit against).
+  if (!intent) {
+    const output = wrapped !== null ? rawOutput
+      : hudLines({ intent: null, fields, rows: 4 }).join('\n') + '\n';
+    return { output, fault, expiresAt: null, settle: null };
+  }
+
+  // The HUD is fitted to the number of rows the composed output will actually occupy: the
+  // cat's height when there is a cat, and the full four when motion is off and there is not.
+  const hudRows = intent.motionPolicy === 'off' ? 4 : intent.sprite.rows;
+  const text = wrapped !== null
+    ? rawOutput
+    : hudLines({
+      intent,
+      // THE PROJECT IS THE IDENTITY'S, NOT THE DIRECTORY'S. identity.project is the repo the
+      // familiar resolved — the thing that chose the slot, the hue and the member. In
+      // ~/repo/packages/api, basename(cwd) is `api` while the identity is `repo`, and a HUD
+      // labelled `api` beside an ember cat that means `repo` contradicts itself.
+      fields: { ...fields, project: intent.identity.project },
+      rows: hudRows,
+    }).join('\n');
+
+  const lines = composeForIntent({ intent, sessionId, rawOutput: text });
+  // The cells just printed name an image a SessionStart hook may have sent to a screen the TUI
+  // is not showing.
+  const settle = intent.motionPolicy !== 'off'
+    ? () => settleStatusline({ record, intent, paths: ctx.paths })
+    : null;
+  return { output: lines.join('\n') + (lines.length ? '\n' : ''), fault, expiresAt, settle };
 }
 
 // The `theme sheet` caption row. Exported and pure because it now makes a
@@ -215,15 +305,18 @@ export async function reap({ deps: given }) {
     stateDir: paths.stateDir, sessionIds: Object.keys(sessions), now: now(),
     pidAlive: (pid) => renderProcess.pidExists(pid),
   });
+  const { removed: renders } = await pruneRenders({ stateDir: paths.stateDir, sessions });
   const { removed: swept } = await sweepTemps({
     dirs: [
       paths.stateDir, paths.transmitDir, join(paths.transmitDir, 'terminals'),
+      renderCacheDir(paths.stateDir),
       // The status line's session files (a render cancelled mid-write) and stage caches.
       join(paths.stateDir, 'statusline'), join(paths.stateDir, 'statusline', 'tasks'),
     ],
     pidExists: renderProcess.pidExists, now,
   });
-  return { reaped, awaiting, ended, pruned: removed.length, swept: swept.length, statusline,
+  return { reaped, awaiting, ended, pruned: removed.length, renders: renders.length, swept: swept.length,
+    statusline,
     lines: lines.map((line) => line.replace(/^familiar: observe:/, 'familiar: reap:')) };
 }
 
@@ -383,111 +476,6 @@ export async function main({ command, args: rest, color, mode }) {
     await runAttentionCommand(command, positionals, {
       paths: resolvePaths(), stdin: readStdin, stdout: process.stdout, now,
     });
-  } else if (command === 'statusline') {
-    const { values } = parseLeaf(rest, leafOptions);
-    // THE OTHER HALF OF THE TERMINAL RENDERER. The hook transmitted the image (invisibly, under
-    // an id derived from the session). This prints the CELLS it lands in -- ordinary characters,
-    // which claude-code's own layout engine places, wraps and scrolls. That is the whole reason
-    // the cat stopped being an overlay: it is text now, and text cannot obscure text.
-    //
-    // It transmits nothing of its own. See src/render/term/statusline.js -- two processes
-    // chunking graphics escapes into one fd is a corrupt escape stream. The one exception is
-    // settling a provisional SessionStart image, which it does inside the hooks' own
-    // terminal ownership and per-session transmit locks (settleStatusline below).
-    const stdin = await readStdin();
-    const payload = JSON.parse(stdin || '{}');
-    const sessionId = payload.session_id;
-
-    const ctx = await context();
-    const { sessions } = await readSessions(ctx.paths.sessionsPath);
-    const record = sessionId ? sessions[sessionId] : undefined;
-
-    // RESOLVE THE INTENT FIRST — before running --with — because the cat's height decides how
-    // much of the wrapped text fits beside it. Resolve one session only: a broken config in
-    // ANOTHER project must not fault this status line.
-    let intent;
-    let visualFault;
-    if (record) {
-      const one = { [sessionId]: record };
-      const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
-      if (faults.has(sessionId)) {
-        visualFault = `session ${sessionId}: ${faults.get(sessionId)}`;
-      } else {
-        // Keep the decay contract: polling must not show done/error forever.
-        const intentRecord = resolveAll({
-          agents: one,
-          identities,
-          tone: ctx.tone,
-          spriteFor,
-          animationFor,
-          motionPolicy: ctx.motionPolicy,
-        })[sessionId];
-        intent = displayedIntent(intentRecord, now());
-      }
-    }
-
-    const wrapped = values.with ?? null;
-    const rawOutput = wrapped ? runWrapped(wrapped, stdin) : null;
-
-    // The task stage and the reported agents. The task is the live claim, or the one this
-    // session last showed once its claim is released; its stage comes from the cache the
-    // detached refresher keeps. A fault is one warning line per render and never blanks it.
-    const warn = (message) => process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
-    const { stateDir } = ctx.paths;
-    const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
-    const taskFields = {
-      agents: record?.agents ?? null,
-      taskOf: (live) => taskForSession({ stateDir, sessionId: payload.session_id, claim: live, now: now(), warn }),
-      stageOf: (task) => {
-        const { stage, fault } = readStage({ stateDir, task, cwd, now: now() });
-        if (fault) warn(fault);
-        return stage;
-      },
-    };
-
-    // NO CAT IS NOT A FALLBACK, IT IS THE TRUTH. A session not on the bus has no identity yet
-    // — the first hook has not fired, or it was evicted.
-    //
-    // BUT THE HUD STILL RENDERS, and this is the one place dropping --with changes existing
-    // control flow. This branch used to print `rawOutput ?? ''`; with no --with that is null,
-    // and printing it is a BLANK STATUS LINE for every session until its first hook fires.
-    // No identity means no hue and no state — so the HUD renders uncoloured, with the state
-    // slot reading as absent, at the full four rows (there is no cat here to fit against).
-    if (!intent) {
-      const output = wrapped ? rawOutput
-        : hudLines({ intent: null, fields: readFields(payload, taskFields), rows: 4 }).join('\n') + '\n';
-      process.stdout.write(output);
-      if (visualFault !== undefined) {
-        process.stderr.write(`familiar: statusline: ${visualFault.replace(/[\r\n]+/g, ' ')}\n`);
-      }
-      return;
-    }
-
-    // The HUD is fitted to the number of rows the composed output will actually occupy: the
-    // cat's height when there is a cat, and the full four when motion is off and there is not.
-    // Field collection belongs inside the native branch: readFields performs a synchronous,
-    // bounded git lookup, and --with replaces the HUD rather than paying to build unused fields.
-    const hudRows = intent.motionPolicy === 'off' ? 4 : intent.sprite.rows;
-    const text = wrapped
-      ? rawOutput
-      : hudLines({
-        intent,
-        // THE PROJECT IS THE IDENTITY'S, NOT THE DIRECTORY'S. identity.project is the repo the
-        // familiar resolved — the thing that chose the slot, the hue and the member. In
-        // ~/repo/packages/api, basename(cwd) is `api` while the identity is `repo`, and a HUD
-        // labelled `api` beside an ember cat that means `repo` contradicts itself.
-        fields: { ...readFields(payload, taskFields), project: intent.identity.project },
-        rows: hudRows,
-      }).join('\n');
-
-    const lines = composeForIntent({ intent, sessionId, rawOutput: text });
-    process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
-
-    // After the line is written, so a failure here cannot blank it. The cells just printed
-    // name an image a SessionStart hook may have sent to a screen the TUI is not showing.
-    if (intent.motionPolicy !== 'off') {
-      await settleStatusline({ record, intent, paths: ctx.paths });
-    }
   } else if (command === 'install pets') {
     const { values } = parseLeaf(rest, leafOptions);
     if (values.out !== undefined && values['sync-projects']) {
@@ -619,11 +607,12 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write(`${JSON.stringify(result)}\n`);
       return;
     }
-    const { reaped, awaiting, ended, pruned, swept, statusline } = result;
+    const { reaped, awaiting, ended, pruned, renders, swept, statusline } = result;
     if (reaped.length > 0) process.stdout.write(`reaped ${reaped.join(' ')}\n`);
     if (awaiting.length > 0) process.stdout.write(`awaiting ${awaiting.join(' ')}\n`);
     if (ended.length > 0) process.stdout.write(`ended ${ended.join(' ')}\n`);
     if (pruned > 0) process.stdout.write(`pruned ${pruned} transmission ledger(s)\n`);
+    if (renders > 0) process.stdout.write(`pruned ${renders} cached status line(s)\n`);
     if (swept > 0) process.stdout.write(`swept ${swept} orphaned temp file(s)\n`);
     if (statusline > 0) process.stdout.write(`pruned ${statusline} status line file(s)\n`);
   } else if (command === 'install opencode') {

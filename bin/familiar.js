@@ -3,8 +3,9 @@
 // on every hook event, and a SessionEnd runs under relay's tightest teardown budget, so it
 // is routed here to src/observe/run.js alone; every other command lives in
 // familiar-commands.js, whose static graph (the theme contract, YAML, install and render
-// modules) costs more than a teardown can spend on loading. Keep this file's own imports
-// to what parsing and routing need.
+// modules) costs more than a teardown can spend on loading. `statusline` is polled for
+// every open session, so its render cache is checked here and familiar-commands.js loads
+// only on a miss. Keep this file's own imports to what parsing and routing need.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -521,6 +522,69 @@ async function observeCommand(args) {
   process.exitCode = result.exitCode;
 }
 
+// Claude Code polls this every refreshInterval for every open session, so its hit path loads
+// only the HUD fields and the render cache (src/render/term/render-cache.js says what the key
+// covers). The renderer, and with it the theme contract and YAML, loads on a miss. --with
+// output belongs to an arbitrary command that nothing can key, so it is never cached.
+async function statuslineCommand(args) {
+  const { values } = parseLeaf(args, leafOptionsFor('statusline'));
+  const stdin = await readStdin();
+  const payload = JSON.parse(stdin || '{}');
+  const wrapped = values.with ?? null;
+  const [{ now }, { paths }, { readFields }, cache] = await Promise.all([
+    import('../src/clock.js'),
+    import('../src/bus/paths.js'),
+    import('../src/render/term/statusfields.js'),
+    import('../src/render/term/render-cache.js'),
+  ]);
+  const at = now();
+  const p = paths();
+  const sessionId = payload.session_id;
+  // Field collection makes a bounded git call and a claim lookup; --with replaces the HUD
+  // rather than paying for fields it would not show. The task and its stage come through
+  // readFields, so the key below covers them: the task is the live claim, or the one this
+  // session last showed once its claim is released, and its stage is the cache the detached
+  // refresher keeps (stagecache.js), spawned here on every poll whose stage cache is stale,
+  // hit or miss. A fault there is one warning line per poll and never blanks the line.
+  // The agent count is not read here: it is on the session's record, which the key holds raw
+  // and the miss path validates.
+  let fields = null;
+  if (wrapped === null) {
+    const { readStage, taskForSession } = await import('../src/render/term/stagecache.js');
+    const warn = (message) => process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
+    const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
+    fields = readFields(payload, {
+      taskOf: (live) => taskForSession({ stateDir: p.stateDir, sessionId, claim: live, now: at, warn }),
+      stageOf: (task) => {
+        const { stage, fault } = readStage({ stateDir: p.stateDir, task, cwd, now: at });
+        if (fault) warn(fault);
+        return stage;
+      },
+    });
+  }
+  const keyed = wrapped === null && typeof sessionId === 'string' && sessionId !== '';
+  const key = keyed ? cache.renderKey({ paths: p, sessionId, fields }) : null;
+  const cachePath = key === null ? null : cache.renderCachePath(p.stateDir, sessionId);
+  if (key !== null) {
+    const hit = cache.readRender(cachePath, key, at);
+    if (hit !== null) {
+      process.stdout.write(hit);
+      return;
+    }
+  }
+
+  const { renderStatusline } = await import('./familiar-commands.js');
+  const { output, fault, expiresAt, settle } = await renderStatusline({ stdin, payload, wrapped, fields, at });
+  process.stdout.write(output);
+  if (fault !== null) process.stderr.write(`familiar: statusline: ${fault}\n`);
+  if (settle !== null) await settle();
+  // Only a clean line is cached: a fault is said again on the next poll. A line whose image is
+  // still provisional was never keyed (renderKey), so its settle is retried every poll.
+  if (key !== null && fault === null) {
+    await cache.writeRender(cachePath, { key, output, renderedAt: at, until: cache.validUntil(at, expiresAt) });
+  }
+}
+
 // Status-line failures are cosmetic; observer faults must reach relay.
 const COSMETIC_COMMANDS = new Set(['statusline']);
 export function reportCommandError(error, resolved, {
@@ -589,6 +653,7 @@ export async function run(argv = process.argv.slice(2)) {
     resolved = resolveCommand(rest);
     if (resolved.help) process.stdout.write(renderHelp(resolved.help, { color: cliColor({ color }) }));
     else if (resolved.command === 'observe') await observeCommand(resolved.args);
+    else if (resolved.command === 'statusline') await statuslineCommand(resolved.args);
     else {
       const { main } = await import('./familiar-commands.js');
       await main({ ...resolved, color, mode });

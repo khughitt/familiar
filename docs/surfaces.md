@@ -38,6 +38,21 @@ supported surface because it lays out and repaints those cells itself. Relay inv
 transcript content and lets a state change
 replace the image in place.
 
+Claude Code polls the status line every `refreshInterval` for every open session, so
+`familiar statusline` caches each session's rendered line under
+`$FAMILIAR_STATE_DIR/statusline-render/`. A poll whose inputs are unchanged (the HUD
+fields from the payload, git, the claimed or retained task and its stage; the session's
+bus record, which carries the agent count; `config.yaml`, `scheme.json` and
+`identities.yaml`; the session's transmit ledger) prints the cached line
+without loading the renderer. An entry also expires when a `done` or `error` intent decays,
+and after 30 s in any case, which bounds how long the inputs the key does not cover take to
+reach the line: the theme pack's files, familiar's own code, symlinks under a pinned or
+recorded path, and another session's malformed entry in the sessions file. `--with` output, a
+faulted line, an image still awaiting its settle, and a payload with no `session_id` are
+never cached; `familiar reap` removes the entries of sessions no longer on
+the bus. Anything new the HUD shows must reach it through `readFields`
+(`src/render/term/statusfields.js`), which the key covers, or it stays stale for up to 30 s.
+
 The status line's state slot may add the session's task stage (its flow gate, else its
 tasks status or park) and a count of the agents relay reports, as in
 `▎ ⚡ working · designed · 2 agents`. `verified` is the gate flow recorded, not a check of
@@ -46,7 +61,9 @@ waiting on it. A finished or parked task stays on the line, with its outcome, un
 session claims another (`familiar reap` drops it once the session is gone). The stage reads
 tasks' park store at a path predicted from tasks' private layout; `node
 test/host/tasks-park-store.mjs` checks that prediction against the installed `tasks`, so run
-it after a tasks upgrade.
+it after a tasks upgrade. The task and its stage reach the line through `readFields`, so the
+render cache above keys on them: a stage change shows on the next poll, and every poll
+(cached or not) starts the stage's detached refresher when its stage cache is stale.
 
 agy's custom status line works the same way. Its stdin has Claude Code's shape, with
 `product: "antigravity"` and the conversation UUID as `session_id`, which is the id relay
