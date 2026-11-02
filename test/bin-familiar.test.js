@@ -1674,6 +1674,37 @@ for (const wrapped of [false, true]) {
   });
 }
 
+// A world fault is a fault like any other to the render cache: never cached, so it is said on
+// every poll. A world image is not in the key, so a line cached while it was whole serves
+// until the TTL; past it the fault shows, and the next poll says it again.
+test('a world that fails proof is said on every poll and never cached', async () => {
+  const shipped = mkdtempSync(join(tmpdir(), 'familiar-world-themes-'));
+  const dir = writeTheme(shipped, 'cats');
+  writeFileSync(join(dir, 'theme.yaml'), readFileSync(join(dir, 'theme.yaml'), 'utf8').replace('members:', [
+    'world:', '  asset-root: world', '  size: [1, 1]', '  locales:',
+    '    home: { image: home.png, places: [[0, 0]] }', 'members:',
+  ].join('\n')));
+  mkdirSync(join(dir, 'world'));
+  writeFileSync(join(dir, 'world', 'home.png'), TINY_PNG());
+  const e = { ...statuslineEnv(), FAMILIAR_THEMES_DIR: shipped };
+  await seedBus(e, 'worldly');
+  const payload = { session_id: 'worldly', cwd: process.cwd() };
+  const at = Date.now();
+  const good = statusline(atClock(e, at), [], payload);
+  assert.equal(good.stderr, '');
+  const cachePath = renderCachePath(paths(e).stateDir, 'worldly');
+  assert.ok(existsSync(cachePath), 'a whole world\'s line is cached');
+  rmSync(join(dir, 'world', 'home.png'));
+  const expired = at + RENDER_TTL_MS;
+  for (const poll of [0, 1]) {
+    const faulted = statusline(atClock(e, expired + poll), [], payload);
+    assert.equal(faulted.status, 0, faulted.stderr);
+    assert.match(faulted.stderr, /world: locale "home"/, `poll ${poll} says the world fault`);
+    assert.ok(!faulted.stdout.includes(PLACEHOLDER), 'a faulted line draws no cells');
+  }
+  assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).renderedAt, at, 'no faulted poll rewrote the entry');
+});
+
 // THE ONE THAT PROVES THE COMPOSED PATH. The test above deliberately uses an unknown session,
 // so it exercises neither intent resolution nor composeForIntent -- on its own it would leave
 // the entire composed path unproven while LOOKING like coverage.
