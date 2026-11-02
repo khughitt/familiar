@@ -1906,3 +1906,88 @@ test('the status line paints the label in the colour its record carries', async 
   // this path does make is the claim lookup.
   assert.equal(readFileSync(e.FAKE_TASKS_LOG, 'utf8'), 'claims --json\n');
 });
+
+// --- Family, theme and role on whoami and projects -------------------------------------
+
+// A `tasks` that registers each checkout at a root of its own, by the path asked for, so
+// two checkouts can belong to two families.
+function tasksByPath(t, roots) {
+  const dir = mkdtempSync(join(tmpdir(), 'familiar-tasks-by-path-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const script = join(dir, 'tasks');
+  writeFileSync(script, `#!/usr/bin/env node
+const roots = ${JSON.stringify(roots)};
+const input = process.argv.at(-1);
+console.log(JSON.stringify({ results: [{ input, kind: 'path', status: 'resolved', prefix: 'x', root: roots[input] }], warnings: [] }));
+`);
+  chmodSync(script, 0o755);
+  return dir;
+}
+
+function familyLayout(t) {
+  const temp = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-cli-families-')));
+  t.after(() => rmSync(temp, { recursive: true, force: true }));
+  const a = seedRepo(join(temp, 'alpha'));
+  const b = seedRepo(join(temp, 'beta'));
+  mkdirSync(join(a, 'tools'));
+  writeFileSync(join(a, 'tools', 'family.toml'), 'name = "guild"\n');
+  mkdirSync(join(b, 'tools'));
+  writeFileSync(join(b, 'tools', 'family.toml'), 'name = "grove"\n');
+  const e = pinned('identities: []\n');
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'),
+    'theme: cats\nmotion: off\nfamilies:\n  guild: guild-theme\n  grove: grove-theme\n');
+  mkdirSync(join(e.FAMILIAR_CONFIG_DIR, 'themes'));
+  writeTheme(join(e.FAMILIAR_CONFIG_DIR, 'themes'), 'guild-theme');
+  writeTheme(join(e.FAMILIAR_CONFIG_DIR, 'themes'), 'grove-theme');
+  e.PATH = `${tasksByPath(t, { [a]: a, [b]: b })}:${e.PATH}`;
+  return { a, b, e };
+}
+
+test('whoami reports the family, its theme and the role from FAMILIAR_ROLE', (t) => {
+  const { a, e } = familyLayout(t);
+  const w = whoami({ ...e, FAMILIAR_ROLE: 'reviewer' }, a);
+  assert.deepEqual(
+    [w.family, w.theme, w.themeSource, w.role, w.memberSource],
+    ['guild', 'guild-theme', 'family', 'reviewer', 'unmapped'],
+  );
+  assert.equal(typeof w.anchor, 'string');
+  const text = spawnSync(process.execPath, [bin, 'whoami', a], {
+    encoding: 'utf8', env: { ...e, FAMILIAR_ROLE: 'reviewer' },
+  });
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^  family  guild · theme guild-theme \(family\)$/m);
+  assert.match(text.stdout, /^  role    reviewer · member .+ \(unmapped\)$/m);
+  const bare = whoami(e, a);
+  assert.deepEqual([bare.role, bare.memberSource], [null, 'default']);
+});
+
+test('whoami refuses a reserved or malformed FAMILIAR_ROLE', (t) => {
+  const { a, e } = familyLayout(t);
+  for (const role of ['default', 'Reviewer']) {
+    const r = spawnSync(process.execPath, [bin, 'whoami', a], { encoding: 'utf8', env: { ...e, FAMILIAR_ROLE: role } });
+    assert.equal(r.status, 1);
+    assert.equal(r.stdout, '');
+    assert.match(r.stderr, /FAMILIAR_ROLE/);
+  }
+});
+
+test('projects lists checkouts with no role even when FAMILIAR_ROLE is set', (t) => {
+  const { a, b, e } = familyLayout(t);
+  const rows = projectsJson({ ...e, FAMILIAR_ROLE: 'reviewer' }, [a, b]);
+  assert.deepEqual(rows.map((p) => [p.project, p.family, p.theme, p.themeSource, p.memberSource]), [
+    ['alpha', 'guild', 'guild-theme', 'family', 'default'],
+    ['beta', 'grove', 'grove-theme', 'family', 'default'],
+  ]);
+  assert.equal(Object.hasOwn(rows[0], 'role'), false);
+});
+
+test('projects lists two families under two theme headers', (t) => {
+  const { a, b, e } = familyLayout(t);
+  const r = spawnSync(process.execPath, [bin, '--color', 'never', 'projects', a, b], { encoding: 'utf8', env: e });
+  assert.equal(r.status, 0, r.stderr);
+  const headers = r.stdout.match(/^  \S+ — .+$/gm);
+  assert.equal(headers.length, 2, r.stdout);
+  assert.match(headers[0], /^  guild-theme — /);
+  assert.match(headers[1], /^  grove-theme — /);
+  assert.match(r.stdout, /^      .+ · default · auto$/m);
+});

@@ -126,6 +126,9 @@ const themeFixture = fileURLToPath(new URL('../test/fixtures/theme-pack', import
 // its own `theme` still resolves to by default. Built once and reused.
 const shippedThemesFixture = mkdtempSync(join(tmpdir(), 'familiar-catalog-shipped-'));
 cpSync(themeFixture, join(shippedThemesFixture, 'cats'), { recursive: true });
+// A pack's own id must match the directory it is installed under.
+writeFileSync(join(shippedThemesFixture, 'cats', 'theme.yaml'),
+  readFileSync(join(themeFixture, 'theme.yaml'), 'utf8').replace(/^id: fixture$/m, 'id: cats'));
 
 // A second, independently-generated theme with two members (able holding the
 // default role, baker holding none) — the engine fixture is

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
-import { loadConfig, loadTone, writeTone, themeDirFor } from '../src/config.js';
+import { loadConfig, loadTone, writeTone, themeDirFor, themeFor } from '../src/config.js';
 import { listThemes, stagingStatus } from '../src/theme/catalog.js';
 import { addTheme } from '../src/theme/add.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
@@ -26,9 +26,11 @@ import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
-import { resolveIdentity, resolveAll, oneThemePackFor } from '../src/bus/resolve.js';
+import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
+import { lookupFamily } from '../src/bus/family.js';
+import { roleFromEnv } from '../src/observe/enrich.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
 import { gridPlan, layoutRow } from '../src/render/term/cells.js';
 import { displayedIntent } from '../src/protocol/intent.js';
@@ -141,38 +143,37 @@ function reportTasksWarnings(warnings) {
   for (const warning of new Set(warnings)) process.stderr.write(`familiar: tasks: ${warning}\n`);
 }
 
-// The identity pipeline whoami and projects share: config -> pack -> pin catalog,
-// loaded once, then one directory at a time through git and the resolver. The
-// asset proof (assetsFor) is part of resolving, not of printing: an identity whose
-// sprites are missing is not an identity the surfaces can show.
-async function identityResolver() {
-  const paths = resolvePaths();
-  const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
-  const pack = await loadThemePack(themeDirFor(paths, themeId));
-  const catalog = await loadIdentities(paths.identitiesPath);
-  // SHIM (Task C7 replaces it): one theme, no families, and no family or role for the
-  // directory, until whoami and projects resolve a checkout's family and every theme.
-  // Keyed by the pack's own id, which is what member pins were matched against before.
-  const themes = { themeId: pack.id, families: {}, packFor: oneThemePackFor(pack.id, pack) };
+// The identity pipeline whoami and projects share: the context (config, tone, pin
+// catalog and the live themes), then one directory at a time through git, tasks, the
+// family file and the resolver. Each directory's family picks its theme, and only that
+// theme is loaded. The asset proof (assetsFor) is part of resolving, not of printing: an
+// identity whose sprites are missing is not an identity the surfaces can show.
+//
+// `role` is the agent's role: whoami reports the invoking agent's (FAMILIAR_ROLE), while
+// projects lists checkouts, which have no role, and passes null.
+async function identityResolver({ role }) {
+  const { config, tone, catalog, themes } = await context();
   return {
-    themeId,
+    config,
     tone,
-    pack,
     catalog,
     async resolve(cwd) {
       const { remote, repoRoot, repositoryRoot } = await gitContext(cwd);
       const projectKey = projectKeyFor({ remote, repositoryRoot, cwd });
       const project = displayProject({ repoRoot, cwd });
       const pin = matchPin(catalog, { remote, repoRoot, repositoryRoot, project });
-      const { color: projectColor, prefix, warnings } = repoRoot
+      const { color: projectColor, prefix, root, warnings } = repoRoot
         ? await lookupProjectColor(repoRoot)
         : NO_PROJECT;
+      const family = root === null ? null : await lookupFamily(root);
+      await themes.load([themeFor(config, family).theme]);
       const identity = resolveIdentity({
         projectKey, project, remote, repoRoot, repositoryRoot, projectColor,
-        family: null, role: null, catalog, themes,
+        family, role, catalog, themes,
       });
+      const pack = themes.packFor(identity.theme);
       assetsFor(pack, identity.member, tone.mode);
-      return { identity, pin, prefix, warnings };
+      return { identity, pack, pin, prefix, warnings };
     },
   };
 }
@@ -224,32 +225,38 @@ export async function main({ command, args: rest, color, mode }) {
   } else if (command === 'whoami') {
     const { positionals } = parseLeaf(rest, leafOptions);
     const cwd = positionals[0] ?? process.cwd();
-    const resolver = await identityResolver();
+    const resolver = await identityResolver({ role: roleFromEnv(process.env) });
     const { identity, prefix, warnings } = await resolver.resolve(cwd);
     reportTasksWarnings(warnings);
     const { hue } = slotSpec(identity.slot);
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         project: identity.project,
-        theme: resolver.themeId,
+        family: identity.family,
+        theme: identity.theme,
+        themeSource: identity.themeSource,
+        role: identity.role,
         slot: identity.slot,
         color: identity.projectColor,
         source: identity.source,
         hue,
         member: { id: identity.member, label: identity.label },
+        memberSource: identity.memberSource,
+        anchor: identity.anchor,
       })}\n`);
       return;
     }
     process.stdout.write(
       `${identity.project}\n` +
-      `  theme   ${resolver.themeId}\n` +
+      `  family  ${identity.family ?? '—'} · theme ${identity.theme} (${identity.themeSource})\n` +
+      `  role    ${identity.role ?? '—'} · member ${identity.label} (${identity.memberSource})\n` +
       `  slot    ${identity.slot} · hue ${hue}°\n` +
       (identity.projectColor ? `  colour  ${identity.projectColor} · ${prefix}\n` : '') +
       `  member  ${identity.label} (${identity.member})\n`,
     );
   } else if (command === 'projects') {
     const { positionals, values } = parseLeaf(rest, leafOptions);
-    const resolver = await identityResolver();
+    const resolver = await identityResolver({ role: null });
     // With no DIR the pin catalog is the list. A `remote:` or `project:` pin
     // names no directory, so only `path:` pins can be walked.
     const given = positionals.length > 0
@@ -270,9 +277,10 @@ export async function main({ command, args: rest, color, mode }) {
     reportTasksWarnings(resolved.flatMap(({ warnings }) => warnings));
     resolved.sort((a, b) => a.identity.project.localeCompare(b.identity.project));
 
-    // The same view control, the same bounds, and the same reason as `theme show`.
-    const viewRows = values.rows === undefined ? resolver.pack.rows : Number(values.rows);
-    if (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX) {
+    // The same view control, the same bounds, and the same reason as `theme show`. Without
+    // --rows each theme's own rows apply, so the override is checked once here.
+    const viewRows = values.rows === undefined ? null : Number(values.rows);
+    if (viewRows !== null && (!Number.isInteger(viewRows) || viewRows < ROW_MIN || viewRows > ROW_MAX)) {
       throw new Error(
         `--rows must be a whole number between ${ROW_MIN} and ${ROW_MAX} — got ${JSON.stringify(values.rows)}`
       );
@@ -283,11 +291,14 @@ export async function main({ command, args: rest, color, mode }) {
     }
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        theme: resolver.pack.id,
         projects: resolved.map(({ identity }) => ({
           project: identity.project,
+          family: identity.family,
+          theme: identity.theme,
+          themeSource: identity.themeSource,
           member: identity.member,
           label: identity.label,
+          memberSource: identity.memberSource,
           slot: identity.slot,
           color: identity.projectColor,
           source: identity.source,
@@ -310,47 +321,57 @@ export async function main({ command, args: rest, color, mode }) {
     }
 
     const useColor = cliColor({ color });
-    const cells = resolved.map(({ identity }) => {
-      const colors = identityColors(identity, resolver.tone);
-      const swatch = cliSwatch(identity.projectColor ?? colors.base, { color: useColor });
-      const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
-      // resolve() proved the member's assets exist. Idle is what a roster shows,
-      // as it is for `theme show`; --state asks for another pose.
-      const png = graphical
-        ? readFileSync(assetsFor(resolver.pack, identity.member, resolver.tone.mode)[state].terminal)
-        : null;
-      return {
-        lines: [
-          `  ${swatch}  ${name}`,
-          `      ${identity.label} · slot ${identity.slot} · ${identity.source}`,
-        ],
-        png,
-        cols: png ? boxFor(png, viewRows).cols : 0,
-      };
-    });
+    // One group per theme, in first-use order (the projects are sorted by name): a
+    // family's checkouts draw from its theme, so the list reads as one roster per theme.
+    const groups = new Map();
+    for (const entry of resolved) {
+      const { theme } = entry.identity;
+      if (!groups.has(theme)) groups.set(theme, { pack: entry.pack, entries: [] });
+      groups.get(theme).entries.push(entry);
+    }
     const gutter = 4;
     const width = interactive ? process.stdout.columns : undefined;
-    // The sprite is part of the cell's width: a wide member must not overhang the
-    // caption column beside it.
-    const { cellWidth, perRow } = gridPlan(cells.map((c) => c.lines), {
-      width, gutter, minCellWidth: Math.max(0, ...cells.map((c) => c.cols)),
-    });
-
-    process.stdout.write(`\n  ${resolver.pack.id} — ${resolver.pack.label}\n\n`);
-    if (cells.length === 0) {
-      process.stdout.write('  (no projects: pass directories, or pin paths in identities.yaml)\n\n');
-    }
-    for (let start = 0; start < cells.length; start += perRow) {
-      const row = cells.slice(start, start + perRow);
-      if (graphical) {
-        // The caption's two-space indent is where the sprite's box starts too, so
-        // the art sits over its own name; each advance is one whole cell.
-        process.stdout.write('  ' + transmitAcross(
-          row.map((c) => ({ png: c.png, cols: c.cols, advance: cellWidth + gutter })),
-          { rows: viewRows, frame },
-        ));
+    for (const [theme, { pack, entries }] of groups) {
+      const rows = viewRows ?? pack.rows;
+      const cells = entries.map(({ identity }) => {
+        const colors = identityColors(identity, resolver.tone);
+        const swatch = cliSwatch(identity.projectColor ?? colors.base, { color: useColor });
+        const name = useColor ? `${BOLD}${identity.project}${RESET}` : identity.project;
+        // resolve() proved the member's assets exist. Idle is what a roster shows,
+        // as it is for `theme show`; --state asks for another pose.
+        const png = graphical
+          ? readFileSync(assetsFor(pack, identity.member, resolver.tone.mode)[state].terminal)
+          : null;
+        return {
+          lines: [
+            `  ${swatch}  ${name}`,
+            `      ${identity.label} · ${identity.memberSource} · ${identity.source}`,
+          ],
+          png,
+          cols: png ? boxFor(png, rows).cols : 0,
+        };
+      });
+      // The sprite is part of the cell's width: a wide member must not overhang the
+      // caption column beside it.
+      const { cellWidth, perRow } = gridPlan(cells.map((c) => c.lines), {
+        width, gutter, minCellWidth: Math.max(0, ...cells.map((c) => c.cols)),
+      });
+      process.stdout.write(`\n  ${theme} — ${pack.label}\n\n`);
+      for (let start = 0; start < cells.length; start += perRow) {
+        const row = cells.slice(start, start + perRow);
+        if (graphical) {
+          // The caption's two-space indent is where the sprite's box starts too, so
+          // the art sits over its own name; each advance is one whole cell.
+          process.stdout.write('  ' + transmitAcross(
+            row.map((c) => ({ png: c.png, cols: c.cols, advance: cellWidth + gutter })),
+            { rows, frame },
+          ));
+        }
+        process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
       }
-      process.stdout.write(layoutRow(row.map((c) => c.lines), { cellWidth, gutter }).join('\n') + '\n\n');
+    }
+    if (groups.size === 0) {
+      process.stdout.write('\n  (no projects: pass directories, or pin paths in identities.yaml)\n\n');
     }
   } else if (command === 'niri focus') {
     // A bounded user click: no attention lock, no state, one socket exchange. The
