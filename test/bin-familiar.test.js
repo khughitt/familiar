@@ -1518,9 +1518,9 @@ test('statusline names the task its session has claimed, on and off the bus', as
   const e = statuslineEnv();
   await seedBus(e, 'claimed');
   e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
-    { id: 'fam-ff5351', session: 'claimed', started: '2026-10-26T00:38:48Z', live: true },
-    { id: 'fam-aaaaaa', session: 'claimed', started: '2026-10-25T00:00:00Z', live: true },
-    { id: 'fam-bbbbbb', session: 'not-on-the-bus', started: '2026-10-25T00:00:00Z', live: true },
+    { id: 'fam-ff5351', session: 'claimed', started: '2026-10-26T00:38:48Z', worktree: '/w', live: true },
+    { id: 'fam-aaaaaa', session: 'claimed', started: '2026-10-25T00:00:00Z', worktree: '/w', live: true },
+    { id: 'fam-bbbbbb', session: 'not-on-the-bus', started: '2026-10-25T00:00:00Z', worktree: '/w', live: true },
     { id: 'fam-cccccc', session: 'claimed', started: '2026-10-27T00:00:00Z', live: false },
   ] });
   const render = (sessionId) => {
@@ -1576,8 +1576,8 @@ test('agy\'s status line names the task its conversation has claimed', async () 
   const e = statuslineEnv();
   const payload = agyStdin();
   e.FAKE_TASKS_CLAIMS = JSON.stringify({ claims: [
-    { id: 'fam-de2ffc', session: `agy:${payload.session_id}`, started: '2026-11-01T00:00:00Z', live: true },
-    { id: 'fam-aaaaaa', session: payload.session_id, started: '2026-11-01T00:00:00Z', live: true },
+    { id: 'fam-de2ffc', session: `agy:${payload.session_id}`, started: '2026-11-01T00:00:00Z', worktree: '/w', live: true },
+    { id: 'fam-aaaaaa', session: payload.session_id, started: '2026-11-01T00:00:00Z', worktree: '/w', live: true },
   ] });
   const render = (input) => {
     const result = statusline(e, [], input);

@@ -59,7 +59,7 @@ export function gitBranch(cwd, { env } = {}) {
 // this is a hang guard, not a budget. Worst case with both git attempts: 750ms of a 2s interval.
 export const CLAIMS_TIMEOUT_MS = 250;
 
-// THE TASK THIS SESSION HAS CLAIMED, as { id, others } or null. `sessionId` is the claim's
+// THE TASK THIS SESSION HAS CLAIMED, as { id, others, worktree } or null. `sessionId` is the claim's
 // `session` (claimSession below), so a live claim with that session is this session's task. One
 // session may hold several: the latest started is shown and the rest are counted.
 //
@@ -105,14 +105,14 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
   // failing on it would take every status line's segment down with it.
   const mine = claims
     .filter((c) => c.live === true && c.session === sessionId)
-    .map((c) => ({ id: c.id, at: RFC3339.test(c.started) ? Date.parse(c.started) : NaN }));
-  if (!mine.every((c) => typeof c.id === 'string' && Number.isFinite(c.at))) {
-    warn('tasks claims: unexpected JSON shape: want a string id and an RFC 3339 started');
+    .map((c) => ({ id: c.id, worktree: c.worktree, at: RFC3339.test(c.started) ? Date.parse(c.started) : NaN }));
+  if (!mine.every((c) => typeof c.id === 'string' && typeof c.worktree === 'string' && Number.isFinite(c.at))) {
+    warn('tasks claims: unexpected JSON shape: want a string id and worktree and an RFC 3339 started');
     return null;
   }
   // By time, not by string: `.` sorts before `Z`, so fractional seconds would invert it.
   mine.sort((a, b) => b.at - a.at);
-  return mine.length ? { id: mine[0].id, others: mine.length - 1 } : null;
+  return mine.length ? { id: mine[0].id, others: mine.length - 1, worktree: mine[0].worktree } : null;
 }
 
 // Checked BEFORE Date.parse, which also takes `Oct 26 2026` and reads a zoneless time as local.

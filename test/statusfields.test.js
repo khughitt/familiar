@@ -179,7 +179,7 @@ test('no claim held by anyone is no task, and no warning', () => {
 });
 
 test('one live claim held by this session is the task', () => {
-  assert.deepEqual(lookup({ claims: [claimRow()] }), { result: { id: 'fam-ff5351', others: 0 }, warnings: [] });
+  assert.deepEqual(lookup({ claims: [claimRow()] }), { result: { id: 'fam-ff5351', others: 0, worktree: '/w' }, warnings: [] });
 });
 
 test('several claims show the latest started, counting the rest', () => {
@@ -190,8 +190,20 @@ test('several claims show the latest started, counting the rest', () => {
       claimRow({ id: 'fam-cccccc', started: '2026-10-25T23:59:59Z' }),
     ],
   });
-  assert.deepEqual(result, { id: 'fam-bbbbbb', others: 2 });
+  assert.deepEqual(result, { id: 'fam-bbbbbb', others: 2, worktree: '/w' });
   assert.deepEqual(warnings, []);
+});
+
+test('claimedTask returns the claim\'s worktree', () => {
+  const { result } = lookup({ claims: [claimRow({ worktree: '/elsewhere/wt' })] });
+  assert.equal(result.worktree, '/elsewhere/wt');
+});
+
+test('a claim of this session without a string worktree is a shape fault', () => {
+  const { result, warnings } = lookup({ claims: [claimRow({ worktree: null })] });
+  assert.equal(result, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /unexpected JSON shape/);
 });
 
 test('a dead claim is not this session\'s task', () => {
@@ -249,7 +261,7 @@ test('JSON of the wrong shape is a fault, not an empty list', () => {
 test('a malformed claim of another session does not hide this one', () => {
   assert.deepEqual(lookup({
     claims: [{ id: 7, session: 'someone-else', live: true }, { session: SESSION, live: false }, claimRow()],
-  }), { result: { id: 'fam-ff5351', others: 0 }, warnings: [] });
+  }), { result: { id: 'fam-ff5351', others: 0, worktree: '/w' }, warnings: [] });
 });
 
 // Time order, not string order: `.` sorts before `Z`, so fractional seconds would invert it.
@@ -260,7 +272,7 @@ test('started is compared as a time, not as a string', () => {
       claimRow({ id: 'fam-bbbbbb', started: '2026-10-26T00:38:48.500Z' }),
     ],
   });
-  assert.deepEqual(result, { id: 'fam-bbbbbb', others: 1 });
+  assert.deepEqual(result, { id: 'fam-bbbbbb', others: 1, worktree: '/w' });
 });
 
 test('a non-zero exit leaves the segment off and says so once', () => {
