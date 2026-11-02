@@ -268,7 +268,8 @@ them, and the window between steps 1 and 2 is the time it takes to type them.
 
 **Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
 after familiar does. Install the previous build, which has no `theme remove`, then
-delete both paths by hand and add the old pack at the commit its receipt names:
+delete both paths by hand and add the old pack at the commit noted in step 2. The first
+path is the installed spec-version 2 pack of the theme being rolled back:
 
 ```sh
 rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json
@@ -276,9 +277,20 @@ familiar theme add <the v1 source, at the commit noted in step 2>
 ```
 
 If a `theme add --replace` left a backup, follow [Rolling back from a surviving
-backup](#rolling-back-from-a-surviving-backup) before this. A managed Codex config
-already rewritten to a per-theme pet id is not recognised by the previous build:
-remove it and run that build's `install pets --sync-projects`.
+backup](#rolling-back-from-a-surviving-backup) before this.
+
+Codex: the previous build recognises a managed `.codex/config.toml` by a `pet` value of
+`custom:familiar-` followed by letters, digits and hyphens, so it treats a per-theme
+selection (`custom:familiar-<theme>--<member>`) as its own and rewrites it. Run the
+previous build's `familiar install pets --sync-projects` to write single-theme
+selections; its pets must be compiled, so run `familiar install pets` there first if
+the `~/.codex/pets/familiar-<member>` directories were deleted. If it refuses a file
+(`refusing unmanaged project config <path>`), that file is not one of Familiar's three
+managed lines and stays yours.
+
+Session records: the previous build's `sessions.json` validator (under the familiar state
+directory) checks the keys it knows and ignores others, so records carrying `family`,
+`role` and `admitted` are read as they are and need no step.
 
 ## Project identity and Git worktrees
 
