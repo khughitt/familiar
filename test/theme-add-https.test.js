@@ -242,7 +242,7 @@ test('a held HTTPS add makes a zero-retry HTTPS add fail by name', async (t) => 
         caFile: CERT,
         lockOpts: { retries: 0 },
       }),
-      /another theme add is running/
+      /another theme add or remove is running/
     );
   } finally {
     releaseFirst();

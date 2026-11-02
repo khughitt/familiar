@@ -105,17 +105,18 @@ Usage:
 
 Explore
   whoami [PATH]                Show this project's familiar identity
-  projects [DIR...]            Show every project's familiar, coloured, pinned or hashed
+  projects [DIR...]            Show every project's familiar: family, theme and member
   theme list                   List installed themes
   theme add SOURCE             Install a theme from an HTTPS URL or local directory
+  theme remove ID              Remove an installed theme and its receipt
   theme validate DIR           Prove a theme directory conforms
-  theme show [ID]              Show a theme's twelve members
+  theme show [ID]              Show a theme's members
   theme preview MEMBER         Preview one member and its states
   theme sheet                  Show every member across every state
 
 Set up
   scheme set dark|light        Set the terminal colour scheme
-  install pets                 Install the active theme as Codex pets
+  install pets                 Install every configured theme as Codex pets
   install opencode             Install the OpenCode integration
   setup claude-code            Print Claude Code integration settings
   setup relay                  Print familiar's relay observer entries
@@ -181,8 +182,9 @@ Usage:
 Commands:
   list                   List installed themes
   add SOURCE             Install a theme
+  remove ID              Remove an installed theme and its receipt
   validate DIR           Prove a theme directory conforms
-  show [ID]              Show a theme's twelve members
+  show [ID]              Show a theme's members
   preview MEMBER         Preview one member and its states
   sheet                  Show every member across every state
 
@@ -193,18 +195,37 @@ Examples:
   'theme add': `Install a theme from an HTTPS URL or local directory.
 
 Usage
-  familiar theme add SOURCE
+  familiar theme add [--replace] SOURCE
 
 Arguments
   SOURCE          An https:// git URL, or a local theme directory
 
+Options
+  --replace       Replace an installed theme of the same id
+
 Only the pack (theme.yaml, licence files, member sprites) is staged,
 validated and promoted atomically; an install receipt records the source. Private repos: clone with git, then
-add the clone's directory.
+add the clone's directory. --replace moves the installed pack and receipt aside, and
+puts them back if the new one cannot be installed.
 
 Examples
   familiar theme add ./familiar-cats
+  familiar theme add --replace ./familiar-cats
   familiar theme add ./my-theme`,
+  'theme remove': `Remove an installed theme and its receipt.
+
+Usage:
+  familiar theme remove ID
+
+Arguments:
+  ID              Theme id, as theme list shows it
+
+Removes the user-installed pack and its install receipt. A shipped theme is not
+removable; removing a user theme that shadows a shipped one brings the shipped one back.
+
+Examples:
+  familiar theme remove cats
+`,
   'theme validate': `Prove a theme directory conforms.
 
 Usage:
@@ -225,7 +246,7 @@ Examples:
   familiar theme list
   NO_COLOR=1 familiar theme list
 `,
-  'theme show': `Show a theme's twelve members.
+  'theme show': `Show a theme's members.
 
 Usage:
   familiar theme show [ID] [--rows N]
@@ -304,7 +325,7 @@ Usage:
   familiar install <command>
 
 Commands:
-  pets            Install the active theme as Codex pets
+  pets            Install every configured theme as Codex pets
   opencode        Install the OpenCode integration
 
 Examples:

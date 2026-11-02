@@ -151,6 +151,10 @@ test('output mode is honoured by every non-protocol, non-family command', () => 
     projects: () => ['projects', scratch()],
     'theme list': () => ['theme', 'list'],
     'theme add': () => ['theme', 'add', addSource],
+    'theme remove': () => {
+      fs.cpSync(themeFixture, path.join(configDir, 'themes', 'fixture-removed'), { recursive: true });
+      return ['theme', 'remove', 'fixture-removed'];
+    },
     'theme validate': () => ['theme', 'validate', themeFixture],
     'theme show': () => ['theme', 'show'],
     'theme preview': () => ['theme', 'preview', 'pip'],

@@ -94,7 +94,7 @@ test('root and bare families print offline help with status zero', (t) => {
     assert.equal(root.match(new RegExp(`^${heading}$`, 'gm'))?.length, 1);
   }
   for (const command of [
-    'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
+    'whoami [PATH]', 'projects [DIR...]', 'theme list', 'theme add SOURCE', 'theme remove ID', 'theme validate DIR', 'theme show [ID]', 'theme preview MEMBER', 'theme sheet',
     'scheme set dark|light', 'install pets', 'install opencode', 'setup claude-code', 'setup relay', 'observe', 'statusline', 'reap',
   ]) {
     assert.equal(root.split('\n').filter((line) => line.startsWith(`  ${command} `)).length, 1, command);
@@ -104,7 +104,7 @@ test('root and bare families print offline help with status zero', (t) => {
 });
 
 const leaves = [
-  ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'show'], ['theme', 'preview'],
+  ['whoami'], ['projects'], ['theme', 'list'], ['theme', 'add'], ['theme', 'remove'], ['theme', 'show'], ['theme', 'preview'],
   ['theme', 'sheet'], ['theme', 'validate'], ['scheme', 'set'], ['install', 'pets'],
   ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'relay'], ['observe'], ['statusline'], ['reap'],
 ];
@@ -408,7 +408,7 @@ test('current user and agent surfaces contain no retired CLI invocations', () =>
   const oldRootLeaves = ['themes', 'preview', 'contact', 'pets'];
   const retired = new RegExp(
     `familiar (?:${oldRootLeaves.join('|')})\\b|tools/whoami\\.mjs|` +
-    'familiar theme (?!list\\b|add\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
+    'familiar theme (?!list\\b|add\\b|remove\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
     'u',
   );
   // Both agents' configuration is generated now, so a literal placeholder path in user-facing

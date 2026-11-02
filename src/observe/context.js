@@ -27,14 +27,19 @@ export async function loadContext({ paths = resolvePaths(), config } = {}) {
 //
 // A pack whose own id differs from the directory it was loaded under is a fault for
 // that theme, not a pack to key either way: a pin's `members:` and a window's tag would
-// name one id while the art came from another.
+// name one id while the art came from another. `theme list` applies the same check, so a
+// theme it lists as readable is one this set can load.
+export function assertPackMatchesDirectory(pack, id) {
+  if (pack.id !== id) throw new Error(`pack id "${pack.id}" does not match its directory`);
+}
+
 export function themeSet({ paths, config: { themeId, families }, loadPack = loadThemePack }) {
   // id -> { ready, pack } or { ready, fault }, the second key set when `ready` settles.
   const entries = new Map();
   const loadOne = async (id) => {
     try {
       const pack = await loadPack(themeDirFor(paths, id));
-      if (pack.id !== id) throw new Error(`pack id "${pack.id}" does not match its directory`);
+      assertPackMatchesDirectory(pack, id);
       return { pack };
     } catch (error) {
       return { fault: new Error(`theme "${id}": ${error.message}`) };

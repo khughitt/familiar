@@ -1,6 +1,6 @@
 // Every familiar command but `observe`, which bin/familiar.js routes on its own: that file
 // parses and routes, and loads this module only for the commands implemented here.
-import { loadContext as context, makePrepareSprites } from '../src/observe/context.js';
+import { loadContext as context, makePrepareSprites, assertPackMatchesDirectory } from '../src/observe/context.js';
 export { makePrepareSprites } from '../src/observe/context.js';
 import { readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -10,9 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
-import { loadConfig, loadTone, writeTone, themeDirFor, themeFor } from '../src/config.js';
-import { listThemes, stagingStatus } from '../src/theme/catalog.js';
-import { addTheme } from '../src/theme/add.js';
+import { loadConfig, loadTone, writeTone, themeDirFor, themeFor, themeIdsOf } from '../src/config.js';
+import { listThemes, replacementBackups, stagingStatus } from '../src/theme/catalog.js';
+import { addTheme, removeTheme } from '../src/theme/add.js';
 import { planCodexProjectSync, applyCodexProjectSync } from '../src/install/codex.js';
 import { setupDocument } from '../src/install/setup.js';
 import { readReceipt, receiptPath } from '../src/theme/receipt.js';
@@ -752,36 +752,52 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write(`  ${state}: ${member.poses[state]}\n`);
     }
   } else if (command === 'theme add') {
-    const { positionals } = parseLeaf(rest, leafOptions);
+    const { positionals, values } = parseLeaf(rest, leafOptions);
     const paths = resolvePaths();
-    const { themeId: activeId } = await loadConfig({ paths });
-    const result = await addTheme({ paths, source: positionals[0] });
+    const active = new Set(themeIdsOf(await loadConfig({ paths })));
+    const result = await addTheme({ paths, source: positionals[0], replace: values.replace === true });
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        id: result.id, dir: result.dir, members: result.members, active: result.id === activeId,
+        id: result.id, dir: result.dir, members: result.members, active: active.has(result.id),
       })}\n`);
       return;
     }
     process.stdout.write(`installed theme '${result.id}' (${result.members} members) at ${result.dir}\n`);
-    if (result.id !== activeId) {
+    if (!active.has(result.id)) {
       process.stdout.write(`activate with: set "theme: ${result.id}" in ${paths.configPath}\n`);
     }
+  } else if (command === 'theme remove') {
+    const { positionals } = parseLeaf(rest, leafOptions);
+    const result = await removeTheme({ paths: resolvePaths(), id: positionals[0] });
+    if (mode === 'json') {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+      return;
+    }
+    const what = [result.removed.pack && 'pack', result.removed.receipt && 'receipt'].filter(Boolean).join(' and ');
+    process.stdout.write(`removed theme '${result.id}' (${what})\n`);
   } else if (command === 'theme list') {
     parseLeaf(rest, leafOptions);
     // Deliberately NOT context(): a broken theme on disk must not stop you
     // LISTING what is on disk — that is exactly when you need the list. Each
     // pack is loaded independently and a failure is reported on its own row.
     const paths = resolvePaths();
-    const { themeId: activeId } = await loadConfig({ paths });
+    const active = new Set(themeIdsOf(await loadConfig({ paths })));
     const rows = listThemes(paths);
+    // The checks every live theme passes (src/observe/context.js), so a theme listed as
+    // readable is one a session can draw from.
+    const loadRow = (row) => {
+      const pack = loadThemePackSync(row.dir);
+      assertPackMatchesDirectory(pack, row.id);
+      return pack;
+    };
 
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify(rows.map((row) => {
         let pack = null, error = null;
-        try { pack = loadThemePackSync(row.dir); } catch (err) { error = err.message; }
+        try { pack = loadRow(row); } catch (err) { error = err.message; }
         return {
           id: row.id,
-          active: row.id === activeId,
+          active: active.has(row.id),
           source: row.shadowed ? 'user (shadows shipped)' : row.source,
           label: pack?.label ?? null,
           members: pack ? pack.members.size : null,
@@ -794,10 +810,10 @@ export async function main({ command, args: rest, color, mode }) {
 
     process.stdout.write('\n');
     for (const row of rows) {
-      const status = row.id === activeId ? 'active' : '';
+      const status = active.has(row.id) ? 'active' : '';
       let detail;
       try {
-        const pack = loadThemePackSync(row.dir);
+        const pack = loadRow(row);
         const source = row.shadowed ? 'user (shadows shipped)' : row.source;
         // pack.label is required non-empty by parseThemePack, and pack.members
         // is a Map — hence .size, not .length.
@@ -822,6 +838,12 @@ export async function main({ command, args: rest, color, mode }) {
       process.stdout.write('  theme add staging present — another add may be running; abandoned staging is cleaned by the next add\n');
     } else if (staging === 'not-a-directory') {
       process.stdout.write(`  ${join(paths.userThemesDir, '.staging')} is not a directory — remove it\n`);
+    }
+    // A backup survives only a replacement whose restore failed: the one copy of a theme.
+    const backups = replacementBackups(paths);
+    if (backups.notADirectory) process.stdout.write(`  ${backups.root} is not a directory — remove it\n`);
+    for (const { id, path } of backups.backups) {
+      process.stdout.write(`  replacement backup of '${sanitize(id)}' at ${sanitize(path)} — restore or remove it\n`);
     }
     process.stdout.write('\n');
   } else if (command === 'theme validate') {

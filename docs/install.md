@@ -21,7 +21,9 @@ directory, such as your working checkout. It installs only the pack itself
 (`theme.yaml`, licence files, and each member's sprite directory), validates
 exactly those files, and atomically installs them into
 `~/.config/familiar/themes/<id>`. Anything else in the checkout (tool
-workspaces, docs, build output) is left behind.
+workspaces, docs, build output) is left behind. A theme that is already installed
+refuses a second `theme add`; see [Replacing and removing
+themes](#replacing-and-removing-themes).
 
 macOS agent lifecycle is supported. The portable core is CI-backed, and the
 Darwin agent resolver was activated on live-hook evidence captured on a physical
@@ -37,6 +39,53 @@ the same gate exercised it and found the sprite never changes pose. tmux is supp
 inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes on tmux
 ≤ 3.7c; status-line colour depth; multiple attached clients with different outer
 terminals are not addressed). Intel Macs, macOS 13, and other terminals stay unclaimed.
+
+### Replacing and removing themes
+
+```sh
+familiar theme add --replace <theme-url-or-directory>   # install a new copy over an installed theme
+familiar theme remove <id>                              # remove an installed theme and its receipt
+```
+
+`theme remove` deletes the pack under `~/.config/familiar/themes/<id>` and its install
+receipt under `~/.config/familiar/theme-receipts/<id>.json`, whichever exist. It
+refuses a pack directory that is a symlink, and a shipped theme, which is not
+removable. Removing a user theme that shadows a shipped one brings the shipped one
+back. A theme that config still names faults wherever it is drawn until config names
+another or it is installed again.
+
+`theme add --replace` validates the new copy first, then moves the installed pack
+and receipt into a backup directory,
+`~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `pack/` and
+`receipt.json`. It installs the new pack, writes its receipt, and only then deletes
+the backup. If the install fails after the old theme was moved aside, the new copy
+is removed and the old pack and receipt are moved back; the error names the cause.
+`theme add` and `theme remove` share one lock, so neither runs while another is
+under way.
+
+#### Rolling back from a surviving backup
+
+If moving the old theme back fails too, the backup stays where it is and nothing
+deletes it: not a later `theme add`, whose staging sweep never reaches it, nor
+`theme remove`. The error and every `theme list` name it (`replacement backup of
+'<id>' at <path> — restore or remove it`). To restore it, move its two entries back
+to the two paths they came from (skip one the backup does not hold: a manual install
+has no receipt):
+
+```sh
+B=~/.config/familiar/themes/.replace-backup/<id>-<instant>   # the path theme list names
+ls ~/.config/familiar/themes/<id>                            # absent after a failed replace;
+                                                             # if present, it is the new copy:
+                                                             # familiar theme remove <id>
+mv "$B/pack" ~/.config/familiar/themes/<id>
+mv "$B/receipt.json" ~/.config/familiar/theme-receipts/<id>.json
+rmdir "$B"
+familiar theme list                                          # the theme is back, the notice gone
+```
+
+To keep the new theme instead, install it again and delete the backup
+(`rm -r "$B"`). With `FAMILIAR_CONFIG_DIR` set, every `~/.config/familiar` above is
+that directory.
 
 ### Relay observers and lifecycle hooks (operator cutover)
 

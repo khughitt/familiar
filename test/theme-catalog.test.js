@@ -220,21 +220,35 @@ test('familiar theme list names the shipped theme active', () => {
   assert.match(result.stdout, /shipped/);
 });
 
+// A user theme copied from the fixture pack, its descriptor's id set to the directory
+// it sits in, as `theme add` installs it: a pack whose id differs from its directory
+// lists as a fault (Ruling 11), which the next test but one pins.
+function ownId(env, dir) {
+  const descriptor = join(env.FAMILIAR_CONFIG_DIR, 'themes', dir, 'theme.yaml');
+  writeFileSync(descriptor, readFileSync(descriptor, 'utf8').replace(/^id: fixture$/m, `id: ${dir}`));
+  return descriptor;
+}
+
 // An inactive theme keeps the fixed status column blank, so its details align
 // with the active row and with any description continuation below it.
-//
-// The fixture also pins a real distinction: the copied directory is named
-// `spare` while the theme.yaml inside it still says `id: fixture`. themeDirFor
-// resolves by DIRECTORY name, so the directory is what the listing must print.
 test('a theme that is not active has a blank status and aligns its description', () => {
   const env = cliEnv({ theme: 'cats', userThemes: { spare: themeFixture } });
-  const descriptor = join(env.FAMILIAR_CONFIG_DIR, 'themes', 'spare', 'theme.yaml');
+  const descriptor = ownId(env, 'spare');
   writeFileSync(descriptor, `${readFileSync(descriptor, 'utf8')}\ndescription: Spare roster\n`);
   const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^ {2}cats {8}active {4}Fixture/m);
   assert.match(result.stdout, /^ {2}spare {7} {10}Fixture/m);
   assert.match(result.stdout, /^ {24}Spare roster$/m);
+});
+
+// themeDirFor resolves by DIRECTORY name, so a directory renamed by hand reaches a pack
+// whose id says otherwise; every live surface faults on it, and the listing says so.
+test('a user theme whose pack id differs from its directory lists as unreadable', () => {
+  const env = cliEnv({ theme: 'cats', userThemes: { spare: themeFixture } });
+  const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^ {2}spare {17}— unreadable: pack id "fixture" does not match its directory$/m);
 });
 
 test('an unreadable active theme still prints active on its row', () => {
@@ -269,6 +283,7 @@ test('a stray file in the user themes root does not brick themes, theme, or prev
 
 test('familiar theme list reports a user theme that shadows a shipped one', () => {
   const env = cliEnv({ userThemes: { cats: themeFixture } });
+  ownId(env, 'cats');
   const result = spawnSync(process.execPath, [bin, 'theme', 'list'], { encoding: 'utf8', env });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /shadows shipped/);
