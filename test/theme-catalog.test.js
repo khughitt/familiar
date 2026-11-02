@@ -430,14 +430,26 @@ test('CLI color requires a TTY and honours NO_COLOR', () => {
 });
 
 test('NO_COLOR keeps interactive kitty art but removes SGR swatches', () => {
-  const env = cliEnv(GRAPHICAL);
-  env.FAMILIAR_COLOR = 'auto';   // opt into TTY/NO_COLOR sensing; the flag's own default is 'never'
-  env.NO_COLOR = '1';
-  delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
-  const result = runTty(['theme', 'show'], { encoding: 'utf8', env, maxBuffer: THEME_MAX_BUFFER });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal((result.stdout.match(/\x1b_Ga=T,/g) ?? []).length, 1);
-  assert.doesNotMatch(result.stdout, /\x1b\[/);
+  const sense = (noColor) => {
+    const env = cliEnv(GRAPHICAL);
+    env.FAMILIAR_COLOR = 'auto';   // opt into TTY/NO_COLOR sensing; the flag's own default is 'never'
+    if (noColor) env.NO_COLOR = '1';
+    delete env.FORCE_COLOR;   // node 26 warns on stderr when both are set
+    return env;
+  };
+  // `theme show` paints no swatch; its claim here is the kitty art.
+  const show = runTty(['theme', 'show'], { encoding: 'utf8', env: sense(true), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(show.status, 0, show.stderr);
+  assert.equal((show.stdout.match(/\x1b_Ga=T,/g) ?? []).length, 1);
+  const projectDir = mkdtempSync(join(tmpdir(), 'familiar-nocolor-'));
+  // `projects` still paints an SGR swatch: the control proves the assertion can fail.
+  const painted = runTty(['projects', projectDir], { encoding: 'utf8', env: sense(false), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(painted.status, 0, painted.stderr);
+  assert.match(painted.stdout, /\x1b\[38;2;/);
+  const plain = runTty(['projects', projectDir], { encoding: 'utf8', env: sense(true), maxBuffer: THEME_MAX_BUFFER });
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.match(plain.stdout, /\x1b_Ga=T,/);
+  assert.doesNotMatch(plain.stdout, /\x1b\[[0-9;]*m/);   // cursor-move CSI around the art is not SGR
 });
 
 // FIX 4: `--rows` bounds must come from familiar-theme's ROW_MIN/ROW_MAX, not

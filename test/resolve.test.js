@@ -164,7 +164,7 @@ test('a role the theme covers chooses its member, even over a pin', () => {
   assert.equal(pinned.slot, 6);
 });
 
-test('the default role is an ordinary role lookup when named explicitly', () => {
+test('a role the theme covers beats a pin-free lookup of the default holder', () => {
   const identity = resolveIdentity({ ...ctx, role: 'planner', catalog: NO_PINS, themes: THEMES });
   assert.deepEqual([identity.member, identity.memberSource], ['ginger-tabby', 'role']);
 });
