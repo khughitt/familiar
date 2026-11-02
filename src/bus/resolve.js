@@ -100,7 +100,7 @@ export function oneThemePackFor(themeId, pack) {
 }
 
 export function resolveIntent({
-  record, identity, tone, spriteFor, animationFor, motionPolicy,
+  record, identity, tone, spriteFor, animationFor, worldFor, motionPolicy,
 }) {
   if (!MOTION_POLICIES.includes(motionPolicy)) {
     const choices = `${MOTION_POLICIES.slice(0, -1).join(', ')}, or ${MOTION_POLICIES.at(-1)}`;
@@ -114,13 +114,21 @@ export function resolveIntent({
       `resolveIntent: animationFor must be a function (found ${typeof animationFor})`,
     );
   }
+  if (typeof worldFor !== 'function') {
+    throw new Error(`resolveIntent: worldFor must be a function (found ${typeof worldFor})`);
+  }
   const color = identityColors(identity, tone);
+  // Proven once per record: a locale image that fails proof throws here and faults the
+  // record, like a missing sprite. The world rides on the identity so a consumer reads
+  // it from the snapshot it displays.
+  const shownIdentity = { ...identity, world: worldFor(identity.theme) };
   const animation = animationFor(identity.theme, identity.member);
 
   const intentFor = (state) => ({
     sessionId: record.sessionId,
     pid: record.pid,
-    identity,
+    admitted: record.admitted,
+    identity: shownIdentity,
     state: assertState(state),
     ...presentationFor(state),
     motionPolicy,
@@ -206,14 +214,14 @@ export function resolveIdentities({ agents, catalog, themes }) {
 // (Faulted records are not "missing" — the transaction has already dropped them
 // from `agents` by the time this runs.)
 export function resolveAll({
-  agents, identities, tone, spriteFor, animationFor, motionPolicy,
+  agents, identities, tone, spriteFor, animationFor, worldFor, motionPolicy,
 }) {
   const out = {};
   for (const [sessionId, record] of Object.entries(agents)) {
     const identity = identities.get(sessionId);
     if (!identity) throw new Error(`no resolved identity for session "${sessionId}"`);
     out[sessionId] = resolveIntent({
-      record, identity, tone, spriteFor, animationFor, motionPolicy,
+      record, identity, tone, spriteFor, animationFor, worldFor, motionPolicy,
     });
   }
   return out;

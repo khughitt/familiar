@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { loadThemePack, assetsFor, STATES, loadAnimationMember } from 'familiar-theme';
+import { loadThemePack, assetsFor, localeAssetFor, STATES, loadAnimationMember } from 'familiar-theme';
 import { paths as resolvePaths } from '../bus/paths.js';
 import { loadConfig, loadTone, themeDirFor, themeFor } from '../config.js';
 import { loadIdentities } from '../bus/pins.js';
@@ -176,20 +176,44 @@ export function makePrepareSprites(ctx, {
       return admitted.animationSet;
     };
 
-    return { identities, spriteFor, animationFor, animationSetFor, faults };
+    // The theme's `home` locale, proven once per theme per invocation: `null` for a pack
+    // without a world (localeAssetFor is not called for it), else the image path, size and
+    // places. A failed proof throws, and the record resolving to that theme faults (§5.8).
+    // A failure is cached too, so every record of the theme reports the same fault.
+    const worlds = new Map();
+    const worldFor = (theme) => {
+      if (!worlds.has(theme)) {
+        try {
+          const pack = ctx.themes.packFor(theme);
+          if (pack.world === null) {
+            worlds.set(theme, { world: null });
+          } else {
+            const { image, size, places } = localeAssetFor(pack, 'home');
+            worlds.set(theme, { world: { locale: 'home', image, size, places } });
+          }
+        } catch (error) {
+          worlds.set(theme, { error });
+        }
+      }
+      const outcome = worlds.get(theme);
+      if (outcome.error) throw outcome.error;
+      return outcome.world;
+    };
+
+    return { identities, spriteFor, animationFor, animationSetFor, worldFor, faults };
   };
 }
 
 export function visualResolver(ctx) {
   const prepare = makePrepareSprites(ctx);
   return async (sessions) => {
-    const { identities, spriteFor, animationFor, faults } = await prepare(sessions);
+    const { identities, spriteFor, animationFor, worldFor, faults } = await prepare(sessions);
     const intent = {};
     for (const [sid, record] of Object.entries(sessions)) {
       if (faults.has(sid)) continue;
       try {
         Object.assign(intent, resolveAll({
-          agents: { [sid]: record }, identities, spriteFor, animationFor,
+          agents: { [sid]: record }, identities, spriteFor, animationFor, worldFor,
           tone: ctx.tone, motionPolicy: ctx.motionPolicy,
         }));
       } catch (error) {

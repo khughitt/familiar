@@ -13,7 +13,7 @@ import { readSessions } from '../src/bus/sessions.js';
 import { readJson } from '../src/bus/store.js';
 import { withLock } from '../src/bus/lock.js';
 import { readAttention } from '../src/attention/store.js';
-import { loadContext, makePrepareSprites, themeSet } from '../src/observe/context.js';
+import { loadContext, makePrepareSprites, themeSet, visualResolver } from '../src/observe/context.js';
 import { loadConfig } from '../src/config.js';
 import { preloadedThemes, writeTheme } from './helpers/themes.js';
 
@@ -493,4 +493,54 @@ test('a pack whose own id differs from its directory faults that theme', async (
   const prepared = await makePrepareSprites(ctx)({ a: familyRecord('a', 'guild'), b: familyRecord('b', 'verifiably') });
   assert.equal(prepared.faults.get('a'), 'theme "odd": pack id "other" does not match its directory');
   assert.deepEqual([...prepared.identities.keys()], ['b']);
+});
+
+// --- world, anchor and admission on the intent record ------------------------------------
+
+// Gives an installed theme a one-locale world (a 1x1 `home.png`, one place) and returns the
+// image path. The fixture member is `ginger`, anchor floor by default.
+async function addWorld(paths, id) {
+  const dir = join(paths.userThemesDir, id);
+  const descriptor = await readFile(join(dir, 'theme.yaml'), 'utf8');
+  await writeFile(join(dir, 'theme.yaml'), descriptor.replace('members:', [
+    'world:', '  asset-root: world', '  size: [1, 1]', '  locales:',
+    '    home: { image: home.png, places: [[0, 0]] }', 'members:',
+  ].join('\n')));
+  await mkdir(join(dir, 'world'));
+  const { TINY_PNG } = await import('./helpers/fixture.js');
+  await writeFile(join(dir, 'world', 'home.png'), TINY_PNG());
+  return join(dir, 'world', 'home.png');
+}
+
+test('the intent identity carries the theme\'s proven home locale and the member anchor; a theme without a world carries null', async (t) => {
+  const { paths, ctx } = await themedContext(t, { extra: () => {} });
+  const image = await addWorld(paths, 'forest');
+  const fresh = await loadContext({ paths });
+  const { intent, faults } = await visualResolver(fresh)({
+    a: { ...familyRecord('a', null), admitted: 3 }, b: { ...familyRecord('b', 'verifiably'), admitted: 4 },
+  });
+  assert.deepEqual(faults, new Map());
+  assert.equal(intent.a.current.identity.world, null);
+  assert.equal(intent.a.current.identity.anchor, 'floor');
+  assert.equal(intent.a.current.admitted, 3);
+  const world = intent.b.current.identity.world;
+  assert.equal(world.locale, 'home');
+  assert.equal(world.image, image);
+  assert.deepEqual(world.size, { width: 1, height: 1 });
+  assert.deepEqual(world.places, [{ x: 0, y: 0 }]);
+  assert.equal(intent.b.current.admitted, 4);
+  void ctx;
+});
+
+test('a deleted home.png faults the record of that theme and no other', async (t) => {
+  const { paths } = await themedContext(t);
+  const image = await addWorld(paths, 'forest');
+  const fresh = await loadContext({ paths });
+  await rm(image);
+  const { intent, faults } = await visualResolver(fresh)({
+    a: { ...familyRecord('a', null), admitted: 3 }, b: { ...familyRecord('b', 'verifiably'), admitted: 4 },
+  });
+  assert.match(faults.get('b'), /world: locale "home"/);
+  assert.equal(Object.hasOwn(intent, 'b'), false);
+  assert.equal(Object.hasOwn(intent, 'a'), true);
 });

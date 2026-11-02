@@ -394,7 +394,7 @@ export async function main({ command, args: rest, color, mode }) {
     let visualFault;
     if (record) {
       const one = { [sessionId]: record };
-      const { identities, spriteFor, animationFor, faults } = await makePrepareSprites(ctx)(one);
+      const { identities, spriteFor, animationFor, worldFor, faults } = await makePrepareSprites(ctx)(one);
       if (faults.has(sessionId)) {
         visualFault = `session ${sessionId}: ${faults.get(sessionId)}`;
       } else {
@@ -405,6 +405,7 @@ export async function main({ command, args: rest, color, mode }) {
           tone: ctx.tone,
           spriteFor,
           animationFor,
+          worldFor,
           motionPolicy: ctx.motionPolicy,
         })[sessionId];
         intent = displayedIntent(intentRecord, now());

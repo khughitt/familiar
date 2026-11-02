@@ -92,6 +92,8 @@ const CLIPS_REF = Object.freeze({
 });
 const animationFor = (theme, member) => theme === 'cats' && member === 'ginger-tabby' ? CLIPS_REF : { kind: 'static' };
 const motionPolicy = 'full';
+const WORLD = Object.freeze({ locale: 'home', image: '/theme/world/home.png', size: { width: 4, height: 2 }, places: [{ x: 1, y: 1 }] });
+const worldFor = (theme) => (theme === 'cats' ? WORLD : null);
 
 const record = (over = {}) => ({
   sessionId: 's1',
@@ -332,7 +334,7 @@ test('resolveIntent asks spriteFor and animationFor for its identity\'s theme an
     record: record({ state: 'done' }), identity: { ...identity, theme: 'forest', member: 'ginger' }, tone: DARK,
     spriteFor: (...args) => { calls.push(['sprite', ...args]); return spriteFor(...args); },
     animationFor: (...args) => { calls.push(['animation', ...args]); return animationFor(...args); },
-    motionPolicy,
+    worldFor, motionPolicy,
   });
   assert.deepEqual(calls, [
     ['animation', 'forest', 'ginger'], ['sprite', 'forest', 'ginger', 'done'], ['sprite', 'forest', 'ginger', 'idle'],
@@ -343,7 +345,7 @@ test('resolveIntent asks spriteFor and animationFor for its identity\'s theme an
 test('a persistent state has no expiry and no successor', () => {
   const intent = resolveIntent({
     record: record({ state: 'needs-input' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
   assert.equal(intent.expiresAt, null);
   assert.equal(intent.after, null);
@@ -355,11 +357,11 @@ test('a persistent state has no expiry and no successor', () => {
 test('state owns urgency and motion; it never repaints the identity hue', () => {
   const working = resolveIntent({
     record: record({ state: 'working' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
   const erroring = resolveIntent({
     record: record({ state: 'error' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
 
   // An erroring ginger tabby is still ginger.
@@ -371,7 +373,7 @@ test('state owns urgency and motion; it never repaints the identity hue', () => 
 test('a transient state carries its expiry AND its fully-resolved successor', () => {
   const done = resolveIntent({
     record: record({ state: 'done' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
   assert.equal(done.expiresAt, 1_000_000 + TTL_DONE_MS);
   assert.equal(done.after.state, 'idle');
@@ -392,7 +394,7 @@ test('a transient state carries its expiry AND its fully-resolved successor', ()
 
   const err = resolveIntent({
     record: record({ state: 'error' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
   assert.equal(err.expiresAt, 1_000_000 + TTL_ERROR_MS);   // longer: a failure deserves to be noticed
   assert.equal(err.after.state, 'idle');
@@ -401,7 +403,7 @@ test('a transient state carries its expiry AND its fully-resolved successor', ()
 test('the successor is a complete Intent — a renderer decides WHEN to swap, never WHAT to', () => {
   const done = resolveIntent({
     record: record({ state: 'done' }), identity, tone: DARK,
-    spriteFor, animationFor, motionPolicy,
+    spriteFor, animationFor, worldFor, motionPolicy,
   });
   assert.deepEqual(Object.keys(done.after).sort(), Object.keys(done.current).sort());
 });
@@ -410,7 +412,7 @@ test('an unknown state throws rather than defaulting to idle', () => {
   assert.throws(
     () => resolveIntent({
       record: record({ state: 'busy' }), identity, tone: DARK,
-      spriteFor, animationFor, motionPolicy,
+      spriteFor, animationFor, worldFor, motionPolicy,
     }),
     /unknown state: busy/
   );
@@ -607,7 +609,7 @@ test('resolveAll keys intent records by session id', () => {
   };
   const { identities } = resolveIdentities({ agents, catalog: NO_PINS, themes: THEMES });
   const out = resolveAll({
-    agents, identities, tone: DARK, spriteFor, animationFor, motionPolicy,
+    agents, identities, tone: DARK, spriteFor, animationFor, worldFor, motionPolicy,
   });
   assert.deepEqual(Object.keys(out), ['s1', 's2']);
   assert.equal(out.s2.after.state, 'idle');
@@ -624,7 +626,7 @@ test('resolveAll takes the identity map rather than recomputing it — one pin-m
 
   assert.throws(
     () => resolveAll({
-      agents, identities, tone: DARK, spriteFor, animationFor, motionPolicy,
+      agents, identities, tone: DARK, spriteFor, animationFor, worldFor, motionPolicy,
     }),
     /no resolved identity for session "s2"/
   );
@@ -674,6 +676,48 @@ test('a record without its own projectColor faults until its next hook', () => {
 
 test('the intent carries the exact colour as its project stop', () => {
   const identity = resolveIdentity({ ...ctx, projectColor: '#317d01', catalog: NO_PINS, themes: THEMES });
-  const intent = resolveIntent({ record: record(), identity, tone: DARK, spriteFor, animationFor, motionPolicy });
+  const intent = resolveIntent({ record: record(), identity, tone: DARK, spriteFor, animationFor, worldFor, motionPolicy });
   assert.equal(intent.current.color.project, '#317d01');
+});
+
+// Composed surfaces group by project and place by `admitted`: the snapshot carries it
+// beside sessionId and pid, on both halves of a transient record.
+test('both snapshots carry admitted beside sessionId and pid; identity carries anchor and world', () => {
+  const intent = resolveIntent({
+    record: record({ state: 'done', admitted: 7 }), identity: { ...identity, anchor: 'floor' }, tone: DARK,
+    spriteFor, animationFor, worldFor, motionPolicy,
+  });
+  for (const half of [intent.current, intent.after]) {
+    assert.equal(half.admitted, 7);
+    assert.equal(half.sessionId, 's1');
+    assert.equal(half.pid, 4242);
+    assert.equal(half.identity.anchor, 'floor');
+  }
+  assert.deepEqual(intent.current.identity.world, WORLD);
+});
+
+test('a theme without a world yields identity.world null', () => {
+  const intent = resolveIntent({
+    record: record(), identity: { ...identity, theme: 'forest' }, tone: DARK,
+    spriteFor, animationFor, worldFor, motionPolicy,
+  });
+  assert.equal(intent.current.identity.world, null);
+});
+
+test('a worldFor that throws faults the record with its own message', () => {
+  assert.throws(() => resolveIntent({
+    record: record(), identity, tone: DARK, spriteFor, animationFor, motionPolicy,
+    worldFor: () => { throw new Error('theme "cats": world: locale "home" image missing'); },
+  }), /world: locale "home"/);
+  assert.throws(() => resolveIntent({
+    record: record(), identity, tone: DARK, spriteFor, animationFor, motionPolicy,
+  }), /worldFor must be a function/);
+});
+
+test('resolveAll passes worldFor through', () => {
+  const out = resolveAll({
+    agents: { s1: record() }, identities: new Map([['s1', identity]]), tone: DARK,
+    spriteFor, animationFor, worldFor, motionPolicy,
+  });
+  assert.deepEqual(out.s1.current.identity.world, WORLD);
 });
