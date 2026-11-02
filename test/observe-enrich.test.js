@@ -45,7 +45,7 @@ test('proven event returns context and root basis for a worker', async () => {
   assert.deepEqual(result, {
     ok: true, sessionId: 's', basis: { generation: 'g', agentId: row.id, process: row.process, cwd: row.cwd },
     terminal: { pid: 7, starttime: 456 },
-    context: { ...git, cwd: '/repo', projectKey: '/repo', project: 'repo', projectColor: '#abcdef' }, warnings: ['warning'],
+    context: { ...git, cwd: '/repo', projectKey: '/repo', project: 'repo', projectColor: '#abcdef', family: null, role: null }, warnings: ['warning'],
   });
   assert.ok(calls.some(([kind, pid]) => kind === 'handle' && pid === 7));
   assert.ok(calls.some(([kind, cwd]) => kind === 'git' && cwd === row.cwd));

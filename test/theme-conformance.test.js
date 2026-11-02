@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { validateThemePack, SLOT_COUNT } from 'familiar-theme';
+import { validateThemePack, defaultMember } from 'familiar-theme';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const catsThemeDir = join(REPO, 'themes', 'cats');
@@ -23,6 +23,6 @@ test(
   async () => {
     const pack = await validateThemePack(catsThemeDir);
     assert.equal(pack.id, 'cats');
-    assert.equal(pack.bySlot.size, SLOT_COUNT);
+    assert.ok(pack.members.has(defaultMember(pack)));
   },
 );

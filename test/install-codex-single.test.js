@@ -14,7 +14,7 @@ import {
 import { addWorktree, git, seedRepo } from './fixtures/git-worktree.mjs';
 
 const THEME = await loadThemePack(
-  fileURLToPath(new URL('./fixtures/theme-slots', import.meta.url)));
+  fileURLToPath(new URL('./fixtures/theme-roles', import.meta.url)));
 
 // `git rev-parse --show-toplevel` reports the PHYSICAL path, so resolve the root
 // the way gitContext would rather than trusting the temp path we were handed.
@@ -40,7 +40,7 @@ test('an unmanaged config in another project does not affect this one', async (t
   });
 
   assert.ok(planned.config, 'this project plans normally');
-  assert.equal(planned.member, 'alpha', 'slot 2 is in the alpha band');
+  assert.equal(planned.member, 'alpha', 'the default member');
   assert.match(planned.config.text, /^# Managed by Familiar\./);
   assert.match(planned.config.text, /pet = "custom:familiar-alpha"\n$/);
 });
@@ -64,19 +64,19 @@ test('a pin for THIS path still wins, so narrowing the target did not narrow the
     path: mine, pinned: false, catalog: { identities: [] }, pack: THEME,
   });
   const pinned = await planCodexProjectForPath({
-    path: mine, pinned: true, catalog: { identities: [{ path: mine, slot: 7 }] }, pack: THEME,
+    path: mine, pinned: true, catalog: { identities: [{ path: mine, slot: 7, members: { 'roles-fixture': 'beta' } }] }, pack: THEME,
   });
-  assert.equal(unpinned.member, 'alpha', 'hashed slot 2');
-  assert.equal(pinned.member, 'beta', 'pinned slot 7');
+  assert.equal(unpinned.member, 'alpha', 'the default member');
+  assert.equal(pinned.member, 'beta', 'the pinned member');
 });
 
 test('a supplied member is used verbatim, and nothing is re-resolved', async (t) => {
   const mine = repo(t, 'mine');
   const planned = await planCodexProjectForPath({
-    path: mine, pinned: false, catalog: { identities: [] }, pack: THEME, member: 'gamma',
+    path: mine, pinned: false, catalog: { identities: [] }, pack: THEME, member: 'beta',
   });
-  assert.equal(planned.member, 'gamma', "the caller's member wins over the hashed slot");
-  assert.match(planned.config.text, /pet = "custom:familiar-gamma"\n$/);
+  assert.equal(planned.member, 'beta', "the caller's member wins over the default member");
+  assert.match(planned.config.text, /pet = "custom:familiar-beta"\n$/);
 });
 
 test('a target reached by two routes is planned once — dedupe covers every outcome', async (t) => {
@@ -112,7 +112,7 @@ function worktreeFixture(t) {
 
 test('worktree config is local and Git exclusions are shared and idempotent', async (t) => {
   const { main, tree } = worktreeFixture(t);
-  const catalog = { identities: [{ path: main, slot: 7 }] };
+  const catalog = { identities: [{ path: main, slot: 7, members: { 'roles-fixture': 'beta' } }] };
   const plan = await planCodexProjectForPath({ path: tree, pinned: false,
     catalog, pack: THEME });
   assert.equal(plan.member, 'beta');
@@ -132,7 +132,7 @@ test('worktree config is local and Git exclusions are shared and idempotent', as
 
 test('a worktree path pin chooses its own pet without touching the main checkout', async (t) => {
   const { main, tree } = worktreeFixture(t);
-  const catalog = { identities: [{ path: main, slot: 7 }, { path: tree, slot: 3 }] };
+  const catalog = { identities: [{ path: main, slot: 7, members: { 'roles-fixture': 'beta' } }, { path: tree, slot: 3 }] };
   const plan = await planCodexProjectForPath({ path: tree, pinned: false, catalog, pack: THEME });
   assert.equal(plan.member, 'alpha');
   applyCodexProjectSync({ configs: [plan.config], excludes: [plan.exclude] });
@@ -143,7 +143,7 @@ test('a worktree path pin chooses its own pet without touching the main checkout
 test('bulk sync plans the pinned main checkout and the current worktree, and no sibling', async (t) => {
   const { dir, main, tree } = worktreeFixture(t);
   const sibling = addWorktree(main, join(dir, 'sibling'));
-  const catalog = { identities: [{ path: main, slot: 7 }] };
+  const catalog = { identities: [{ path: main, slot: 7, members: { 'roles-fixture': 'beta' } }] };
   const plan = await planCodexProjectSync({ catalog, pack: THEME, cwd: tree });
   assert.deepEqual(plan.configs.map((c) => c.path),
     [join(main, '.codex/config.toml'), join(tree, '.codex/config.toml')]);
@@ -154,7 +154,9 @@ test('bulk sync plans the pinned main checkout and the current worktree, and no 
 });
 
 
-test('the Codex sync selects the pet the colour decides and reports warnings', async (t) => {
+test('the Codex sync keeps the pet whatever the colour and reports warnings', async (t) => {
+  // A colour decides the slot, never the member: since spec-version 2 a member holds
+  // roles, not slots, so two colours on two slots draw the same default member.
   const mine = repo(t, 'mine');
   const lookupProjectColor = async () => ({ prefix: 'api', color: '#317d01', warnings: [] });
   const plan = await planCodexProjectForPath({ path: mine, pinned: false,
@@ -164,7 +166,7 @@ test('the Codex sync selects the pet the colour decides and reports warnings', a
   const grey = await planCodexProjectForPath({ path: mine, pinned: false,
     catalog: { identities: [] }, pack: THEME,
     lookupProjectColor: async () => ({ prefix: 'api', color: '#808080', warnings: [] }) });
-  assert.equal(grey.member, 'gamma', 'a neutral colour overrides the hashed alpha slot');
+  assert.equal(grey.member, 'alpha', 'a neutral colour moves the slot, not the member');
   const warned = await planCodexProjectSync({
     catalog: { identities: [{ path: mine, slot: 7 }] }, pack: THEME, cwd: mine,
     lookupProjectColor: async () => ({ prefix: null, color: null, warnings: ['w2', 'w1', 'w2'] }),

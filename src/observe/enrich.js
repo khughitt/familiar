@@ -50,6 +50,11 @@ export async function prepareEnrichment({
       project: displayProject({ ...context, cwd: row.cwd }),
       remote: context.remote, repoRoot: context.repoRoot, repositoryRoot: context.repositoryRoot,
       projectColor: color.color,
+      // SHIM (Task C4 replaces it): the hook does not yet look up the checkout's family
+      // or read FAMILIAR_ROLE, so every record says "none" for both. The resolver faults
+      // a record that lacks either property; it does not fault an explicit null.
+      family: null,
+      role: null,
     },
     warnings: color.warnings,
   };

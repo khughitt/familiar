@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gitContext, projectKeyFor, displayProject } from '../bus/identity.js';
-import { resolveIdentity } from '../bus/resolve.js';
+import { resolveIdentity, oneThemePackFor } from '../bus/resolve.js';
 import { lookupProjectColor as defaultLookupProjectColor, NO_PROJECT } from '../bus/project-color.js';
 import { writeAtomicSync } from './atomic.js';
 
@@ -128,10 +128,13 @@ export async function planCodexProjectForPath({
   const { color: projectColor, warnings } = givenMember === null && repoRoot
     ? await lookupProjectColor(repoRoot)
     : NO_PROJECT;
+  // SHIM (Task C9 replaces it): one theme, the pack's own, and no family or role,
+  // until install pets resolves each checkout's family and role.
   const member = givenMember ?? resolveIdentity({
     projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
     project: displayProject({ repoRoot, cwd: path }),
-    remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
+    remote, repoRoot, repositoryRoot, projectColor, family: null, role: null, catalog,
+    themes: { themeId: pack.id, families: {}, packFor: oneThemePackFor(pack.id, pack) },
   }).member;
 
   if (isTracked) {

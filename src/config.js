@@ -27,6 +27,16 @@ export async function loadConfig({ paths, readFile = fsReadFile }) {
   return { themeId: data.theme ?? DEFAULT_THEME, motionPolicy };
 }
 
+// The theme a session's family draws from: its `families:` entry when the family is
+// named there, else the default `theme:`. Pure, so the resolver and the views agree
+// on one rule. `themeSource` says which of the two decided.
+export function themeFor({ themeId, families }, family) {
+  if (family !== null && Object.hasOwn(families, family)) {
+    return { theme: families[family], themeSource: 'family' };
+  }
+  return { theme: themeId, themeSource: 'default' };
+}
+
 // A theme in ~/.config/familiar/themes/<id> shadows a shipped one of the same
 // name. This is the whole of "themes are user-authorable": without it, the
 // user themes dir is a path constant nothing resolves.

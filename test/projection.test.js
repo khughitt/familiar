@@ -13,7 +13,7 @@ import { applyEvent, normalizeEvent } from 'relay';
 
 const generation = 'generation-1';
 const handle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 42, start: '123' };
-const context = { cwd: '/repo', projectKey: 'familiar-key', project: 'repo', remote: null, repoRoot: '/repo/wt', repositoryRoot: '/repo', projectColor: '#123456' };
+const context = { cwd: '/repo', projectKey: 'familiar-key', project: 'repo', remote: null, repoRoot: '/repo/wt', repositoryRoot: '/repo', projectColor: '#123456', family: null, role: null };
 const row = (sid, extra = {}) => ({
   id: `codex:${sid}`, harness: 'codex', sessionId: sid, scope: 'session',
   process: handle, cwd: '/repo', repoRoot: '/repo', remote: null, projectKey: 'relay-key',
@@ -320,7 +320,7 @@ test('projection keeps checkout labels and repository anchors for path and remot
   for (const { pins, remote, slot } of cases) {
     const a = row('a');
     const ctx = { cwd: '/fixture/fix-api/src', repoRoot: '/fixture/fix-api', repositoryRoot: '/fixture/api',
-      remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null };
+      remote, projectKey: remote ?? '/fixture/api', project: 'fix-api', projectColor: null, family: null, role: null };
     const result = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a, { context: ctx }),
       resolveVisuals: visualResolver({ pack, catalog: parseIdentities(JSON.stringify({ identities: pins })),
         tone: { mode: 'dark', satScale: 1 }, motionPolicy: 'full' }),

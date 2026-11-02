@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeRgba } from 'familiar-theme';
-import { loadThemePackSync, STATES, SLOT_COUNT } from 'familiar-theme';
+import { loadThemePackSync, STATES } from 'familiar-theme';
 
 // Two sources: the real shipped roster (present only in the monolith, before
 // projection — themes/cats does not travel with the engine) and the
@@ -68,29 +68,5 @@ for (const { id, dir } of packs) {
     // one member (the engine fixture) or a full roster (cats).
     assert.equal(visited.length, pack.members.size, `theme "${id}" did not visit every descriptor member`);
     assert.deepEqual(visited, [...pack.members.keys()]);
-  });
-
-  // THIS REPLACES AN ASSERTION THAT COULD NOT FAIL. It read:
-  //
-  //     for (const [slot, ids] of pack.bySlot) assert.ok(ids.length > 0, ...)
-  //
-  // `bySlot` is BUILT by pushing member ids into it (familiar-theme's pack.js), so a slot only
-  // appears there at all if some member declared it. `ids.length > 0` was true by
-  // construction, for every possible theme, including a theme with ONE member and eleven
-  // empty slots -- the exact condition it appeared to be guarding. It agreed with its author
-  // instead of testing him.
-  //
-  // The real question is the one it was named after and never asked: does every slot a
-  // project can HASH TO have a member? A project hashes to any of the twelve; a gap is a repo
-  // that renders nothing but an exception on every tool call, and per the spec must never
-  // silently borrow another member's sprite. Until the roster landed this could not be
-  // asserted, because the theme was deliberately partial. It can now, so it is.
-  //
-  // KILLS: deleting any member from theme.yaml. Verified by doing exactly that -- dropping
-  // `witches-familiar` (slot 11) turns this RED and nothing else in the suite notices.
-  test(`theme "${id}" populates every one of the ${SLOT_COUNT} slots a project can hash to`, () => {
-    const pack = load();
-    const missing = [...Array(SLOT_COUNT).keys()].filter((slot) => !pack.bySlot.has(slot));
-    assert.deepEqual(missing, [], `slots with no member: ${missing.join(', ')}`);
   });
 }

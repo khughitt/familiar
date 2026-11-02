@@ -1,13 +1,13 @@
-spec-version: 1
-id: slots-fixture
-label: Slots Fixture
+spec-version: 2
+id: roles-fixture
+label: Roles Fixture
 rows: 4
 members:
   - id: alpha
     asset-root: sprites/alpha
     label: Alpha
-    slots: [0, 1, 2, 3]
-    persona: fixture member for the low slot band
+    roles: [default]
+    persona: fixture member every project without a pin or a covered role draws
     animation:
       kind: static
     poses:
@@ -20,22 +20,8 @@ members:
   - id: beta
     asset-root: sprites/beta
     label: Beta
-    slots: [4, 5, 6, 7]
-    persona: fixture member for the middle slot band
-    animation:
-      kind: static
-    poses:
-      idle: flat grey square
-      working: flat grey square
-      needs-input: flat grey square
-      needs-approval: flat grey square
-      error: flat grey square
-      done: flat grey square
-  - id: gamma
-    asset-root: sprites/gamma
-    label: Gamma
-    slots: [8, 9, 10, 11]
-    persona: fixture member for the high slot band
+    roles: [reviewer]
+    persona: fixture member for the reviewer role and for member pins
     animation:
       kind: static
     poses:

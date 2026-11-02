@@ -26,7 +26,7 @@ import { readSessions, writeSessions } from '../src/bus/sessions.js';
 import { pruneTerminalOwners, withTerminal } from '../src/render/term/terminal-owner.js';
 import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
-import { resolveIdentity, resolveAll } from '../src/bus/resolve.js';
+import { resolveIdentity, resolveAll, oneThemePackFor } from '../src/bus/resolve.js';
 import { gitContext, projectKeyFor, displayProject } from '../src/bus/identity.js';
 import { lookupProjectColor, NO_PROJECT } from '../src/bus/project-color.js';
 import { loadIdentities, matchPin, pinPath } from '../src/bus/pins.js';
@@ -46,8 +46,8 @@ import { transmit, transmitAcross } from '../src/render/term/kitty.js';
 import { boxFor } from '../src/render/term/box.js';
 import { composeStrip, composeGrid, scaleTo, padTo } from '../src/render/term/contact.js';
 import {
-  loadThemePack, loadThemePackSync, memberOrThrow, defaultMemberForSlot, ROW_MIN, ROW_MAX,
-  assetsFor, SLOT_COUNT, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
+  loadThemePack, loadThemePackSync, memberOrThrow, defaultMember, DEFAULT_ROLE, ROW_MIN, ROW_MAX,
+  assetsFor, STATES, loadAnimationMember, validateThemePack, decodeRgba, encodeRgba,
 } from 'familiar-theme';
 import { cliColor, cliSwatch, parseLeaf, leafOptionsFor, readStdin, usageError } from './familiar.js';
 import { commandAt } from '../src/commands.js';
@@ -123,21 +123,18 @@ export async function settleStatusline({
   });
 }
 
-// The `theme sheet` caption row. Exported and pure because it now makes a
-// choice: a member holds several slots but the swatch takes one colour.
-export function sheetRowCaptions(rows, tone) {
-  const slotText = rows.map((row) => row.member.slots.join(','));
-  // Width once, from the widest list. `padStart(2)` was right when every member
-  // held exactly one slot; a member holding 1,2,3 would shove every other row's
-  // label three columns right.
-  const width = Math.max(...slotText.map((text) => text.length));
-  return rows.map((row, index) => {
-    // slots[0] is the member's primary identity — the same first-declared-wins
-    // rule as bySlot, read from the member's end instead of the slot's.
-    const swatch = cliSwatch(identityColors({ slot: row.member.slots[0], projectColor: null }, tone).base);
-    return `  ${slotText[index].padStart(width)}  ${swatch}  `
-      + `${row.member.label.padEnd(20)}${row.id}\n`;
-  });
+// A member's roles as the theme views print them: `default` first, then the rest in
+// declaration order. A member with none is reachable only by a project's pin.
+export function rolesText(roles) {
+  if (roles.length === 0) return '(pin only)';
+  return [...roles].sort((a, b) => (b === DEFAULT_ROLE) - (a === DEFAULT_ROLE)).join(', ');
+}
+
+// The `theme sheet` caption row: label, id, then the member's roles. No swatch: since
+// spec-version 2 a member holds no slot, so it has no colour of its own to show.
+export function sheetRowCaptions(rows) {
+  const idWidth = Math.max(...rows.map((row) => row.id.length));
+  return rows.map((row) => `  ${row.member.label.padEnd(20)}${row.id.padEnd(idWidth)}  ${rolesText(row.member.roles)}\n`);
 }
 
 function reportTasksWarnings(warnings) {
@@ -153,6 +150,10 @@ async function identityResolver() {
   const [{ themeId }, tone] = await Promise.all([loadConfig({ paths }), loadTone({ paths })]);
   const pack = await loadThemePack(themeDirFor(paths, themeId));
   const catalog = await loadIdentities(paths.identitiesPath);
+  // SHIM (Task C7 replaces it): one theme, no families, and no family or role for the
+  // directory, until whoami and projects resolve a checkout's family and every theme.
+  // Keyed by the pack's own id, which is what member pins were matched against before.
+  const themes = { themeId: pack.id, families: {}, packFor: oneThemePackFor(pack.id, pack) };
   return {
     themeId,
     tone,
@@ -167,7 +168,8 @@ async function identityResolver() {
         ? await lookupProjectColor(repoRoot)
         : NO_PROJECT;
       const identity = resolveIdentity({
-        projectKey, project, remote, repoRoot, repositoryRoot, projectColor, catalog, pack,
+        projectKey, project, remote, repoRoot, repositoryRoot, projectColor,
+        family: null, role: null, catalog, themes,
       });
       assetsFor(pack, identity.member, tone.mode);
       return { identity, pin, prefix, warnings };
@@ -685,7 +687,7 @@ export async function main({ command, args: rest, color, mode }) {
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
         theme: themeId,
-        member: { id: memberId, label: member.label, persona: member.persona, slots: member.slots },
+        member: { id: memberId, label: member.label, persona: member.persona, roles: member.roles },
         states: states.map((state) => ({ state, pose: member.poses[state] })),
       })}\n`);
       return;
@@ -698,7 +700,7 @@ export async function main({ command, args: rest, color, mode }) {
       capability === GRAPHICS_CAPABILITY.ANIMATION ||
       capability === GRAPHICS_CAPABILITY.STATIC
     );
-    process.stdout.write(`\n  ${member.label} · ${themeId} · slot${member.slots.length === 1 ? '' : 's'} ${member.slots.join(', ')}\n  ${member.persona}\n\n`);
+    process.stdout.write(`\n  ${member.label} · ${themeId} · roles ${rolesText(member.roles)}\n  ${member.persona}\n\n`);
     for (const state of states) {
       // Caption UNDER the art, for the same constant-box reason as the theme grid
       // below — see the note there. The pose text is long enough to wrap, which made
@@ -792,18 +794,25 @@ export async function main({ command, args: rest, color, mode }) {
   } else if (command === 'theme validate') {
     const { positionals } = parseLeaf(rest, leafOptions);
     const pack = await validateThemePack(resolve(positionals[0]));
-    const covered = pack.bySlot.size;
+    // `default` first, then every other role in the order the members declare them.
+    const roles = [DEFAULT_ROLE, ...[...pack.byRole.keys()].filter((role) => role !== DEFAULT_ROLE)];
+    const locales = pack.world === null ? null
+      : [...pack.world.locales].map(([name, locale]) => ({ name, places: locale.places.length }));
     if (mode === 'json') {
       process.stdout.write(`${JSON.stringify({
-        id: pack.id, label: pack.label, members: pack.members.size,
-        slotsCovered: covered, slotCount: SLOT_COUNT, specVersion: pack.specVersion,
+        id: pack.id, label: pack.label, members: pack.members.size, roles,
+        defaultMember: defaultMember(pack), world: locales === null ? null : { locales },
+        specVersion: pack.specVersion,
       })}\n`);
       return;
     }
+    const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
     process.stdout.write(
       `${pack.id} — ${pack.label}\n` +
-      `  ${pack.members.size} member${pack.members.size === 1 ? '' : 's'}, ` +
-      `${covered}/${SLOT_COUNT} slots covered\n` +
+      `  ${plural(pack.members.size, 'member')}; default member ${defaultMember(pack)}\n` +
+      `  roles ${roles.map((role) => `${role} (${pack.byRole.get(role)})`).join(', ')}\n` +
+      `  world ${locales === null ? 'none'
+        : locales.map(({ name, places }) => `${name} (${plural(places, 'place')})`).join(', ')}\n` +
       `  conforms to spec-version ${pack.specVersion}\n`,
     );
   } else if (command === 'theme show') {
@@ -833,18 +842,18 @@ export async function main({ command, args: rest, color, mode }) {
     const { mode: schemeMode } = ctxTone;
 
     if (mode === 'json') {
-      const slots = [];
-      for (let slot = 0; slot < SLOT_COUNT; slot++) {
-        let member = null, fault = null;
+      // The fault is the member's asset proof, the same one the text view draws from.
+      const members = [...pack.members.values()].map((member) => {
+        let fault = null;
         try {
-          member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+          assetsFor(pack, member.id, schemeMode);
         } catch (error) {
           fault = error.message;
         }
-        slots.push({ slot, member: member ? { id: member.id, label: member.label } : null, fault });
-      }
+        return { id: member.id, label: member.label, roles: member.roles, fault };
+      });
       process.stdout.write(`${JSON.stringify({
-        id: row.id, label: pack.label, source: row.source, shadowed: row.shadowed ?? false, slots,
+        id: row.id, label: pack.label, source: row.source, shadowed: row.shadowed ?? false, members,
       })}\n`);
       return;
     }
@@ -859,11 +868,11 @@ export async function main({ command, args: rest, color, mode }) {
     );
 
     // THIS VERB'S ENTIRE VALUE IS THE ART — README says `familiar theme show` renders
-    // the twelve slots WITH their art. Without graphics (a plain TERM, or a
+    // the theme's members WITH their art. Without graphics (a plain TERM, or a
     // tmux pane the probe refuses — and for tmux it says which setting) it silently
-    // degrades to a bare slot listing. `preview` stays quiet about this on
+    // degrades to a bare member listing. `preview` stays quiet about this on
     // purpose (test/bin-familiar.test.js pins that); `theme` does not, because
-    // a human judging whether twelve familiars cohere as a set needs to know
+    // a human judging whether a cast coheres as a set needs to know
     // they are looking at labels, not the set.
     if (interactive && !graphical) {
       process.stderr.write(
@@ -889,41 +898,25 @@ export async function main({ command, args: rest, color, mode }) {
     if (pack.description) process.stdout.write(`  ${pack.description}\n`);
     process.stdout.write('\n');
 
-    // SLOT ORDER, not member order. The slot is the stable identity a project
-    // hashes to; a theme is that identity's inhabitants. Walking the slots is
-    // also what surfaces a gap as a gap rather than a shorter list.
-    const useColor = cliColor({ color });
-    for (let slot = 0; slot < SLOT_COUNT; slot++) {
-      // A REAL SWATCH, not the text "hue 22/62". identityColors({ slot, projectColor: null }, tone) is
-      // the same ramp every other surface paints this slot with, so the strip
-      // shows the colour the bar and the border actually use rather than a
-      // second opinion computed here. sgr.js exports fg(hex) and no background
-      // setter, hence a block glyph rather than a filled cell.
-      const swatch = cliSwatch(identityColors({ slot, projectColor: null }, ctxTone).base, { color: useColor });
-
-      // defaultMemberForSlot THROWS on an empty slot, and a half-built theme is
-      // precisely when this view earns its keep — so the gap is caught, labelled,
-      // and the grid keeps going. A theme must fill all twelve; showing WHICH one
-      // is missing beats refusing to draw any of them.
-      //
-      // assetsFor + readFileSync + transmit live in THIS SAME try, not after it.
-      // The build workflow writes all twelve member blocks up front and fills
-      // sprites one member at a time, so every intermediate state of a theme
-      // under construction has twelve members and fewer than twelve sprite
-      // sets — assetsFor throwing on a faulted asset-root or a missing
-      // <state>.png is the ORDINARY case this view exists to survive, not an
-      // edge case. One bad slot labels itself; the other eleven still draw.
-      let member = null;
+    // DECLARATION ORDER: the cast as its author wrote it. Since spec-version 2 a member
+    // holds roles, not slots, so the caption names the roles a member answers to.
+    const idWidth = Math.max(...[...pack.members.keys()].map((id) => id.length));
+    for (const member of pack.members.values()) {
+      // assetsFor + readFileSync + transmit live in ONE try per member. The build
+      // workflow writes every member block up front and fills sprites one member at
+      // a time, so every intermediate state of a theme under construction has more
+      // members than sprite sets — assetsFor throwing on a faulted asset-root or a
+      // missing <state>.png is the ORDINARY case this view exists to survive, not an
+      // edge case. One bad member labels itself; the others still draw.
       let fault = null;
       let rendered = null;
       try {
-        member = memberOrThrow(pack, defaultMemberForSlot(pack, slot));
+        const assets = assetsFor(pack, member.id, schemeMode);
         if (graphical) {
-          const assets = assetsFor(pack, member.id, schemeMode);
           // A STRIP, NOT A GRID, and that is a property of transmit(): it sends
           // C=1 (the image does not move the cursor) and then advances by hand
           // with exactly `rows` newlines, so consecutive images always stack
-          // vertically. Twelve side by side would need a placement-capable
+          // vertically. Side by side would need a placement-capable
           // emitter that does not exist — see the spec's §1.2 and §9.
           rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows, frame });
         }
@@ -943,15 +936,15 @@ export async function main({ command, args: rest, color, mode }) {
       if (rendered) process.stdout.write(rendered);
 
       process.stdout.write(
-        `  ${String(slot).padStart(2)}  ${swatch}  ` +
-        `${(member?.label ?? '(no member)').padEnd(20)}${fault ?? member?.id}\n`
+        `  ${member.label.padEnd(20)}${member.id.padEnd(idWidth)}  ${rolesText(member.roles)}`
+        + `${fault === null ? '' : `  ${fault}`}\n`
       );
     }
     process.stdout.write('\n');
   } else if (command === 'theme sheet') {
     const { values } = parseLeaf(rest, leafOptions);
     // THE WHOLE THEME AT A GLANCE: one row per member, six poses across it, at whatever
-    // height fits your screen. `theme` shows twelve members in ONE state and `preview`
+    // height fits your screen. `theme` shows every member in ONE state and `preview`
     // shows one member in six — the sheet neither of them can draw is the one that puts
     // every member beside every state, and that is the view you want when judging
     // whether a roster reads as a set.
@@ -983,7 +976,7 @@ export async function main({ command, args: rest, color, mode }) {
     }
 
     const ids = memberArg === undefined
-      ? [...Array(SLOT_COUNT).keys()].map((slot) => defaultMemberForSlot(pack, slot))
+      ? [...pack.members.keys()]
       : [memberOrThrow(pack, memberArg).id];
 
     // json with no --out has no file to describe and nothing worth rendering (a
@@ -1041,7 +1034,7 @@ export async function main({ command, args: rest, color, mode }) {
       capability === GRAPHICS_CAPABILITY.STATIC
     );
     process.stdout.write(`\n  ${pack.id} — ${pack.label}\n  ${STATES.join('   ')}\n\n`);
-    const captions = sheetRowCaptions(boxed, ctxTone);
+    const captions = sheetRowCaptions(boxed);
     for (const [index, row] of boxed.entries()) {
       if (graphical) {
         process.stdout.write(transmit(encodeRgba(composeStrip(row.frames, { gap: 8 })), { rows: viewRows, frame }));

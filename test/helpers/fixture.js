@@ -7,14 +7,14 @@ import { CLIP_ROLES, encodeRgba, ROLE_SPEC, STATES } from 'familiar-theme';
 
 export const TINY_PNG = () => encodeRgba({ w: 1, h: 1, buf: new Uint8Array([0, 0, 0, 255]) });
 
-// The smallest legal v1 pack: one member holding all twelve slots, six 1x1 states.
-export const DESCRIPTOR = `spec-version: 1
+// The smallest legal v2 pack: one member holding the default role, six 1x1 states.
+export const DESCRIPTOR = `spec-version: 2
 id: gate-fixture
 label: Gate Fixture
 members:
   - id: solo
     label: Solo
-    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: test fixture
     asset-root: sprites/solo
     animation:

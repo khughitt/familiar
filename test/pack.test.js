@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  parseThemePack, loadThemePack, validateThemePack, defaultMemberForSlot, memberOrThrow,
+  parseThemePack, loadThemePack, validateThemePack, defaultMember, memberForRole, memberOrThrow,
   DEFAULT_ROWS, SPEC_VERSION,
 } from 'familiar-theme';
 import { writePack } from './helpers/fixture.js';
@@ -18,28 +18,28 @@ const POSES = `
       done: proud, sitting beside the thing it broke`;
 
 const YAML = `
-spec-version: 1
+spec-version: 2
 id: cats
 label: Cats
 members:
   - id: ginger-tabby
     asset-root: sprites/ginger-tabby
     label: Ginger Tabby
-    slots: [0]
+    roles: [default]
     persona: The Enthusiast. Boundless energy, zero impulse control.
     animation: { kind: static }
     poses:${POSES}
   - id: siamese
     asset-root: sprites/siamese
     label: Siamese
-    slots: [1]
+    roles: [reviewer, planner]
     persona: The Backseat Driver. Vocal, bossy, narrates everything.
     animation: { kind: static }
     poses:${POSES}
   - id: lion
     asset-root: sprites/lion
     label: Lion
-    slots: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: []
     persona: The Sovereign. Grandiose, theatrical, expects tribute.
     animation: { kind: static }
     poses:${POSES}
@@ -89,74 +89,68 @@ test('animation parses the exact clips discriminant', () => {
   );
 });
 
-test('loads members and indexes them by slot', () => {
+test('loads members and indexes them by role', () => {
   const pack = parseThemePack(YAML, '/themes/cats');
   assert.equal(pack.id, 'cats');
   assert.equal(pack.label, 'Cats');
-  assert.deepEqual(pack.members.get('lion').slots, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
-  assert.deepEqual(pack.bySlot.get(1), ['siamese', 'lion']);
+  assert.deepEqual(pack.members.get('siamese').roles, ['reviewer', 'planner']);
+  assert.deepEqual(pack.members.get('lion').roles, []);
+  assert.deepEqual([...pack.byRole], [['default', 'ginger-tabby'], ['reviewer', 'siamese'], ['planner', 'siamese']]);
 });
 
-test('member order within a slot is significant — the first is the default', () => {
+test('the default member is the one holder of the default role', () => {
   const pack = parseThemePack(YAML, '/themes/cats');
-  assert.equal(defaultMemberForSlot(pack, 1), 'siamese');
-  assert.equal(defaultMemberForSlot(pack, 0), 'ginger-tabby');
+  assert.equal(defaultMember(pack), 'ginger-tabby');
 });
 
-test('a leftover slot: names the change instead of reading as a typo', () => {
-  const old = YAML.replace('slots: [0]', 'slot: 0');
+test('memberForRole answers null for a role no member holds, never the default', () => {
+  const pack = parseThemePack(YAML, '/themes/cats');
+  assert.equal(memberForRole(pack, 'reviewer'), 'siamese');
+  assert.equal(memberForRole(pack, 'poet'), null);
+  assert.throws(() => memberForRole(pack, 'Poet'), /role/);
+});
+
+test('a leftover slots: names the change to roles instead of reading as a typo', () => {
+  const old = YAML.replace('roles: [default]', 'slots: [0]');
   assert.throws(() => parseThemePack(old, '/tmp/x'),
-    /"slot" was replaced by "slots" in spec-version 1 — write: slots: \[0\]/);
+    /member "ginger-tabby": "slots" was replaced by "roles" in spec-version 2/);
 });
 
-test('slots must be a non-empty, duplicate-free array of valid slots', () => {
+test('roles must be an array of valid, distinct role ids', () => {
   const cases = [
-    ['slots: 0', /slots must be an array/],
-    ['slots: []', /slots is empty/],
-    ['slots: [0, 0]', /slots repeats 0/],
-    ['slots: [12]', /slot out of range/],
-    ['slots: [1.5]', /slot out of range/],
+    ['roles: default', /roles must be an array of role ids/],
+    ['roles: [default, default]', /roles repeats default/],
+    ['roles: [default, Reviewer]', /role "Reviewer" is invalid/],
   ];
   for (const [replacement, pattern] of cases) {
-    assert.throws(() => parseThemePack(YAML.replace('slots: [0]', replacement), '/tmp/x'), pattern);
+    assert.throws(() => parseThemePack(YAML.replace('roles: [default]', replacement), '/tmp/x'), pattern);
   }
 });
 
-test('every slot must be held by some member, and the gap is named', () => {
-  // Replaces the deleted "a slot with no member names the gap" test: the gap is
-  // now impossible in a parsed pack, so the guarantee moved from resolution time
-  // to parse time and this is its only home.
-  //
-  // Target `lion`'s list by its exact text. A regex for the FIRST `slots: [1...]`
-  // matches siamese's unchanged `slots: [1]` and replaces it with itself -- a
-  // silent no-op that leaves the fixture fully covered and the test vacuous.
-  const short = YAML.replace('slots: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]', 'slots: [1]');
-  assert.notEqual(short, YAML, 'the fixture text moved — retarget this replacement');
-  assert.throws(() => parseThemePack(short, '/tmp/x'), /no member holds slots 2, 3, 4, 5, 6, 7, 8, 9, 10, 11/);
+test('exactly one member holds the default role, and each role has one holder', () => {
+  assert.throws(() => parseThemePack(YAML.replace('roles: [default]', 'roles: []'), '/tmp/x'),
+    /no member holds the role "default"/);
+  assert.throws(() => parseThemePack(YAML.replace('roles: []', 'roles: [default]'), '/tmp/x'),
+    /role "default" is held by both "ginger-tabby" and "lion"/);
+  assert.throws(() => parseThemePack(YAML.replace('roles: []', 'roles: [planner]'), '/tmp/x'),
+    /role "planner" is held by both "siamese" and "lion"/);
 });
 
-test('one member may cover every slot', () => {
-  const solo = `spec-version: 1
+test('one member may be the whole cast', () => {
+  const solo = `spec-version: 2
 id: cats
 label: Cats
 members:
   - id: ginger-tabby
     asset-root: sprites/ginger-tabby
     label: Ginger Tabby
-    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: The Enthusiast.
     animation: { kind: static }
     poses:${POSES}`;
   const pack = parseThemePack(solo, '/tmp/x');
   assert.equal(pack.members.size, 1);
-  for (let slot = 0; slot < 12; slot++) {
-    assert.equal(defaultMemberForSlot(pack, slot), 'ginger-tabby');
-  }
-});
-
-test('overlap is allowed and the first member declared for a slot still wins', () => {
-  const pack = parseThemePack(YAML, '/tmp/x');
-  assert.equal(defaultMemberForSlot(pack, 1), 'siamese');
+  assert.equal(defaultMember(pack), 'ginger-tabby');
 });
 
 test('a member missing a pose is a validation error naming the pose', () => {
@@ -172,14 +166,6 @@ test('a member missing a persona is a validation error — six identical poses i
   assert.throws(
     () => parseThemePack(broken, '/themes/cats'),
     /member "ginger-tabby" is missing persona/
-  );
-});
-
-test('a member declaring a slot outside the canonical twelve is rejected, and the message names the member', () => {
-  const broken = YAML.replace('    slots: [0]\n', '    slots: [12]\n');
-  assert.throws(
-    () => parseThemePack(broken, '/themes/cats'),
-    (err) => err.message === 'theme "cats": member "ginger-tabby": slot out of range: 12'
   );
 });
 
@@ -331,7 +317,7 @@ test('loadThemePack reads theme.yaml from a real pack directory on disk', async 
   const pack = await loadThemePack(dir);
   assert.equal(pack.id, 'cats');
   assert.equal(pack.dir, dir);
-  assert.equal(defaultMemberForSlot(pack, 0), 'ginger-tabby');
+  assert.equal(defaultMember(pack), 'ginger-tabby');
 });
 
 test('loadThemePack honors an injected readFile — it never assumes the real filesystem', async () => {
@@ -402,7 +388,7 @@ test('a bare description: (null) is refused by name, not treated as absent', () 
 // --- spec-version: which contract this theme.yaml speaks --------------------
 
 test('spec-version is required', () => {
-  const withoutVersion = YAML.replace(/^spec-version: 1\n/m, '');
+  const withoutVersion = YAML.replace(/^spec-version: 2\n/m, '');
   assert.throws(() => parseThemePack(withoutVersion, '/tmp/x'), /missing spec-version/);
 });
 
@@ -415,13 +401,8 @@ test('D1: pre-id parser errors name the descriptor via the caller label', () => 
   );
 });
 
-test('D2: the slot->slots migration message renders non-integers through shown()', () => {
-  const descriptor = `spec-version: 1\nid: t\nlabel: T\nmembers:\n  - id: m\n    label: M\n    slot: "3"\n`;
-  assert.throws(() => parseThemePack(descriptor, '/x'), /write: slots: \["3"\]/);
-});
-
 test('D10: a non-object poses names the shape, not "unknown key 0"', () => {
-  const descriptor = `spec-version: 1\nid: t\nlabel: T\nmembers:\n  - id: m\n    label: M\n    slots: [0]\n    persona: p\n    asset-root: sprites/m\n    animation: {kind: static}\n    poses: [a, b]\n`;
+  const descriptor = `spec-version: 2\nid: t\nlabel: T\nmembers:\n  - id: m\n    label: M\n    roles: [default]\n    persona: p\n    asset-root: sprites/m\n    animation: {kind: static}\n    poses: [a, b]\n`;
   assert.throws(() => parseThemePack(descriptor, '/x'), (e) => {
     assert.equal(e.message,
       'theme "t": member "m": poses must be a map of the six states (found a,b)');
@@ -441,21 +422,26 @@ test('the gate stays pack-relative through the D1 label', async (t) => {
 });
 
 test('spec-version must be an integer, and a quoted string is not one', () => {
-  const quoted = YAML.replace(/^spec-version: 1$/m, 'spec-version: "1"');
+  const quoted = YAML.replace(/^spec-version: 2$/m, 'spec-version: "2"');
   assert.throws(() => parseThemePack(quoted, '/tmp/x'), /spec-version must be an integer/);
 });
 
-test('spec-version 1.0 is accepted — yaml parses it to the number 1', () => {
-  // Deliberate (spec 1.1): yaml.parse yields the JS number 1 for both `1` and
-  // `1.0`, so rejecting the lexical form would need parseDocument to enforce a
+test('spec-version 2.0 is accepted — yaml parses it to the number 2', () => {
+  // Deliberate (spec 1.1): yaml.parse yields the JS number 2 for both `2` and
+  // `2.0`, so rejecting the lexical form would need parseDocument to enforce a
   // distinction with no semantic content. Do not "fix" this.
-  const float = YAML.replace(/^spec-version: 1$/m, 'spec-version: 1.0');
-  assert.equal(parseThemePack(float, '/tmp/x').specVersion, 1);
+  const float = YAML.replace(/^spec-version: 2$/m, 'spec-version: 2.0');
+  assert.equal(parseThemePack(float, '/tmp/x').specVersion, 2);
 });
 
 test('an unsupported spec-version names both versions', () => {
-  const future = YAML.replace(/^spec-version: 1$/m, 'spec-version: 2');
-  assert.throws(() => parseThemePack(future, '/tmp/x'), /spec-version 2 .*understands spec-version 1/);
+  const future = YAML.replace(/^spec-version: 2$/m, 'spec-version: 3');
+  assert.throws(() => parseThemePack(future, '/tmp/x'), /spec-version 3 .*understands spec-version 2/);
+});
+
+test('a spec-version 1 pack is refused with what changed', () => {
+  const old = YAML.replace(/^spec-version: 2$/m, 'spec-version: 1');
+  assert.throws(() => parseThemePack(old, '/tmp/x'), /spec-version 1 .*replaced member "slots" with "roles"/);
 });
 
 test('the parsed pack exposes specVersion', () => {

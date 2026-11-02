@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { SLOT_COUNT, assertSlot } from 'familiar-theme';
-import { SLOTS, slotSpec, GREY_SLOT, nearestSlotForHue, slotForColor } from '../src/protocol/slot-hues.js';
+import {
+  SLOT_COUNT, assertSlot, SLOTS, slotSpec, GREY_SLOT, nearestSlotForHue, slotForColor,
+} from '../src/protocol/slot-hues.js';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const SLOT_HUES = join(REPO, 'src/protocol/slot-hues.js');
@@ -28,16 +29,13 @@ test('an out-of-range slot is an error, never clamped', () => {
 });
 
 test('the engine fails to LOAD when the hue table and the slot count disagree', async () => {
-  // SLOT_COUNT was `SLOTS.length` before the contract/policy split. Now the count
-  // is the contract's and the rows are the engine's, so the derivation is gone
-  // and slot-hues.js's import-time throw is all that stands between them.
+  // SLOT_COUNT is a written number beside the rows, not `SLOTS.length`, so
+  // slot-hues.js's import-time throw is all that stands between them.
   //
   // NOT `assert.equal(SLOTS.length, SLOT_COUNT)`: that is a second copy of the
   // comparison the guard itself makes, and it passes with the guard deleted --
   // which leaves the load-time failure the spec asked for (§6) untested. So
-  // mutate the module and prove the IMPORT rejects. The mutated copy has to live
-  // inside the repo: slot-hues.js imports the bare specifier 'familiar-theme',
-  // which only resolves from a path under the workspace root.
+  // mutate the module and prove the IMPORT rejects.
   const source = readFileSync(SLOT_HUES, 'utf8');
   const short = source.replace('  { slot: 11, hue: 0, sat: 6 },\n', '');
   assert.notEqual(short, source, 'the mutation removed no hue row — slot 11 was reshaped');

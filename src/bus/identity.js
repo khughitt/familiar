@@ -2,7 +2,7 @@ import { basename, dirname, isAbsolute } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fnv1a32 } from '../protocol/hash.js';
-import { SLOT_COUNT } from 'familiar-theme';
+import { SLOT_COUNT } from '../protocol/slot-hues.js';
 
 const defaultExec = promisify(execFile);
 

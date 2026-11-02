@@ -546,12 +546,21 @@ test('a SessionEnd ends an admitted session without loading the theme contract, 
   assert.deepEqual(loaded.filter(heavyModule), []);
 });
 
-test('the import trace sees the theme contract and YAML on an event that resolves visuals', { skip: traceSkip }, async (t) => {
+// The control for the teardown trace: an envelope that resolves visuals loads both. A
+// reconcile, not a hook event, because a hook event's enrichment proves process ownership
+// first, and a refusal there (this test process is not the session's harness) returns
+// before visuals load. The prompt event this used passed only while enrichment's
+// identity module happened to import the theme contract for its slot count.
+test('the import trace sees the theme contract and YAML on an envelope that resolves visuals', { skip: traceSkip }, async (t) => {
   const f = reapFixture(t);
   await f.admit();
-  const prompt = f.event('prompt');
-  const { snapshot } = await f.publish(prompt);
-  const { loaded } = tracedObserve(t, f.e, envelopeFor(prompt, snapshot));
+  const snapshot = await readSnapshot({ paths: relayPaths(f.e) });
+  const { result, loaded } = tracedObserve(t, f.e, {
+    schema: 1, type: 'reconcile', subscriber: 'familiar', event: null,
+    registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: false, reaped: [],
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(loaded.some((url) => url.endsWith('/src/observe/context.js')), 'the reconcile resolved visuals');
   const heavy = loaded.filter(heavyModule).map((url) => url.replace(/^.*\/node_modules\/([^/]+)\/.*$/, '$1'));
   assert.ok(heavy.includes('familiar-theme') && heavy.includes('yaml'), `loaded: ${[...new Set(heavy)].join(', ')}`);
 });
@@ -603,21 +612,20 @@ test('an animation asset fault is one concise cosmetic line at the CLI boundary'
   ]);
 });
 
-test('the sheet caption takes its colour from the member\'s first slot, and the column aligns', () => {
-  const row = (id, slots) => ({ id, member: { slots, label: id } });
-  const captions = sheetRowCaptions(
-    [row('one', [1]), row('many', [1, 2, 3]), row('three', [3])],
-    { mode: 'dark', satScale: 1 },
-  );
-  // [slots, swatch, label, id] — the caption's columns are 2+ spaces apart.
+test('the sheet caption names each member\'s roles, default first, and the column aligns', () => {
+  const row = (id, roles) => ({ id, member: { roles, label: id } });
+  const captions = sheetRowCaptions([row('one', ['reviewer', 'default']), row('many', []), row('three', ['planner'])]);
+  // [label, id, roles] — the caption's columns are 2+ spaces apart.
   const fields = (caption) => caption.trim().split(/\s\s+/);
 
-  assert.equal(fields(captions[1])[0], '1,2,3', 'the column shows every slot the member holds');
-  assert.equal(fields(captions[1])[1], fields(captions[0])[1], 'coloured by slots[0]...');
-  assert.notEqual(fields(captions[1])[1], fields(captions[2])[1], '...not by its last slot');
-  // One width for the whole column: a multi-slot member must not push every
-  // other row's swatch and label out of alignment.
-  assert.equal(new Set(captions.map((c) => c.indexOf(fields(c)[1]))).size, 1);
+  assert.deepEqual(captions.map(fields), [
+    ['one', 'one', 'default, reviewer'],
+    ['many', 'many', '(pin only)'],
+    ['three', 'three', 'planner'],
+  ]);
+  // One width for the id column: a long id must not push every other row's roles
+  // out of alignment.
+  assert.equal(new Set(captions.map((c) => c.indexOf(fields(c)[2]))).size, 1);
 });
 
 // Same boundary, a genuinely different throw site: `scheme set` with a bad
@@ -891,14 +899,14 @@ test('an incoming malformed animation reports its member fault before preflight'
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const poses = STATES.map((state) => `      ${state}: ${state} pose`).join('\n');
   const pack = parseThemePack(`
-spec-version: 1
+spec-version: 2
 id: cats
 label: Cats
 members:
   - id: broken-cat
     asset-root: sprites/broken-cat
     label: Broken Cat
-    slots: [3, 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: Broken.
     animation: { kind: clips }
     poses:
@@ -925,6 +933,7 @@ ${poses}
   const result = await prepareSprites({ bad: {
     sessionId: 'bad', projectKey: 'github.com/me/api', project: 'api',
     remote: 'github.com/me/api', repoRoot: '/repos/api', repositoryRoot: '/repos/api', projectColor: null,
+    family: null, role: null,
   } });
   assert.equal(result.faults.get('bad'), namedFault);
   assert.equal(preflights, 0, 'preflight ran after validation failed');

@@ -110,7 +110,7 @@ function fixture({
       }
     }
   }
-  writeFileSync(join(dir, 'theme.yaml'), `spec-version: 1
+  writeFileSync(join(dir, 'theme.yaml'), `spec-version: 2
 id: cats
 label: Cats
 rows: 4
@@ -118,7 +118,7 @@ members:
   - id: ${MEMBER}
     asset-root: ${assetRoot}
     label: Ginger Tabby
-    slots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: A sufficiently detailed animation asset fixture persona.
     animation: { kind: ${kind} }
     poses:

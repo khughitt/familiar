@@ -14,7 +14,7 @@ import { stampFor, STAMP_FILE } from '../src/install/pet-stamp.js';
 import { SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 
 const THEME = await loadThemePack(
-  fileURLToPath(new URL('./fixtures/theme-slots', import.meta.url)));
+  fileURLToPath(new URL('./fixtures/theme-roles', import.meta.url)));
 
 function petsFor(t) {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-pets-'));
@@ -53,16 +53,16 @@ const readConfig = (root) => readFileSync(join(root, '.codex', 'config.toml'), '
 
 test('a repository with no config gets one, and the exclude entry with it', async (t) => {
   const root = repo(t);
-  const result = await run(root, petsFor(t), 'gamma');
+  const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'converged');
-  assert.match(readConfig(root), /pet = "custom:familiar-gamma"/);
+  assert.match(readConfig(root), /pet = "custom:familiar-beta"/);
   assert.match(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8'), /\.codex\/config\.toml/);
 });
 
 test('an already-correct config is unchanged, and spawns no git', async (t) => {
   const root = repo(t);
   const petsDir = petsFor(t);
-  await run(root, petsDir, 'gamma');
+  await run(root, petsDir, 'beta');
   const before = readConfig(root);
 
   // The no-op path must not reach the planner. Break `git` on PATH for the
@@ -73,16 +73,16 @@ test('an already-correct config is unchanged, and spawns no git', async (t) => {
   process.env.PATH = bin;
   t.after(() => { process.env.PATH = priorPath; });
 
-  const again = await run(root, petsDir, 'gamma');
+  const again = await run(root, petsDir, 'beta');
   assert.equal(again.outcome, 'unchanged');
   assert.equal(again.changed, false);
   assert.equal(readConfig(root), before);
 });
 
 test('the member the caller supplied is the member written — not a re-resolved one', async (t) => {
-  const root = repo(t);            // unpinned, hashes to slot 8 -> gamma
+  const root = repo(t);            // unpinned; the hook resolved beta first
   const petsDir = petsFor(t);
-  await run(root, petsDir, 'gamma');
+  await run(root, petsDir, 'beta');
   const second = await run(root, petsDir, 'alpha');
   assert.equal(second.outcome, 'converged');
   assert.equal(second.member, 'alpha');
@@ -91,12 +91,12 @@ test('the member the caller supplied is the member written — not a re-resolved
 
 test('a matching config whose pet is missing reports, rather than saying unchanged', async (t) => {
   const root = repo(t);
-  await run(root, petsFor(t), 'gamma');
+  await run(root, petsFor(t), 'beta');
   const before = readConfig(root);
 
   const empty = mkdtempSync(join(tmpdir(), 'familiar-pets-empty-'));
   t.after(() => rmSync(empty, { recursive: true, force: true }));
-  const result = await run(root, empty, 'gamma');
+  const result = await run(root, empty, 'beta');
 
   assert.equal(result.outcome, 'actionable');
   assert.match(result.reason, /not installed/);
@@ -107,7 +107,7 @@ test('an unmanaged config is left alone and reported as actionable', async (t) =
   const root = repo(t);
   mkdirSync(join(root, '.codex'), { recursive: true });
   writeFileSync(join(root, '.codex', 'config.toml'), '[tui]\npet = "mine"\n');
-  const result = await run(root, petsFor(t), 'gamma');
+  const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'actionable');
   assert.match(result.reason, /unmanaged/);
   assert.equal(readConfig(root), '[tui]\npet = "mine"\n');
@@ -117,7 +117,7 @@ test('a member whose assets are missing is NOT selected — a broken selection i
   const root = repo(t);
   const empty = mkdtempSync(join(tmpdir(), 'familiar-pets-empty-'));
   t.after(() => rmSync(empty, { recursive: true, force: true }));
-  const result = await run(root, empty, 'gamma');
+  const result = await run(root, empty, 'beta');
   assert.equal(result.outcome, 'actionable');
   assert.match(result.reason, /not installed/);
   assert.match(result.reason, /familiar install pets/);
@@ -130,7 +130,7 @@ test('a FIFO at the config path is refused without opening it', async (t) => {
   if (spawnSync('mkfifo', [join(root, '.codex', 'config.toml')]).status !== 0) return;
 
   // If this returns at all, the implementation did not read the FIFO.
-  const result = await run(root, petsFor(t), 'gamma');
+  const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'error');
   assert.match(result.reason, /not a regular file/);
 });
@@ -138,13 +138,13 @@ test('a FIFO at the config path is refused without opening it', async (t) => {
 test('the empty .codex marker is migrated, not reported as an error', async (t) => {
   const root = repo(t);
   writeFileSync(join(root, '.codex'), '');     // the zero-byte marker the planner migrates
-  const result = await run(root, petsFor(t), 'gamma');
+  const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'converged');
-  assert.match(readConfig(root), /pet = "custom:familiar-gamma"/);
+  assert.match(readConfig(root), /pet = "custom:familiar-beta"/);
 });
 
 test('a session with no repository root is a quiet no-op', async (t) => {
-  const result = await run(null, petsFor(t), 'gamma');
+  const result = await run(null, petsFor(t), 'beta');
   assert.equal(result.outcome, 'quiet');
   assert.equal(result.changed, false);
 });

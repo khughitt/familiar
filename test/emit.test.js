@@ -326,7 +326,7 @@ test('emit takes an Intent, NOT an IntentRecord — the shape bin/familiar actua
 // now (surface-truth); 20 is deliberately NOT the default 12, so a later assertion that the
 // cat stands at 20 can only pass on a number that came from THIS theme.
 const THEME_YAML = `
-spec-version: 1
+spec-version: 2
 id: cats
 label: Cats
 rows: 20
@@ -334,7 +334,7 @@ members:
   - id: ginger-tabby
     asset-root: sprites/ginger-tabby
     label: Ginger Tabby
-    slots: [6, 0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11]
+    roles: [default]
     persona: The Enthusiast. Boundless energy, zero impulse control.
     animation: { kind: static }
     poses:

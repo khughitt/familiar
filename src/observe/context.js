@@ -3,7 +3,7 @@ import { loadThemePack, assetsFor, STATES, loadAnimationMember } from 'familiar-
 import { paths as resolvePaths } from '../bus/paths.js';
 import { loadConfig, loadTone, themeDirFor } from '../config.js';
 import { loadIdentities } from '../bus/pins.js';
-import { resolveIdentities, resolveAll } from '../bus/resolve.js';
+import { resolveIdentities, resolveAll, oneThemePackFor } from '../bus/resolve.js';
 import { preflightKittyPrograms } from '../render/term/kitty-animation.js';
 
 // Everything the resolver needs, assembled once. This is the composition root:
@@ -42,7 +42,10 @@ export function makePrepareSprites(ctx, {
   readFrame = readFileSync,
 } = {}) {
   return async (agents) => {
-    const { identities, faults } = resolveIdentities({ agents, catalog: ctx.catalog, pack: ctx.pack });
+    // SHIM (Task C5 replaces it): the one theme `theme:` names and no families, until
+    // the context loads every live theme and the asset pass keys on (theme, member).
+    const themes = { themeId: ctx.pack.id, families: {}, packFor: oneThemePackFor(ctx.pack.id, ctx.pack) };
+    const { identities, faults } = resolveIdentities({ agents, catalog: ctx.catalog, themes });
 
     // Keyed by MEMBER, because that is what an asset or animation failure is
     // about: a deleted PNG or malformed manifest belongs to a member, and faults
