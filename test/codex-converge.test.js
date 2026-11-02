@@ -11,16 +11,18 @@ import { loadThemePack } from 'familiar-theme';
 import { convergeCodexProject } from '../src/install/codex-converge.js';
 import { addWorktree, seedRepo } from './fixtures/git-worktree.mjs';
 import { stampFor, STAMP_FILE } from '../src/install/pet-stamp.js';
-import { SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
+import { SPRITESHEET_PATH, FRAME, petId } from '../src/render/codex/pets.js';
+import { preloadedThemes } from './helpers/themes.js';
 
 const THEME = await loadThemePack(
   fileURLToPath(new URL('./fixtures/theme-roles', import.meta.url)));
+const THEMES = preloadedThemes({ [THEME.id]: THEME });
 
 function petsFor(t) {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-pets-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   for (const [memberId, member] of THEME.members) {
-    const petDir = join(dir, `familiar-${memberId}`);
+    const petDir = join(dir, petId(THEME.id, memberId));
     mkdirSync(join(petDir, 'assets'), { recursive: true });
     writeFileSync(join(petDir, SPRITESHEET_PATH), 'png');
     writeFileSync(join(petDir, 'pet.json'), '{}');
@@ -44,8 +46,8 @@ function repo(t) {
     { encoding: 'utf8' }).stdout.trim();
 }
 
-const run = (root, petsDir, member, catalog = { identities: [] }) =>
-  convergeCodexProject({ repoRoot: root, member, catalog, pack: THEME, themeId: THEME.id, petsDir });
+const run = (root, petsDir, member, catalog = { identities: [] }, themeId = THEME.id) =>
+  convergeCodexProject({ repoRoot: root, themeId, member, catalog, themes: THEMES, petsDir });
 
 const readConfig = (root) => readFileSync(join(root, '.codex', 'config.toml'), 'utf8');
 
@@ -55,7 +57,7 @@ test('a repository with no config gets one, and the exclude entry with it', asyn
   const root = repo(t);
   const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'converged');
-  assert.match(readConfig(root), /pet = "custom:familiar-beta"/);
+  assert.match(readConfig(root), /pet = "custom:familiar-roles-fixture--beta"/);
   assert.match(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8'), /\.codex\/config\.toml/);
 });
 
@@ -86,7 +88,7 @@ test('the member the caller supplied is the member written — not a re-resolved
   const second = await run(root, petsDir, 'alpha');
   assert.equal(second.outcome, 'converged');
   assert.equal(second.member, 'alpha');
-  assert.match(readConfig(root), /pet = "custom:familiar-alpha"/);
+  assert.match(readConfig(root), /pet = "custom:familiar-roles-fixture--alpha"/);
 });
 
 test('a matching config whose pet is missing reports, rather than saying unchanged', async (t) => {
@@ -140,7 +142,7 @@ test('the empty .codex marker is migrated, not reported as an error', async (t) 
   writeFileSync(join(root, '.codex'), '');     // the zero-byte marker the planner migrates
   const result = await run(root, petsFor(t), 'beta');
   assert.equal(result.outcome, 'converged');
-  assert.match(readConfig(root), /pet = "custom:familiar-beta"/);
+  assert.match(readConfig(root), /pet = "custom:familiar-roles-fixture--beta"/);
 });
 
 test('a session with no repository root is a quiet no-op', async (t) => {
@@ -162,6 +164,30 @@ test('worktree convergence writes the supplied member into that worktree only', 
   const catalog = { identities: [{ path: main, slot: 0 }] };
   const result = await run(tree, petsFor(t), 'beta', catalog);
   assert.equal(result.outcome, 'converged');
-  assert.match(readConfig(tree), /custom:familiar-beta/);
+  assert.match(readConfig(tree), /custom:familiar-roles-fixture--beta/);
   assert.equal(existsSync(join(main, '.codex', 'config.toml')), false);
+});
+
+// A pre-upgrade managed file names `custom:familiar-<member>`. It is not ours any more:
+// convergence refuses it by path, as it refuses any unmanaged file, and leaves it as it is.
+test('a v1 managed config is refused as unmanaged and left unchanged', async (t) => {
+  const root = repo(t);
+  const v1 = '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
+    + '[tui]\npet = "custom:familiar-beta"\n';
+  mkdirSync(join(root, '.codex'), { recursive: true });
+  writeFileSync(join(root, '.codex', 'config.toml'), v1);
+  const result = await run(root, petsFor(t), 'beta');
+  assert.equal(result.outcome, 'actionable');
+  assert.equal(result.reason, `refusing unmanaged project config ${join(root, '.codex', 'config.toml')}`);
+  assert.equal(readConfig(root), v1);
+});
+
+// Review Focus 5: the gate checks this session's (theme, member), so a pet compiled
+// under the same member id for another theme does not pass for this one.
+test('the gate keys on the session\'s theme, not the member id alone', async (t) => {
+  const root = repo(t);
+  const result = await run(root, petsFor(t), 'beta', { identities: [] }, 'forest');
+  assert.equal(result.outcome, 'actionable');
+  assert.match(result.reason, /^pet "familiar-forest--beta" is not installed/);
+  assert.equal(existsSync(join(root, '.codex', 'config.toml')), false);
 });

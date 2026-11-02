@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stampFor, readStamp, petUsable, STAMP_FILE, STAMP_VERSION } from '../src/install/pet-stamp.js';
-import { SPRITESHEET_PATH } from '../src/render/codex/pets.js';
+import { SPRITESHEET_PATH, petId } from '../src/render/codex/pets.js';
 
 const base = {
   themeId: 'cats', memberId: 'ginger',
@@ -75,8 +75,8 @@ test('readStamp rejects anything it cannot fully trust', (t) => {
   assert.equal(readStamp(dir).memberId, 'ginger');
 });
 
-function pet(dir, id, { stamp = null, manifest = true, sheetFile = true } = {}) {
-  const petDir = join(dir, id);
+function pet(dir, memberId, { themeId = 'cats', stamp = null, manifest = true, sheetFile = true } = {}) {
+  const petDir = join(dir, petId(themeId, memberId));
   mkdirSync(join(petDir, 'assets'), { recursive: true });
   if (sheetFile) writeFileSync(join(petDir, SPRITESHEET_PATH), 'png');
   if (manifest) writeFileSync(join(petDir, 'pet.json'), '{}');
@@ -92,7 +92,7 @@ const pets = (t) => {
 
 test('the gate accepts a complete pet stamped for this theme and member', (t) => {
   const dir = pets(t);
-  pet(dir, 'familiar-ginger', { stamp: stampFor(sheet(1)) });
+  pet(dir, 'ginger', { stamp: stampFor(sheet(1)) });
   assert.deepEqual(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }), { ok: true });
 });
 
@@ -102,24 +102,24 @@ test('the gate refuses every incomplete installation, and says which', (t) => {
 
   assert.match(verdict('ginger').reason, /not installed/);
 
-  pet(dir, 'familiar-tuxedo', { stamp: null });
+  pet(dir, 'tuxedo', { stamp: null });
   assert.match(verdict('tuxedo').reason, /no valid stamp/);
 
   // The manifest is what Codex reads to learn the pet's tracks. A sheet without
   // it is a pet Codex cannot use.
-  pet(dir, 'familiar-persian', {
+  pet(dir, 'persian', {
     stamp: stampFor({ ...sheet(1), memberId: 'persian' }), manifest: false });
   assert.match(verdict('persian').reason, /pet\.json/);
 
-  pet(dir, 'familiar-tabby', {
+  pet(dir, 'tabby', {
     stamp: stampFor({ ...sheet(1), memberId: 'tabby' }), sheetFile: false });
   assert.match(verdict('tabby').reason, /spritesheet/);
 
-  pet(dir, 'familiar-siamese', {
+  pet(dir, 'siamese', {
     stamp: stampFor({ ...sheet(1), themeId: 'dogs', memberId: 'siamese' }) });
   assert.match(verdict('siamese').reason, /theme "dogs"/);
 
-  pet(dir, 'familiar-manx', { stamp: stampFor({ ...sheet(1), memberId: 'somebody-else' }) });
+  pet(dir, 'manx', { stamp: stampFor({ ...sheet(1), memberId: 'somebody-else' }) });
   assert.match(verdict('manx').reason, /member "somebody-else"/);
 
   for (const id of ['ginger', 'tuxedo', 'persian', 'tabby', 'siamese', 'manx']) {
@@ -129,6 +129,30 @@ test('the gate refuses every incomplete installation, and says which', (t) => {
 
 test('a torn install — new sheet, stamp not yet published — is refused', (t) => {
   const dir = pets(t);
-  pet(dir, 'familiar-ginger', { stamp: null });
+  pet(dir, 'ginger', { stamp: null });
   assert.equal(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }).ok, false);
+});
+
+// Review Focus 5: two live themes whose member ids collide. Each pair has its own pet
+// directory, and the gate keys on the pair, never the member alone.
+test('the gate tells cats/ginger from forest/ginger', (t) => {
+  const dir = pets(t);
+  pet(dir, 'ginger', { stamp: stampFor(sheet(1)) });
+  assert.deepEqual(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }), { ok: true });
+  assert.deepEqual(petUsable({ petsDir: dir, themeId: 'forest', memberId: 'ginger' }),
+    { ok: false, reason: 'pet "familiar-forest--ginger" is not installed' });
+
+  pet(dir, 'ginger', { themeId: 'forest', stamp: stampFor({ ...sheet(2), themeId: 'forest' }) });
+  assert.deepEqual(petUsable({ petsDir: dir, themeId: 'forest', memberId: 'ginger' }), { ok: true });
+  assert.deepEqual(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }), { ok: true });
+});
+
+test('a pet in the v1 directory is not this pair\'s pet', (t) => {
+  const dir = pets(t);
+  mkdirSync(join(dir, 'familiar-ginger', 'assets'), { recursive: true });
+  writeFileSync(join(dir, 'familiar-ginger', SPRITESHEET_PATH), 'png');
+  writeFileSync(join(dir, 'familiar-ginger', 'pet.json'), '{}');
+  writeFileSync(join(dir, 'familiar-ginger', STAMP_FILE), JSON.stringify(stampFor(sheet(1))));
+  assert.match(petUsable({ petsDir: dir, themeId: 'cats', memberId: 'ginger' }).reason,
+    /"familiar-cats--ginger" is not installed/);
 });

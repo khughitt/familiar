@@ -324,6 +324,46 @@ test('the hook environment\'s FAMILIAR_ROLE reaches the record, and the record i
   assert.equal(second.admitted, first.admitted);
 });
 
+// --- Codex: a roled session never rewrites the repository's face ------------------------
+//
+// The managed `.codex/config.toml` is read by every later launch in the repository, so it
+// holds the member the repository resolves with no role. A session that carries a role
+// skips convergence with one line and leaves the file exactly as it was.
+async function codexFixture(t, env = {}) {
+  const f = await fixture(t);
+  const repoRoot = join(f.dir, 'repo');
+  const codexHome = join(f.dir, 'codex-home');
+  await mkdir(join(repoRoot, '.codex'), { recursive: true });
+  await mkdir(join(codexHome, 'pets'), { recursive: true });
+  const config = join(repoRoot, '.codex', 'config.toml');
+  const before = '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
+    + '[tui]\npet = "custom:familiar-fixture--pip"\n';
+  await writeFile(config, before);
+  f.deps.gitContext = async () => ({ remote: null, repoRoot, repositoryRoot: repoRoot });
+  f.deps.lookupProjectColor = async () => ({ color: null, root: null, warnings: [] });
+  f.deps.env = { ...f.deps.env, CODEX_HOME: codexHome, ...env };
+  const start = { ...event(), harness: 'codex', agentId: 'codex:s' };
+  await f.publish(start);
+  return { f, start, config, before };
+}
+
+test('a roled Codex session-start prints the skip line and leaves .codex/config.toml untouched', async (t) => {
+  const { f, start, config, before } = await codexFixture(t, { FAMILIAR_ROLE: 'reviewer' });
+  assert.deepEqual(await f.run(start), { exitCode: 0, lines: [
+    'familiar: observe: codex: session role "reviewer" set — repository pet selection left unchanged',
+  ] });
+  assert.equal((await readSessions(f.paths.sessionsPath)).sessions.s.role, 'reviewer');
+  assert.equal(await readFile(config, 'utf8'), before);
+});
+
+test('an unroled Codex session-start converges, gated on its own (theme, member) pet', async (t) => {
+  const { f, start, config, before } = await codexFixture(t);
+  assert.deepEqual(await f.run(start), { exitCode: 0, lines: [
+    'familiar: observe: pet "familiar-fixture--pip" is not installed — run `familiar install pets`',
+  ] });
+  assert.equal(await readFile(config, 'utf8'), before);
+});
+
 // --- attention capture ------------------------------------------------------------------
 
 async function savedApproval(f) {

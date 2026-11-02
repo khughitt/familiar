@@ -312,8 +312,9 @@ defaults to plain output.
 
 ### Codex pets
 
-Install the current theme's pets and select one for the repository you are in,
-along with every `path:` entry in `~/.config/familiar/identities.yaml`:
+Install the pets of every configured theme (`theme:` and each `families:` entry)
+and select one for the repository you are in, along with every `path:` entry in
+`~/.config/familiar/identities.yaml`:
 
 ```sh
 familiar install pets --sync-projects
@@ -328,7 +329,23 @@ Compiling the pets is a prerequisite, not a convenience. After the first
 `install pets`, the [relay lifecycle setup](#codex-lifecycle-hooks) lets Familiar's
 observer maintain a Codex session's project selection from its first turn onward.
 It refuses to select a member whose pet has not been compiled for the active
-theme, and says so. Re-run `familiar install pets` after switching themes.
+theme, and says so. Re-run `familiar install pets` after switching themes or
+adding a family. A configured theme that is not installed, or whose pack does not
+load, fails the command by name before any pet is written.
+
+Each pet is named for its theme and member, `familiar-<theme>--<member>`, so two
+themes holding a member of the same id each keep their own pet. A project's
+selection is the repository's face: the member its family's theme gives it with no
+role. A Codex session started with `FAMILIAR_ROLE` set leaves the selection as it is
+and says so in one line, so a per-launch role is never written into the repository.
+
+**Upgrading from single-theme pet ids.** A managed `.codex/config.toml` written
+before this change names `custom:familiar-<member>`, and Familiar no longer treats
+it as its own: `install pets --sync-projects` refuses it by path, and convergence
+reports it, as for any unmanaged file. Remove each refused file once, then run
+`familiar install pets --sync-projects` again to write the new selection. The old
+`~/.codex/pets/familiar-<member>` directories are no longer selected and can be
+deleted.
 
 Familiar creates managed project `.codex/config.toml` files and excludes them
 from each repository. In a Git worktree the config is written in that worktree
@@ -344,13 +361,13 @@ Choose a user-wide default in `~/.codex/config.toml`:
 
 ```toml
 [tui]
-pet = "custom:familiar-ginger"
+pet = "custom:familiar-cats--ginger"
 ```
 
 For a project-specific pet, use `familiar whoami <project>` to find the assigned
 member (`familiar projects <dir>...` draws several at once, each sprite over its
 name, and says whether the project colour, a pin or the project's hash chose
-each slot), then set `pet = "custom:familiar-<member>"` in that trusted project's `.codex/config.toml`.
+each slot), then set `pet = "custom:familiar-<theme>--<member>"` in that trusted project's `.codex/config.toml`.
 Restart an existing Codex session after syncing.
 
 ### OpenCode

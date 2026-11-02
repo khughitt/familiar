@@ -1012,7 +1012,7 @@ test('pets --sync-projects selects a pet in the current repository with no ident
   assert.equal(result.stderr, '');
   assert.match(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
-    /^\[tui\]\npet = "custom:familiar-[a-z0-9-]+"$/m,
+    /^\[tui\]\npet = "custom:familiar-cats--pip"$/m,
   );
   assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
   assert.equal(
@@ -1104,7 +1104,7 @@ test('pets --sync-projects creates a managed project config and excludes it loca
   assert.equal(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
     '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
-      + '[tui]\npet = "custom:familiar-pip"\n',
+      + '[tui]\npet = "custom:familiar-cats--pip"\n',
   );
   assert.match(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
   assert.equal(
@@ -1124,7 +1124,7 @@ test('pets --sync-projects migrates an untracked empty .codex marker', (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(
     readFileSync(join(project, '.codex', 'config.toml'), 'utf8'),
-    /pet = "custom:familiar-pip"/,
+    /pet = "custom:familiar-cats--pip"/,
   );
 });
 
@@ -1137,14 +1137,14 @@ test('pets --sync-projects replaces only its managed config and does not duplica
   writeFileSync(
     join(project, '.codex', 'config.toml'),
     '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.\n'
-      + '[tui]\npet = "custom:familiar-old"\n',
+      + '[tui]\npet = "custom:familiar-cats--old"\n',
   );
 
   const second = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
     cwd: project, encoding: 'utf8', env: runEnv,
   });
   assert.equal(second.status, 0, second.stderr);
-  assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-pip/);
+  assert.match(readFileSync(join(project, '.codex', 'config.toml'), 'utf8'), /custom:familiar-cats--pip/);
   const exclusions = readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8')
     .split('\n').filter((line) => line === '.codex/config.toml');
   assert.equal(exclusions.length, 1);
@@ -1166,7 +1166,7 @@ test('pets --sync-projects leaves a tracked project config untouched and prints 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(configPath, 'utf8'), original);
   assert.match(result.stdout, new RegExp(`tracked project config left unchanged: ${configPath}`));
-  assert.match(result.stdout, /add manually:\n\[tui\]\npet = "custom:familiar-pip"/);
+  assert.match(result.stdout, /add manually:\n\[tui\]\npet = "custom:familiar-cats--pip"/);
   assert.doesNotMatch(readFileSync(join(project, '.git', 'info', 'exclude'), 'utf8'), /^\.codex\/config\.toml$/m);
 });
 
@@ -1226,7 +1226,7 @@ test('pets --sync-projects reports and skips an identity path that is not presen
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, new RegExp(`skipped missing identity path: ${missing}`));
   assert.equal(existsSync(join(missing, '.codex', 'config.toml')), false);
-  assert.equal(existsSync(join(codexHome, 'pets', 'familiar-pip', 'pet.json')), true);
+  assert.equal(existsSync(join(codexHome, 'pets', 'familiar-cats--pip', 'pet.json')), true);
 });
 
 test('pets --sync-projects refuses a symlinked .codex directory before writing outside the project', (t) => {
@@ -1248,7 +1248,7 @@ test('project sync refuses a config created after preflight before changing any 
   const { runEnv, project } = codexProjectSyncFixture(t);
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const configDir = join(project, '.codex');
   const configPath = join(configDir, 'config.toml');
   const excludePath = join(project, '.git', 'info', 'exclude');
@@ -1268,7 +1268,7 @@ test('project sync refuses an empty marker tracked after preflight', async (t) =
   writeFileSync(marker, '');
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const originalExclude = readFileSync(excludePath, 'utf8');
   const added = spawnSync('git', ['add', '-f', '.codex'], { cwd: project, encoding: 'utf8' });
   assert.equal(added.status, 0, added.stderr);
@@ -1282,7 +1282,7 @@ test('project sync preserves an exclusion edited after preflight', async (t) => 
   const { runEnv, project } = codexProjectSyncFixture(t);
   const catalog = parseIdentities(readFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'identities.yaml'), 'utf8'));
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
-  const plan = await planCodexProjectSync({ catalog, pack });
+  const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const excludePath = join(project, '.git', 'info', 'exclude');
   writeFileSync(excludePath, `${readFileSync(excludePath, 'utf8')}# concurrent edit\n`);
 
@@ -1359,16 +1359,76 @@ test('pets writes explicit Codex tracks without changing either Codex selection'
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /^wrote 1 pets /);
-  assert.match(result.stdout, /\[tui\] pet = "custom:familiar-<member>"/);
+  assert.match(result.stdout, /\[tui\] pet = "custom:familiar-<theme>--<member>"/);
   assert.match(result.stdout, /user-wide: .*config\.toml/);
   assert.match(result.stdout, /project \(trusted\): <project>\/\.codex\/config\.toml/);
   assert.equal(readFileSync(join(projectCodex, 'config.toml'), 'utf8'), projectConfig);
-  const manifest = JSON.parse(readFileSync(join(out, 'familiar-pip', 'pet.json'), 'utf8'));
+  const manifest = JSON.parse(readFileSync(join(out, 'familiar-cats--pip', 'pet.json'), 'utf8'));
   assert.deepEqual(Object.keys(manifest.animations).sort(), [
     'failed', 'failed-root-hold', 'idle', 'review', 'review-root-hold', 'running', 'waiting',
   ]);
-  assert.equal(existsSync(join(out, 'familiar-pip', 'assets', 'sheet.png')), true);
+  assert.equal(existsSync(join(out, 'familiar-cats--pip', 'assets', 'sheet.png')), true);
   assert.equal(readFileSync(join(codexHome, 'config.toml'), 'utf8'), config);
+});
+
+// `install pets` compiles every theme the config makes live: `theme:` and each
+// `families:` entry. The env is built key by key: the CLI reads nothing else here.
+function petsEnv(t, configYaml) {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-pets-themes-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const configDir = join(root, 'config');
+  const stateDir = join(root, 'state');
+  const codexHome = join(root, 'codex-home');
+  for (const dir of [configDir, stateDir, codexHome, join(root, 'home')]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(configDir, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
+  writeFileSync(join(configDir, 'config.yaml'), configYaml);
+  const runEnv = {
+    PATH: process.env.PATH, HOME: join(root, 'home'), USER: 'familiar-test',
+    FAMILIAR_CONFIG_DIR: configDir, FAMILIAR_STATE_DIR: stateDir,
+    RELAY_STATE_DIR: join(stateDir, 'relay'), FAMILIAR_THEMES_DIR: shippedThemesFixture,
+    CODEX_HOME: codexHome,
+  };
+  return { runEnv, configDir, out: join(codexHome, 'pets') };
+}
+
+// Review Focus 5: two themes share the member id `pip`, and each keeps its own pet.
+test('install pets writes one pet per member of every configured theme, keyed on the pair', (t) => {
+  const { runEnv, configDir, out } = petsEnv(t, 'theme: cats\nfamilies:\n  guild: forest\nmotion: full\n');
+  writeTheme(join(configDir, 'themes'), 'forest');
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME, maxBuffer: 64 * 1024 * 1024,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^wrote 2 pets /);
+  assert.deepEqual(readdirSync(out).sort(), ['familiar-cats--pip', 'familiar-forest--pip']);
+  for (const theme of ['cats', 'forest']) {
+    const dir = join(out, `familiar-${theme}--pip`);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'pet.json'), 'utf8')).id, `familiar-${theme}--pip`);
+    const stamp = JSON.parse(readFileSync(join(dir, 'familiar-stamp.json'), 'utf8'));
+    assert.deepEqual([stamp.themeId, stamp.memberId], [theme, 'pip']);
+  }
+});
+
+test('install pets fails by name on a configured theme that is not installed, and writes no pet', (t) => {
+  const { runEnv, out } = petsEnv(t, 'theme: cats\nfamilies:\n  garden: plant-nooks\nmotion: full\n');
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, 'familiar: theme "plant-nooks" is not installed\n');
+  assert.equal(existsSync(out), false);
+});
+
+test('install pets fails by name on a configured theme whose pack does not load', (t) => {
+  const { runEnv, configDir, out } = petsEnv(t, 'theme: cats\nfamilies:\n  guild: forest\nmotion: full\n');
+  writeTheme(join(configDir, 'themes'), 'forest', { packId: 'woods' });
+  const result = spawnSync(process.execPath, [bin, 'install', 'pets'], {
+    encoding: 'utf8', env: runEnv, cwd: runEnv.HOME,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, 'familiar: theme "forest": pack id "woods" does not match its directory\n');
+  assert.equal(existsSync(out), false);
 });
 
 // --- the native HUD --------------------------------------------------------

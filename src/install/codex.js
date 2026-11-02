@@ -5,14 +5,20 @@ import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { gitContext, projectKeyFor, displayProject } from '../bus/identity.js';
-import { resolveIdentity, oneThemePackFor } from '../bus/resolve.js';
+import { resolveIdentity } from '../bus/resolve.js';
 import { lookupProjectColor as defaultLookupProjectColor, NO_PROJECT } from '../bus/project-color.js';
+import { lookupFamily as defaultLookupFamily } from '../bus/family.js';
+import { petId } from '../render/codex/pets.js';
 import { writeAtomicSync } from './atomic.js';
 
 const MANAGED_HEADER = '# Managed by Familiar. Run `familiar install pets --sync-projects` to update.';
-const MANAGED_CONFIG = new RegExp(
+// The v2 text only: `custom:familiar-<theme>--<member>`, each half an id. A pre-upgrade
+// managed file (`custom:familiar-<member>`) is therefore a conflict like any unmanaged
+// file, refused by path; no v1 shape is recognised (spec §5.7).
+const ID = '[a-z0-9]+(?:-[a-z0-9]+)*';
+export const MANAGED_CONFIG = new RegExp(
   `^${MANAGED_HEADER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n` +
-  '\\[tui\\]\\npet = "custom:familiar-[a-z0-9-]+"\\n$',
+  `\\[tui\\]\\npet = "custom:familiar-${ID}--${ID}"\\n$`,
 );
 export const EXCLUDE = '.codex/config.toml';
 
@@ -78,7 +84,7 @@ function assertExcludeTarget(path) {
   if (file && !file.isFile()) throw new Error(`Git exclude path is not a regular file: ${path}`);
 }
 
-const selectionText = (member) => `[tui]\npet = "custom:familiar-${member}"\n`;
+export const selectionText = ({ themeId, memberId }) => `[tui]\npet = "custom:${petId(themeId, memberId)}"\n`;
 export const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member)}`;
 
 // ONE TARGET, ONE BLAST RADIUS. The hook calls this directly, so a refusal here
@@ -95,9 +101,12 @@ export const configText = (member) => `${MANAGED_HEADER}\n${selectionText(member
 // machine-wide command aggregates conflicts and must deduplicate targets across
 // ALL outcomes -- a repository that is both pinned and `cwd` was reported once
 // before this split, and must stay reported once.
+//
+// `member` is a `{ themeId, memberId }` pair, and so is the `member` every outcome
+// carries: two live themes may name a member alike, and the pet id keys on both.
 export async function planCodexProjectForPath({
-  path, pinned, catalog, pack, member: givenMember = null,
-  lookupProjectColor = defaultLookupProjectColor,
+  path, pinned, catalog, themes, member: givenMember = null,
+  lookupProjectColor = defaultLookupProjectColor, lookupFamily = defaultLookupFamily,
 }) {
   if (!existsSync(path)) return { missing: path };
   if (!statSync(path).isDirectory()) throw new Error(`identity path is not a directory: ${path}`);
@@ -125,17 +134,22 @@ export async function planCodexProjectForPath({
   // this function resolved its own, the gate and the write could name different
   // members -- verifying one pet's art and selecting another, which is the exact
   // broken selection the gate exists to prevent.
-  const { color: projectColor, warnings } = givenMember === null && repoRoot
+  const { color: projectColor, root: registeredRoot, warnings } = givenMember === null && repoRoot
     ? await lookupProjectColor(repoRoot)
     : NO_PROJECT;
-  // SHIM (Task C9 replaces it): one theme, the pack's own, and no family or role,
-  // until install pets resolves each checkout's family and role.
-  const member = givenMember ?? resolveIdentity({
-    projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
-    project: displayProject({ repoRoot, cwd: path }),
-    remote, repoRoot, repositoryRoot, projectColor, family: null, role: null, catalog,
-    themes: { themeId: pack.id, families: {}, packFor: oneThemePackFor(pack.id, pack) },
-  }).member;
+  // THE REPOSITORY'S FACE: its family's theme and `role: null`. This file is read by
+  // every later launch in the repository, so no session's role belongs in it; a null
+  // registered root (unregistered, or tasks absent) has no family file to read.
+  let member = givenMember;
+  if (member === null) {
+    const family = registeredRoot === null ? null : await lookupFamily(registeredRoot);
+    const identity = resolveIdentity({
+      projectKey: projectKeyFor({ remote, repositoryRoot, cwd: path }),
+      project: displayProject({ repoRoot, cwd: path }),
+      remote, repoRoot, repositoryRoot, projectColor, family, role: null, catalog, themes,
+    });
+    member = { themeId: identity.theme, memberId: identity.member };
+  }
 
   if (isTracked) {
     return { target, member, warnings, manual: { path: target, setting: selectionText(member) } };
@@ -176,7 +190,8 @@ export async function planCodexProjectForPath({
 // therefore a target too, and takes the same route as a pin: same refusals, same conflict
 // rules, same exclusion. Pins are processed first, so an explicit pin still wins.
 export async function planCodexProjectSync({
-  catalog, pack, cwd = null, lookupProjectColor = defaultLookupProjectColor,
+  catalog, themes, cwd = null,
+  lookupProjectColor = defaultLookupProjectColor, lookupFamily = defaultLookupFamily,
 }) {
   const warnings = new Set();
   const configs = [];
@@ -194,7 +209,9 @@ export async function planCodexProjectSync({
   let unpinnedSkip = null;
 
   for (const { path, pinned } of targets) {
-    const planned = await planCodexProjectForPath({ path, pinned, catalog, pack, lookupProjectColor });
+    const planned = await planCodexProjectForPath({
+      path, pinned, catalog, themes, lookupProjectColor, lookupFamily,
+    });
 
     if (planned.missing) { missing.push(planned.missing); continue; }
     for (const warning of planned.warnings) warnings.add(warning);

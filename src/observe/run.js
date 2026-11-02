@@ -173,15 +173,23 @@ export async function observe({ text, deps: given }) {
         const ctx = result.ctx;
         // The session's own theme, which the visual pass has already loaded: several
         // themes are live at once, and the pet gate checks the art of this one.
-        const { theme, member } = result.intent[next.sessionId].current.identity;
-        const { convergeCodexProject } = await import('../install/codex-converge.js');
-        const convergence = await convergeCodexProject({
-          repoRoot: next.repoRoot, member,
-          catalog: ctx.catalog, pack: ctx.themes.packFor(theme), themeId: theme,
-          petsDir: join(deps.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
-        });
-        if (convergence.outcome === 'error') throw new Error(convergence.reason);
-        if (convergence.outcome === 'actionable') lines.push(line(convergence.reason));
+        const { theme, member, role } = result.intent[next.sessionId].current.identity;
+        // The managed config is the repository's face, read by every later launch, so a
+        // per-launch role is never persisted into it. A roled session's member is the
+        // role's, not the repository's, and resolving a second identity here to find the
+        // repository's is not worth its cost on the hook path (spec §5.7).
+        if (role !== null) {
+          lines.push(line(`codex: session role "${role}" set — repository pet selection left unchanged`));
+        } else {
+          const { convergeCodexProject } = await import('../install/codex-converge.js');
+          const convergence = await convergeCodexProject({
+            repoRoot: next.repoRoot, themeId: theme, member,
+            catalog: ctx.catalog, themes: ctx.themes,
+            petsDir: join(deps.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets'),
+          });
+          if (convergence.outcome === 'error') throw new Error(convergence.reason);
+          if (convergence.outcome === 'actionable') lines.push(line(convergence.reason));
+        }
       }
     }
     await cleanup(deps);

@@ -89,16 +89,6 @@ export function resolveIdentity({
   };
 }
 
-// SHIM for the single-theme callers (identityResolver, install pets), which still load
-// one pack from `theme:`: a `packFor` over that one theme that refuses any other id by
-// name. Tasks C7 and C9 replace those callers; the last of them deletes this.
-export function oneThemePackFor(themeId, pack) {
-  return (wanted) => {
-    if (wanted !== themeId) throw new Error(`theme "${wanted}" is not loaded (only "${themeId}" is)`);
-    return pack;
-  };
-}
-
 export function resolveIntent({
   record, identity, tone, spriteFor, animationFor, worldFor, motionPolicy,
 }) {

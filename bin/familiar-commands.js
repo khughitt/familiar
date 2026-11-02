@@ -2,12 +2,12 @@
 // parses and routes, and loads this module only for the commands implemented here.
 import { loadContext as context, makePrepareSprites, assertPackMatchesDirectory } from '../src/observe/context.js';
 export { makePrepareSprites } from '../src/observe/context.js';
-import { readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { spritesheet, petFile, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
+import { spritesheet, petFile, petId, SPRITESHEET_PATH, FRAME } from '../src/render/codex/pets.js';
 import { STAMP_FILE, stampFor } from '../src/install/pet-stamp.js';
 import { paths as resolvePaths } from '../src/bus/paths.js';
 import { loadConfig, loadTone, writeTone, themeDirFor, themeFor, themeIdsOf } from '../src/config.js';
@@ -494,7 +494,7 @@ export async function main({ command, args: rest, color, mode }) {
     // rule generator.
     // It runs once, at install; nothing on the hook path imports it.
     //
-    // ONE PET PER MEMBER. Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
+    // ONE PET PER (THEME, MEMBER). Codex 0.146 resolves `[tui] pet` through its normal config layers, so a
     // user-wide default and an override in a trusted project's `.codex/config.toml` can choose
     // different members. Config remains user-owned unless --sync-projects explicitly opts into
     // Familiar-managed local files; tracked project config is never rewritten.
@@ -510,18 +510,23 @@ export async function main({ command, args: rest, color, mode }) {
       : join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'pets');
 
     const ctx = await context({ paths, config });
-    // SHIM (Task C9 replaces it): the default theme's pets only, until install pets
-    // compiles every live theme's members under `familiar-<theme>--<member>`.
-    const themeId = ctx.themes.themeId;
-    await ctx.themes.load([themeId]);
-    const pack = ctx.themes.packFor(themeId);
+    // EVERY LIVE THEME, OR NONE. Each theme `theme:` and `families:` name is loaded and
+    // checked before any pet is written: a missing or invalid one fails the command by
+    // name rather than being skipped, since a family whose pets were never compiled is
+    // one whose sessions convergence refuses to select.
+    const themeIds = themeIdsOf(config);
+    for (const id of themeIds) {
+      if (!existsSync(themeDirFor(paths, id))) throw new Error(`theme "${id}" is not installed`);
+    }
+    await ctx.themes.load(themeIds);
+    const packs = themeIds.map((id) => [id, ctx.themes.packFor(id)]);
     const projectSync = values['sync-projects']
-      ? await planCodexProjectSync({ catalog: ctx.catalog, pack, cwd: process.cwd() })
+      ? await planCodexProjectSync({ catalog: ctx.catalog, themes: ctx.themes, cwd: process.cwd() })
       : null;
     if (projectSync) reportTasksWarnings(projectSync.warnings);
 
     let written = 0;
-    for (const [memberId, member] of pack.members) {
+    for (const [themeId, pack] of packs) for (const [memberId, member] of pack.members) {
       // The SAME resolver every other surface uses — not a second path to the same PNGs. The
       // sprites codex renders are byte-for-byte the ones the terminal and the bar render.
       const assets = assetsFor(pack, memberId, ctx.tone.mode);
@@ -530,7 +535,8 @@ export async function main({ command, args: rest, color, mode }) {
       );
       const { set: animationSet } = await loadAnimationMember(pack, memberId);
 
-      const id = `familiar-${memberId}`;
+      // Keyed on the pair: two live themes may both hold a member of this id.
+      const id = petId(themeId, memberId);
       const dir = join(out, id);
       mkdirSync(join(dir, 'assets'), { recursive: true });
 
@@ -589,7 +595,7 @@ export async function main({ command, args: rest, color, mode }) {
     if (!projectSync) {
       const userConfig = join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
       process.stdout.write(
-        'enable one with:  [tui] pet = "custom:familiar-<member>"\n' +
+        'enable one with:  [tui] pet = "custom:familiar-<theme>--<member>"\n' +
         `user-wide: ${userConfig}\n` +
         'project (trusted): <project>/.codex/config.toml\n',
       );

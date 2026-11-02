@@ -19,7 +19,7 @@ have since been fixed but not yet re-tested on hardware.
 | --- | --- | --- |
 | terminal | Relay lifecycle events through `familiar observe` | Kitty-graphics-capable terminals receive the current full-colour image. |
 | Claude Code | Relay lifecycle hooks and `familiar statusline` | The status line owns the cells; Familiar's observer replaces the image beneath them on state changes. |
-| Codex | Codex native pet state | `familiar install pets` writes the selected theme as Codex pets; Codex selects its native animation track. |
+| Codex | Codex native pet state | `familiar install pets` writes every configured theme as Codex pets; Codex selects its native animation track. |
 | OpenCode | Relay server plugin and Familiar TUI plugin | Relay supplies lifecycle events; Familiar's observer publishes presentation state and its TUI plugin draws the full-colour graphic. |
 | Niri desktop moments | `attention.json` | `integrations/niri-desktop` plays one click-through moment per reserved input, approval, error or finished-turn episode on the focused output. |
 | Noctalia workspace pills | `attention.json`, `niri-workspaces.json` | `integrations/noctalia-plugin` marks each workspace with its agents' attention and dismisses it on request (`docs/attention.md`). |
@@ -51,8 +51,8 @@ addressed.
 
 ## Codex
 
-Codex provides its own pet renderer. Familiar installs one pet per current theme
-member and supplies the full-colour spritesheet; Codex drives the visible pet from
+Codex provides its own pet renderer. Familiar installs one pet per member of every
+configured theme and supplies the full-colour spritesheet; Codex drives the visible pet from
 its own state. Relay owns Codex's lifecycle hooks and invokes `familiar observe`
 to update Familiar's shared intent. Codex alone draws the pet.
 
@@ -65,17 +65,25 @@ measured on Codex 0.146 and reproduced on 0.149 on 2026-08-22 with an app-server
 `config/read` probe: the effective value was `custom:project-specific`, and its
 reported origin was the project `.codex` directory.
 
-Familiar writes one stable `custom:familiar-<member>` pet id per theme member.
-`familiar install pets` compiles that roster, stamping each pet with a hash of the
-sheet it compiled so a later session can tell whether the art belongs to the
-active theme.
+Familiar writes one stable `custom:familiar-<theme>--<member>` pet id per member of
+each configured theme. The double hyphen separates the two because an id never holds
+one, so every pair has its own id (`forest-cats`/`ginger` and `forest`/`cats-ginger`
+differ); Codex 0.166.0 loads and draws a pet so named, probed on 2026-11-02 by the
+§6.1 rendering method. `familiar install pets` compiles that roster, stamping each
+pet with a hash of the sheet it compiled so a later session can tell whether the art
+belongs to the session's theme. The managed config is recognised by that v2 text
+only: a file naming a pre-upgrade `custom:familiar-<member>` id is refused like any
+unmanaged file (see [Codex pets](install.md#codex-pets) for the one-time removal).
 
 The project's selection is then **maintained automatically**, with
 [relay hooks and terminal ownership](install.md#codex-lifecycle-hooks) set up;
 daemon-hosted hooks require launching `codex --no-daemon`. On relay's Codex
-`session-start` event, `familiar observe` compares the member it resolved against
-the repository's managed `.codex/config.toml` and rewrites that one file when
-they disagree.
+`session-start` event, `familiar observe` compares the theme and member it resolved
+against the repository's managed `.codex/config.toml` and rewrites that one file
+when they disagree. That file is the repository's face, read by every later launch,
+so only a session with no role converges it: a session started with `FAMILIAR_ROLE`
+prints `codex: session role "<role>" set — repository pet selection left unchanged`
+and writes nothing.
 
 In a Git worktree that file is the worktree's own, never the main checkout's,
 and the member is the one its repository's pins choose: a worktree inherits the

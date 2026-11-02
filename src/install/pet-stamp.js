@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fnv1a32Bytes } from '../protocol/hash.js';
-import { SPRITESHEET_PATH } from '../render/codex/pets.js';
+import { SPRITESHEET_PATH, petId } from '../render/codex/pets.js';
 
 // PROVENANCE CANNOT ANSWER THIS QUESTION, which is why this file exists rather
 // than a copy of the theme receipt. A `local` receipt carries no commit at all
@@ -80,8 +80,11 @@ export function readStamp(dir) {
 // -- and `install pets` publishes the stamp last precisely so a stamp being
 // present implies the other two landed. Checking them anyway costs two
 // existsSync calls and closes the window where someone removes one by hand.
+//
+// THE PAIR, NEVER THE MEMBER ALONE. Two live themes may both hold a `ginger`; each has
+// its own directory under petId(theme, member), and the stamp names both halves.
 export function petUsable({ petsDir, themeId, memberId }) {
-  const name = `familiar-${memberId}`;
+  const name = petId(themeId, memberId);
   const dir = join(petsDir, name);
   if (!existsSync(dir)) return { ok: false, reason: `pet "${name}" is not installed` };
   if (!existsSync(join(dir, SPRITESHEET_PATH))) {

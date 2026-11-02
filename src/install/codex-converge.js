@@ -21,8 +21,13 @@ import { petUsable } from './pet-stamp.js';
 // EVERY ORDINARY REFUSAL IS A RETURN, NOT A THROW. This runs inside a cosmetic
 // hook; an unmanaged config, a tracked one, a missing pet and a non-repository
 // are all normal states of a user's machine, and none may take down the session.
+//
+// `themeId` and `member` are the session's own pair: the pet gate, the managed text
+// and the planner all key on both, since two live themes may name a member alike.
+// The caller converges only a session with no role (src/observe/run.js), so this
+// pair is the repository's face, never a per-launch role's member.
 export async function convergeCodexProject({
-  repoRoot, member, catalog, pack, themeId, petsDir,
+  repoRoot, themeId, member, catalog, themes, petsDir,
 }) {
   // No repository is not a failure -- it is most of the filesystem.
   if (!repoRoot) return { changed: false, member, outcome: 'quiet' };
@@ -89,13 +94,15 @@ export async function convergeCodexProject({
         return { changed: false, member, outcome: 'error', reason: `${target}: ${error.message}` };
       }
     }
-    if (current === configText(member)) return { changed: false, member, outcome: 'unchanged' };
+    if (current === configText({ themeId, memberId: member })) {
+      return { changed: false, member, outcome: 'unchanged' };
+    }
   }
 
   let planned;
   try {
     planned = await planCodexProjectForPath({
-      path: repoRoot, pinned: false, catalog, pack, member,
+      path: repoRoot, pinned: false, catalog, themes, member: { themeId, memberId: member },
     });
   } catch (error) {
     // Only the genuinely exceptional reaches here: a non-regular config, a
@@ -126,5 +133,5 @@ export async function convergeCodexProject({
   } catch (error) {
     return { changed: false, member, outcome: 'error', reason: error.message };
   }
-  return { changed: true, member: planned.member, outcome: 'converged' };
+  return { changed: true, member, outcome: 'converged' };
 }

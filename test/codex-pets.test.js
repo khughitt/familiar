@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 import {
-  spritesheet, sampleTimeline, fitFrame, petFile, FRAME, SPRITESHEET_PATH,
+  spritesheet, sampleTimeline, fitFrame, petFile, petId, parsePetId, FRAME, SPRITESHEET_PATH,
 } from '../src/render/codex/pets.js';
 import { decodeRgba, encodeRgba } from 'familiar-theme';
 import { STATES, loadThemePackSync, memberAssetDir } from 'familiar-theme';
@@ -271,4 +271,35 @@ test('a missing required root is refused, not rendered as a hole', () => {
 test('the spritesheet lives under assets', () => {
   assert.match(SPRITESHEET_PATH, /^assets\//);
   assert.equal(petFile({ id: 'x', displayName: 'X', description: 'x' }).spritesheetPath, SPRITESHEET_PATH);
+});
+
+// --- Pet ids: one per (theme, member) -------------------------------------------------
+//
+// Several themes are live at once, so a pet id carries its theme. `--` separates the
+// two because ID_RE forbids consecutive hyphens inside an id: a single hyphen gave
+// `forest-cats`/`ginger` and `forest`/`cats-ginger` the same id.
+
+test('the pet id encodes its theme and member so that no two pairs collide', () => {
+  assert.equal(petId('forest-cats', 'ginger'), 'familiar-forest-cats--ginger');
+  assert.equal(petId('forest', 'cats-ginger'), 'familiar-forest--cats-ginger');
+  assert.notEqual(petId('forest-cats', 'ginger'), petId('forest', 'cats-ginger'));
+  assert.deepEqual(parsePetId(petId('forest-cats', 'ginger')), { themeId: 'forest-cats', memberId: 'ginger' });
+  assert.deepEqual(parsePetId(petId('forest', 'cats-ginger')), { themeId: 'forest', memberId: 'cats-ginger' });
+});
+
+test('an id without exactly one separator between two valid ids is not a pet id', () => {
+  for (const id of [
+    'familiar-forest-cats-ginger',     // the v1 shape: no separator
+    'familiar-a--b--c',                // two separators
+    'familiar---b', 'familiar-a--', 'familiar-a---b',
+    'familiar-A--b', 'familiar-a--b_c',
+    'other-a--b', 'a--b', '',
+  ]) assert.equal(parsePetId(id), null, id);
+});
+
+test('a pet id is refused for a theme or member that is not an id', () => {
+  for (const [themeId, memberId] of [['', 'ginger'], ['cats', ''], ['Cats', 'ginger'],
+    ['cats', 'gin--ger'], ['cats', '-ginger'], ['cats/x', 'ginger'], [null, 'ginger']]) {
+    assert.throws(() => petId(themeId, memberId), /is not an id/, `${themeId}/${memberId}`);
+  }
 });
