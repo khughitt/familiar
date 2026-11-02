@@ -71,6 +71,11 @@ function fixture(t) {
   return { root, bin, home, state, records, tasksDir, worktree, cwd, stateDir, env, parkStore, respond, log, refresh };
 }
 
+const assertNoSources = (cache) => assert.deepEqual(
+  [cache.tasksDir, cache.parkStore, cache.tasksDirMtimeNs, cache.parkStoreMtimeNs], [null, null, null, null],
+  JSON.stringify(cache),
+);
+
 const writeStore = (path, mtimeSec) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, '# claims\n');
@@ -228,6 +233,9 @@ test('wrong-shaped tasks JSON is a tasks fault', async (t) => {
     ['list', { tasks: {} }],
     ['list', { tasks: [{ id: ID, park: 'yes' }] }],
     ['list', { tasks: [{ id: ID, park: { reason: 'review' } }] }],
+    ['list', { tasks: [{ id: ID, park: { at: '2026-11-01T00:00:00Z', reason: { why: 'review' } } }] }],
+    ['list', { tasks: [{ id: ID, park: { at: '2026-11-01T00:00:00Z', reason: null } }] }],
+    ['list', { tasks: [{ id: ID, park: { at: '2026-11-01T00:00:00Z', waiting_on: 5 } }] }],
   ];
   for (const [key, json] of cases) {
     const f = fixture(t);
@@ -236,6 +244,7 @@ test('wrong-shaped tasks JSON is a tasks fault', async (t) => {
     const cache = await f.refresh();
     assert.equal(cache.stage, '—', `${key}: ${JSON.stringify(json)}`);
     assert.match(cache.fault, new RegExp(`^tasks ${key === 'list' ? 'list --parked' : key}: `), cache.fault);
+    assertNoSources(cache);
   }
 });
 
@@ -245,6 +254,72 @@ test('a failing show is a tasks fault and runs neither list nor flow-state', asy
   const cache = await f.refresh();
   assert.deepEqual({ stage: cache.stage, fault: cache.fault }, { stage: '—', fault: 'tasks show: exited 2' });
   assert.equal(f.log().length, 2);
+  assertNoSources(cache);
+});
+
+test('every tasks fault writes the cache without source paths, so the 30 s retry covers it', async (t) => {
+  const f = fixture(t);
+  writeStore(f.parkStore);
+  f.respond('list', { hook: 'exec sleep 10' });
+  const cache = await f.refresh({ timeoutMs: 200 });
+  assert.match(cache.fault, /^tasks list --parked: timed out/);
+  assertNoSources(cache);
+  assertNoSources(JSON.parse(readFileSync(cachePaths(f.stateDir, ID, f.worktree).file, 'utf8')));
+});
+
+test('with no HOME and no flowStatePath, flow-state is missing, never a relative path', async (t) => {
+  const f = fixture(t);
+  // A repository-controlled script where a relative .agents/bin/flow-state would resolve.
+  const planted = join(f.worktree, '.agents', 'bin', 'flow-state');
+  const marker = join(f.root, 'planted-ran');
+  mkdirSync(dirname(planted), { recursive: true });
+  writeFileSync(planted, `#!/bin/sh\ntouch '${marker}'\necho '{"state":"closed"}'\n`);
+  chmodSync(planted, 0o755);
+  const env = { PATH: f.env.PATH, XDG_STATE_HOME: f.state };
+  for (const cwd of [f.worktree, f.root]) {
+    const cache = await refreshStage({ taskId: ID, worktree: f.worktree, cwd, stateDir: f.stateDir, env });
+    assert.deepEqual({ stage: cache.stage, fault: cache.fault }, { stage: 'doing', fault: null });
+  }
+  assert.equal(existsSync(marker), false);
+  assert.equal(f.log().some((l) => l.startsWith('flow-state')), false);
+});
+
+test('an unexpected error after the lock writes a failed cache and releases the lock', async (t) => {
+  const f = fixture(t);
+  const { file, lock } = cachePaths(f.stateDir, ID, f.worktree);
+  const boom = () => { throw new Error('boom'); };
+  let cache = await f.refresh({ run: boom });
+  assert.deepEqual({ stage: cache.stage, fault: cache.fault }, { stage: '—', fault: 'refresh: boom' });
+  assertNoSources(cache);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), cache);
+  assert.equal(existsSync(lock), false);
+  // A stat that fails with something other than ENOENT: records is a file, so tasks/ is ENOTDIR.
+  const recordsFile = join(f.root, 'records-is-a-file');
+  writeFileSync(recordsFile, '');
+  f.respond('where', { json: { project: { prefix: 'fam', records: recordsFile } } });
+  cache = await f.refresh();
+  assert.equal(cache.stage, '—');
+  assert.match(cache.fault, /^refresh: .*ENOTDIR/);
+  assertNoSources(cache);
+  assert.equal(existsSync(lock), false);
+});
+
+test('a worktree under a file (ENOTDIR) falls back to cwd, as a gone one does', async (t) => {
+  const f = fixture(t);
+  const file = join(f.root, 'plain-file');
+  writeFileSync(file, '');
+  const worktree = join(file, 'wt');
+  const cache = await f.refresh({ worktree });
+  assert.equal(cache.stage, 'designed');
+  for (const line of f.log()) assert.equal(line.split('|')[1], f.cwd);
+});
+
+test('a failed cache write rejects and still releases the lock', async (t) => {
+  const f = fixture(t);
+  const { file, lock } = cachePaths(f.stateDir, ID, f.worktree);
+  mkdirSync(file, { recursive: true });   // rename over a directory fails
+  await assert.rejects(f.refresh(), /EISDIR|ENOTEMPTY|EEXIST/);
+  assert.equal(existsSync(lock), false);
 });
 
 test('a failing flow-state is gate? with a fault; a park wins over it', async (t) => {
@@ -313,7 +388,7 @@ test('the lock is released after a failure', async (t) => {
   await f.refresh();
   assert.equal(existsSync(lock), false);
   const run = () => { throw new Error('boom'); };
-  await assert.rejects(f.refresh({ run }), /boom/);
+  assert.equal((await f.refresh({ run })).fault, 'refresh: boom');
   assert.equal(existsSync(lock), false);
 });
 

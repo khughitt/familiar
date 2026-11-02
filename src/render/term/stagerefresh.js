@@ -176,34 +176,43 @@ const parkShape = (taskId) => (json) => {
   if (entry === undefined) return null;
   const park = entry.park;
   if (!isObject(park) || typeof park.at !== 'string' || Number.isNaN(Date.parse(park.at))) return undefined;
+  // stageToken renders these: anything but a string or absence would print as `[object Object]`.
+  for (const key of ['reason', 'waiting_on']) {
+    if (key in park && typeof park[key] !== 'string') return undefined;
+  }
   return park;
 };
 
 function flowResult(run, flowStatePath, taskId, opts) {
+  if (flowStatePath === null) return { missing: true };
   const r = run(flowStatePath, [taskId, '--json', '--no-git'], { ...opts, env: { ...opts.env, TASKS_FORMAT: 'json' } });
   if (r.error === 'ENOENT') return { missing: true };
   if (r.error === 'ETIMEDOUT') return { timedOut: true };
   return { code: r.code, stdout: r.stdout };
 }
 
+// A worktree that is gone, or whose path now runs through a file (ENOTDIR, which
+// throwIfNoEntry also answers undefined for), falls back to the session's cwd.
 const isDir = (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true;
+
+const NO_SOURCES = { tasksDir: null, tasksDirMtimeNs: null, parkStore: null, parkStoreMtimeNs: null };
 
 export async function refreshStage({
   taskId, worktree, cwd, stateDir, env,
-  flowStatePath = join(env.HOME ?? '', '.agents', 'bin', 'flow-state'),
+  // With no HOME there is no default: flow-state counts as missing (rule 6). A relative
+  // `.agents/bin/flow-state` would resolve in the run directory, a repository's own tree.
+  flowStatePath = env.HOME ? join(env.HOME, '.agents', 'bin', 'flow-state') : null,
   run = defaultRun, now = Date.now(), timeoutMs = REFRESH_TIMEOUT_MS,
 }) {
   const { file, lock } = cachePaths(stateDir, taskId, worktree);
   if (!takeLock(lock, now)) return null;
   try {
-    const opts = { cwd: isDir(worktree) ? worktree : cwd, env, timeoutMs };
     const cache = {
-      taskId, worktree,
-      tasksDir: null, tasksDirMtimeNs: null, parkStore: null, parkStoreMtimeNs: null,
-      stage: ABSENT, fault: null, refreshedAt: new Date(now).toISOString(),
+      taskId, worktree, ...NO_SOURCES, stage: ABSENT, fault: null, refreshedAt: new Date(now).toISOString(),
     };
     let token;
     try {
+      const opts = { cwd: isDir(worktree) ? worktree : cwd, env, timeoutMs };
       const where = tasksJson(run, 'where', ['where', '--json'], opts, whereShape);
       let parkStore;
       try {
@@ -230,10 +239,14 @@ export async function refreshStage({
         }
       }
     } catch (error) {
-      if (!(error instanceof TasksFault)) throw error;
-      // A failure before the stamps leaves all four source fields null (the render's 30 s
-      // retry); one after them keeps the stamps, so the next source change retries it.
-      token = stageToken({ tasks: { fault: error.message }, park: null, flow: null });
+      // Every failure drops the source paths and stamps, so the render side retries it after
+      // its 30 s back-off instead of waiting for a source to move. A tasks read failure goes
+      // through the precedence table (rule 2); anything else (a stat failing other than
+      // ENOENT, a runner that throws) is recorded as a refresh fault with the same `—`.
+      Object.assign(cache, NO_SOURCES);
+      token = error instanceof TasksFault
+        ? stageToken({ tasks: { fault: error.message }, park: null, flow: null })
+        : { stage: ABSENT, fault: `refresh: ${error.message}` };
     }
     Object.assign(cache, { stage: token.stage, fault: token.fault });
     await writeJsonAtomic(file, cache);
