@@ -1847,6 +1847,36 @@ test('a stage change between two polls changes the line on what would be a rende
   assert.deepEqual(f.log(), ['claims --json', 'claims --json', 'claims --json'], 'no refresher on any poll');
 });
 
+// Spec goal 3, end to end through the front door: a task the session showed stays on the line
+// once its claim is released, from the session file, with its stage from a fresh cache. The
+// live line counts a second, older claim (+1); the released line names only the recorded task.
+test('a released claim stays on the line with its cached stage, on a render-cache miss and hit', async (t) => {
+  const f = stageFixture(t);
+  await seedBus(f.e, 'released');
+  writeFileSync(join(f.root, 'claims.json'), JSON.stringify({ claims: [
+    { id: STAGE_ID, session: 'released', started: '2026-11-01T00:00:00Z', worktree: f.dirs.worktree, live: true },
+    { id: 'fam-000001', session: 'released', started: '2026-10-31T00:00:00Z', worktree: f.dirs.worktree, live: true },
+  ] }));
+  f.writeFreshCache('designed');
+  const live = f.render('released');
+  assert.equal(live.stderr, '');
+  assert.match(live.stdout, new RegExp(`\\(${STAGE_ID} \\+1\\)`));
+  assert.ok(existsSync(sessionFilePath(f.dirs.state, 'released')), 'the live claim was recorded');
+
+  writeFileSync(join(f.root, 'claims.json'), JSON.stringify({ claims: [] }));
+  f.writeFreshCache('closed');
+  rmSync(join(f.root, 'tasks.log'), { force: true });
+  const released = f.render('released');
+  assert.equal(released.stderr, '');
+  assert.match(released.stdout, new RegExp(`\\(${STAGE_ID}\\)`));
+  assert.doesNotMatch(released.stdout, new RegExp(`${STAGE_ID} \\+`), 'a recorded task counts no other claims');
+  assert.ok(released.stateRow.endsWith(' · closed'), JSON.stringify(released.stateRow));
+
+  plantSentinel(f.e, 'released');
+  assert.equal(f.render('released').stdout, SENTINEL, 'an unchanged released line is a hit');
+  assert.deepEqual(f.log(), ['claims --json', 'claims --json'], 'a fresh cache starts no refresher');
+});
+
 test('statusline with no claim, no cache and no agents is unchanged', async (t) => {
   const f = stageFixture(t);
   assert.equal(f.render('not-on-the-bus').stateRow, '▎ —');
@@ -1992,7 +2022,7 @@ function tracedStatusline(t, e, payload) {
 }
 const termModule = (name) => (url) => url.endsWith(`/src/render/term/${name}`);
 
-test('a render-cache hit with no task loads no stage module', { skip: traceSkip }, async (t) => {
+test('a render-cache hit with no task loads only the session-file check', { skip: traceSkip }, async (t) => {
   const f = stageFixture(t);
   await seedBus(f.e, 'taskless');
   f.render('taskless');

@@ -133,9 +133,12 @@ export function claimSession(data) {
 }
 
 // THE TASK AND ITS STAGE ARE INJECTED. `taskOf` turns the live claim into the line's task (the
-// status line passes the one that keeps a released task, stagecache.js); `stageOf` reads that
-// task's cached stage. `agents` is the count on the session's bus record. The defaults are the
-// line without any of them: the live claim, no stage, no agent token.
+// status line passes stagesession.js's taskForSession, which keeps a released task); `stageOf`
+// answers that task's stage, and is asked only when there is a task. The status line's stageOf
+// records the task and answers null, and the front door splices the stage in from
+// stagecache.js before the render key is computed. `agents` is the count on the session's bus
+// record. The defaults are the line without any of them: the live claim, no stage, no agent
+// token.
 export function readFields(payload, {
   git = gitBranch, claim = claimedTask, taskOf = (live) => live, stageOf = () => null, agents = null,
 } = {}) {
