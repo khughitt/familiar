@@ -51,6 +51,9 @@ export function motionFor(intent) {
 export function sessionSlot(record, { now }) {
   const expired = record.expiresAt !== null && now >= record.expiresAt;
   const shown = expired ? record.after : record.current;
+  // A record written before the theme was carried has no tag to give: null, and the caller
+  // names the session instead of tagging a window `undefined/<member>`.
+  if (typeof shown.identity?.theme !== 'string' || typeof shown.identity?.member !== 'string') return null;
   const slot = {
     accent: shown.color.base,
     level: levelFor(shown),
@@ -110,6 +113,7 @@ export function planWindowSignals({
   // tag, motion, and expiry come with it.
   const winners = new Map();
   const pulses = [];
+  const diagnostics = [];
   const nextStates = new Map();
   for (const [sessionId, { windowId }] of Object.entries(sessionWindows)) {
     const record = intent[sessionId];
@@ -123,6 +127,10 @@ export function planWindowSignals({
     }
 
     const slot = sessionSlot(record, { now });
+    if (slot === null) {
+      diagnostics.push(`niri: identity unavailable for session ${sessionId}`);
+      continue;
+    }
     const seq = sessions[sessionId]?.seq ?? -1;
     const rank = LEVELS.indexOf(slot.level);
     const held = winners.get(windowId);
@@ -174,5 +182,5 @@ export function planWindowSignals({
   pulses.sort((a, b) => a.seq - b.seq);
   for (const { windowId, args } of pulses) commands.push({ windowId, args });
 
-  return { commands, sent: nextSent, states: nextStates };
+  return { commands, sent: nextSent, states: nextStates, diagnostics };
 }

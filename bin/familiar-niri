@@ -37,6 +37,9 @@ const windowsPath = niriWindowsPath(paths);   // derived HERE — src/ may not n
 const processOps = createProcessOps();
 
 let lastWritten = null;
+// Diagnostics already written, so a resync loop names a skipped record once.
+const diagnosticsSaid = new Set();
+
 // What this process last told niri, per window and per session. See planWindowSignals.
 let sent = new Map();
 let states = new Map();
@@ -72,6 +75,11 @@ async function syncWindows(windows) {
   });
   sent = plan.sent;
   states = plan.states;
+  for (const line of plan.diagnostics) {
+    if (diagnosticsSaid.has(line)) continue;
+    diagnosticsSaid.add(line);
+    process.stderr.write(`${line}\n`);
+  }
   for (const { windowId, args } of plan.commands) {
     try {
       await exec('niri', ['msg', ...args]);

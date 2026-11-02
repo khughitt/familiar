@@ -222,3 +222,17 @@ test('a session with no intent key gets no slot and clears an existing slot', ()
     sessionWindows: { s1: { windowId: 7 } }, windows: [win(7, ['familiar'])] });
   assert.deepEqual(argsOf(result), [['clear-window-signal', '--id', '7', '--source', 'familiar']]);
 });
+
+// A record written before identity.theme existed would tag `undefined/<member>`: it is
+// skipped with a named diagnostic instead, as the attention bridge does.
+test('a record lacking identity.theme is skipped with a named diagnostic', () => {
+  const noTheme = persistent(intentFor('needs-input', { urgency: 'demand', motion: 'pulse' }));
+  delete noTheme.current.identity.theme;
+  const result = plan({
+    intent: { s1: noTheme, s2: persistent(needsInput()) },
+    sessionWindows: { s1: { windowId: 7 }, s2: { windowId: 8 } },
+    windows: [win(7), win(8)],
+  });
+  assert.deepEqual(argsOf(result).map((args) => args.at(-1)), ['cats/ginger']);
+  assert.deepEqual(result.diagnostics, ['niri: identity unavailable for session s1']);
+});
