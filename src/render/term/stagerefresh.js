@@ -3,26 +3,24 @@
 // internal script and not a `familiar` command. It runs `tasks` and flow's `flow-state`,
 // picks the token with stageToken, and writes a per-(task, worktree) cache stamped with the
 // mtimes of the two files the stage depends on: the task records dir and tasks' claim store,
-// which holds parks. The render side re-stats those two and refreshes when either moves.
+// which holds parks. The render side re-stats those two and refreshes when either moves. The
+// cache's paths, the stamp and the lock rule are stagecache.js's, the render side's module,
+// which never loads this file.
 //
 // It runs with no dependency preflight, so it imports node builtins and familiar's relative
 // modules only (test/stagerefresh.test.js walks the graph).
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths } from '../../bus/paths.js';
 import { writeJsonAtomic } from '../../bus/store.js';
-import { ABSENT } from './hud.js';
+import { ABSENT } from './absent.js';
 import { stageToken } from './stage.js';
+import { cachePaths, lockHeld, mtimeStamp } from './stagecache.js';
 
 export const REFRESH_TIMEOUT_MS = 5000;
-export const LOCK_STALE_MS = 30_000;
-export const REFRESHER_PATH = fileURLToPath(import.meta.url);
 
-// A canonical tasks id: what cachePaths accepts, and what the render records or reads back.
-export const TASK_ID = /^[a-z][a-z0-9-]*-[0-9a-f]{6}$/;
 const PREFIX = /^[a-z][a-z0-9-]*$/;
 
 // tasks' ClaimStore::path_with (tasks src/claims.rs): XDG_STATE_HOME when set, even empty
@@ -35,70 +33,6 @@ export function parkStorePath(prefix, env) {
   else if (env.HOME !== undefined) base = join(env.HOME, '.local', 'state');
   else throw new Error('neither XDG_STATE_HOME nor HOME is set');
   return join(base, 'tasks', 'claims', `${prefix}.toml`);
-}
-
-// Full precision, as a string: two writes within one millisecond must still differ.
-export function mtimeStamp(path) {
-  try {
-    return statSync(path, { bigint: true }).mtimeNs.toString();
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-export function cachePaths(stateDir, taskId, worktree) {
-  if (typeof taskId !== 'string' || !TASK_ID.test(taskId)) {
-    throw new Error(`stage cache: not a task id: ${JSON.stringify(taskId)}`);
-  }
-  if (typeof worktree !== 'string' || worktree === '') {
-    throw new Error(`stage cache: not a worktree path: ${JSON.stringify(worktree)}`);
-  }
-  const stem = join(stateDir, 'statusline', 'tasks',
-    `${taskId}.${createHash('sha256').update(worktree).digest('hex').slice(0, 12)}`);
-  return { file: `${stem}.json`, lock: `${stem}.lock` };
-}
-
-const defaultPidAlive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if (error.code === 'EPERM') return true;   // alive, someone else's
-    if (error.code === 'ESRCH') return false;
-    throw error;
-  }
-};
-
-// Held when it names a live pid and was taken within LOCK_STALE_MS of now, either way: a lock
-// stamped far in the future (a clock step) would otherwise hold forever. A lock that does not
-// parse yet (taken but not written) or no longer parses is judged by its file's mtime alone.
-export function lockHeld(lockPath, now, pidAlive = defaultPidAlive) {
-  let text;
-  try {
-    text = readFileSync(lockPath, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return false;
-    throw error;
-  }
-  let lock = null;
-  try {
-    lock = JSON.parse(text);
-  } catch {
-    lock = null;
-  }
-  const at = typeof lock?.at === 'string' ? Date.parse(lock.at) : NaN;
-  if (!Number.isInteger(lock?.pid) || lock.pid <= 0 || Number.isNaN(at)) {
-    let mtimeMs;
-    try {
-      mtimeMs = statSync(lockPath).mtimeMs;
-    } catch (error) {
-      if (error.code === 'ENOENT') return false;
-      throw error;
-    }
-    return Math.abs(now - mtimeMs) <= LOCK_STALE_MS;
-  }
-  return Math.abs(now - at) <= LOCK_STALE_MS && pidAlive(lock.pid);
 }
 
 // Exclusive create. A held lock answers false; a broken one is removed and taken once more
@@ -267,7 +201,7 @@ export async function refreshStage({
 const isEntry = () => {
   if (!process.argv[1]) return false;
   try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(REFRESHER_PATH);
+    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }

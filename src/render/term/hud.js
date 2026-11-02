@@ -15,9 +15,10 @@
 // of these four strings two lines, and no assertion about the ARRAY's length can catch a
 // newline inside an element. So sanitize() runs on the way in, unconditionally.
 import { sanitize, width, fg, BOLD, RESET } from './sgr.js';
+import { ABSENT } from './absent.js';
 
 export const RULE = '▎';    // ▎ the gutter
-export const ABSENT = '—';  // — this slot's data does not exist
+export { ABSENT };          // — this slot's data does not exist (absent.js)
 export const SEP = ' · ';   // between the state and the tokens after it
 const ELLIPSIS = '…';
 const BRANCH = '⎇';         // ⎇

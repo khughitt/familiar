@@ -13,7 +13,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, isAbsolute } from 'node:path';
-import { mtimeStamp, parkStorePath, refreshStage } from '../../src/render/term/stagerefresh.js';
+import { parkStorePath, refreshStage } from '../../src/render/term/stagerefresh.js';
+import { mtimeStamp } from '../../src/render/term/stagecache.js';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'familiar-host-check-')));
 const dir = (name) => {

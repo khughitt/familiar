@@ -550,7 +550,8 @@ async function statuslineCommand(args) {
   // and the miss path validates.
   let fields = null;
   if (wrapped === null) {
-    const { readStage, taskForSession } = await import('../src/render/term/stagecache.js');
+    const { taskForSession } = await import('../src/render/term/stagesession.js');
+    const { readStage } = await import('../src/render/term/stagecache.js');
     const warn = (message) => process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
     const cwd = payload.workspace?.current_dir ?? payload.cwd ?? process.cwd();
     fields = readFields(payload, {

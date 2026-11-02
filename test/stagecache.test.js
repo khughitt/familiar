@@ -6,11 +6,13 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
-  FAILED_RETRY_MS, STAGE_CEILING_MS, readStage, sessionFilePath, taskForSession,
+  FAILED_RETRY_MS, LOCK_STALE_MS, STAGE_CEILING_MS, cachePaths, mtimeStamp, readStage,
 } from '../src/render/term/stagecache.js';
-import { LOCK_STALE_MS, cachePaths, mtimeStamp } from '../src/render/term/stagerefresh.js';
+import { sessionFilePath, taskForSession } from '../src/render/term/stagesession.js';
+import { importGraph } from './fixtures/import-graph.mjs';
 
 const ID = 'fam-8f0f2b';
 const A = '/w/a';
@@ -297,3 +299,25 @@ test('a task whose id is not a task id is a fault naming it, and starts nothing'
   assert.deepEqual([out.stage, /not a worktree path/.test(out.fault)], ['—', true]);
   assert.equal(f.spawns.length, 0);
 }));
+
+// The spec's cold cost gate: the status line reads the stage on every poll, render-cache hit
+// or miss, so the render side's stage modules may add only themselves to the modules a hit
+// already loads (ledger.js and the bus store and memo under it). The refresher's graph (its
+// subprocess runner, the stage table, bus paths) and the HUD's (hud.js, sgr.js) stay off it.
+// stagesession.js, which a poll with no task loads alone, adds nothing but itself.
+test('the render side\'s stage modules add nothing to the hit path but themselves', () => {
+  const term = (name) => fileURLToPath(new URL(`../src/render/term/${name}`, import.meta.url));
+  const bus = (name) => fileURLToPath(new URL(`../src/bus/${name}`, import.meta.url));
+  const hitPath = [term('ledger.js'), bus('store.js'), bus('memo.js')];
+  const forbidden = [term('stagerefresh.js'), term('stage.js'), term('hud.js'), term('sgr.js'), bus('paths.js')];
+  const cases = [
+    [term('stagesession.js'), [term('stagesession.js')]],
+    [term('stagecache.js'), [term('stagecache.js'), term('stagesession.js'), term('absent.js')]],
+  ];
+  for (const [entry, own] of cases) {
+    const { files, bare } = importGraph(entry);
+    assert.deepEqual(bare, [], entry);
+    assert.deepEqual([...files].filter((file) => forbidden.includes(file)), [], entry);
+    assert.deepEqual([...files].filter((file) => !own.includes(file) && !hitPath.includes(file)), [], entry);
+  }
+});

@@ -8,15 +8,15 @@ import {
   utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { REFRESH_TIMEOUT_MS, parkStorePath, refreshStage } from '../src/render/term/stagerefresh.js';
 import {
-  LOCK_STALE_MS, REFRESHER_PATH, REFRESH_TIMEOUT_MS, cachePaths, lockHeld, mtimeStamp,
-  parkStorePath, refreshStage,
-} from '../src/render/term/stagerefresh.js';
-import { readStage } from '../src/render/term/stagecache.js';
+  LOCK_STALE_MS, REFRESHER_PATH, cachePaths, lockHeld, mtimeStamp, readStage,
+} from '../src/render/term/stagecache.js';
+import { importGraph } from './fixtures/import-graph.mjs';
 
 const ID = 'fam-8f0f2b';
 const FAKE = (root, name) => `#!/bin/sh
@@ -437,22 +437,9 @@ test('the script entry refreshes and prints nothing', (t) => {
 });
 
 test('the refresher imports only builtins and relative modules', () => {
-  const seen = new Set();
-  const bare = [];
-  const walk = (file) => {
-    if (seen.has(file)) return;
-    seen.add(file);
-    const src = readFileSync(file, 'utf8');
-    const specs = [
-      ...src.matchAll(/^\s*(?:import|export)\b[^'";]*?\bfrom\s*['"]([^'"]+)['"]/gm),
-      ...src.matchAll(/^\s*import\s*['"]([^'"]+)['"]/gm),
-    ].map((m) => m[1]);
-    for (const spec of specs) {
-      if (spec.startsWith('./') || spec.startsWith('../')) walk(resolve(dirname(file), spec));
-      else if (!spec.startsWith('node:')) bare.push(`${file}: ${spec}`);
-    }
-  };
-  walk(REFRESHER_PATH);
-  assert.ok(seen.size >= 3, [...seen].join('\n'));
+  const { files, bare } = importGraph(REFRESHER_PATH);
+  // The walk reaches the render side's module, whose cache layout the refresher shares.
+  const lean = fileURLToPath(new URL('../src/render/term/stagecache.js', import.meta.url));
+  assert.ok(files.has(lean), [...files].join('\n'));
   assert.deepEqual(bare, []);
 });

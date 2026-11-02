@@ -1,72 +1,88 @@
-// The render side of the status line's task stage: remember the session's last task after its
-// claim is released, read the per-(task, worktree) cache the detached refresher wrote, and
-// spawn that refresher when the cache is stale. Everything here is synchronous and on the
-// render path: file reads, two stats, and at most one detached spawn.
+// The status line's task stage cache, per (task, worktree): where it and its refresher lock
+// live, how a source file's mtime is stamped, and when a lock is held, which the detached
+// refresher (stagerefresh.js) that writes the cache imports from here; and the render side's
+// read, which spawns that refresher when the cache is stale. The read is synchronous and on the
+// render path: file reads, two stats, and at most one detached spawn. The front door loads this
+// only for a poll that shows a task (stagesession.js decides that), so its imports are node
+// builtins, absent.js, ledger.js and stagesession.js: never the refresher's graph (it runs
+// `tasks` and holds the stage table) or the HUD's. `familiar reap`'s share is here too.
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { ABSENT } from './hud.js';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ABSENT } from './absent.js';
 import { ledgerName } from './ledger.js';
-import { REFRESHER_PATH, TASK_ID, cachePaths, lockHeld, mtimeStamp } from './stagerefresh.js';
+import { TASK_ID, readJsonOrNull } from './stagesession.js';
 
+export const LOCK_STALE_MS = 30_000;
+// The script the render spawns, run directly by node.
+export const REFRESHER_PATH = fileURLToPath(new URL('./stagerefresh.js', import.meta.url));
 export const STAGE_CEILING_MS = 600_000;
 export const FAILED_RETRY_MS = 30_000;
 
-export const sessionFilePath = (stateDir, sessionId) =>
-  join(stateDir, 'statusline', `${ledgerName(sessionId)}.json`);
-
-function readJsonOrNull(path) {
-  let text;
+// Full precision, as a string: two writes within one millisecond must still differ.
+export function mtimeStamp(path) {
   try {
-    text = readFileSync(path, 'utf8');
+    return statSync(path, { bigint: true }).mtimeNs.toString();
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
-  return JSON.parse(text);
 }
 
-function writeSync(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
-  const temp = `${path}.tmp.${process.pid}.${randomUUID()}`;
+export function cachePaths(stateDir, taskId, worktree) {
+  if (typeof taskId !== 'string' || !TASK_ID.test(taskId)) {
+    throw new Error(`stage cache: not a task id: ${JSON.stringify(taskId)}`);
+  }
+  if (typeof worktree !== 'string' || worktree === '') {
+    throw new Error(`stage cache: not a worktree path: ${JSON.stringify(worktree)}`);
+  }
+  const stem = join(stateDir, 'statusline', 'tasks',
+    `${taskId}.${createHash('sha256').update(worktree).digest('hex').slice(0, 12)}`);
+  return { file: `${stem}.json`, lock: `${stem}.lock` };
+}
+
+const defaultPidAlive = (pid) => {
   try {
-    writeFileSync(temp, `${JSON.stringify(value)}\n`);
-    renameSync(temp, path);
+    process.kill(pid, 0);
+    return true;
   } catch (error) {
-    try {
-      unlinkSync(temp);
-    } catch { /* never created, or already gone */ }
+    if (error.code === 'EPERM') return true;   // alive, someone else's
+    if (error.code === 'ESRCH') return false;
     throw error;
   }
-}
+};
 
-const isTaskId = (value) => typeof value === 'string' && TASK_ID.test(value);
-
-// The task the line shows: the live claim (recorded when it changed), else the one recorded.
-// Only a canonical task id is recorded or read back; a live claim with another id is still
-// shown, and readStage reports it as a fault.
-export function taskForSession({ stateDir, sessionId, claim, now, warn }) {
-  if (!sessionId) return claim;
-  const path = sessionFilePath(stateDir, sessionId);
-  let recorded = null;
+// Held when it names a live pid and was taken within LOCK_STALE_MS of now, either way: a lock
+// stamped far in the future (a clock step) would otherwise hold forever. A lock that does not
+// parse yet (taken but not written) or no longer parses is judged by its file's mtime alone.
+export function lockHeld(lockPath, now, pidAlive = defaultPidAlive) {
+  let text;
   try {
-    recorded = readJsonOrNull(path);
+    text = readFileSync(lockPath, 'utf8');
   } catch (error) {
-    warn(`session file ${path}: ${error.message}`);
+    if (error.code === 'ENOENT') return false;
+    throw error;
   }
-  const valid = recorded !== null && typeof recorded === 'object'
-    && isTaskId(recorded.taskId) && typeof recorded.worktree === 'string';
-  if (recorded !== null && !valid) warn(`session file ${path}: not the { taskId, worktree, seenAt } shape`);
-  if (!claim) return valid ? { id: recorded.taskId, others: 0, worktree: recorded.worktree } : null;
-  if (isTaskId(claim.id) && (!valid || recorded.taskId !== claim.id || recorded.worktree !== claim.worktree)) {
+  let lock = null;
+  try {
+    lock = JSON.parse(text);
+  } catch {
+    lock = null;
+  }
+  const at = typeof lock?.at === 'string' ? Date.parse(lock.at) : NaN;
+  if (!Number.isInteger(lock?.pid) || lock.pid <= 0 || Number.isNaN(at)) {
+    let mtimeMs;
     try {
-      writeSync(path, { taskId: claim.id, worktree: claim.worktree, seenAt: new Date(now).toISOString() });
+      mtimeMs = statSync(lockPath).mtimeMs;
     } catch (error) {
-      warn(`session file ${path}: ${error.message}`);
+      if (error.code === 'ENOENT') return false;
+      throw error;
     }
+    return Math.abs(now - mtimeMs) <= LOCK_STALE_MS;
   }
-  return claim;
+  return Math.abs(now - at) <= LOCK_STALE_MS && pidAlive(lock.pid);
 }
 
 function defaultSpawnRefresher({ taskId, worktree, cwd }) {

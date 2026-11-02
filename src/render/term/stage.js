@@ -1,7 +1,7 @@
 // Picks the one stage token the status line shows for a task. Pure: the detached refresher
 // runs `tasks` and flow's `flow-state` and hands their results here. Imports stay node
 // builtins and relative files only, because the refresher runs with no dependency preflight.
-import { ABSENT } from './hud.js';
+import { ABSENT } from './absent.js';
 
 export const GATES = ['captured', 'scoped', 'designed', 'planned', 'implementing', 'verified', 'closed'];
 

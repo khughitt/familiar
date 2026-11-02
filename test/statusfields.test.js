@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import {
   readFields, gitBranch, claimedTask, BRANCH_TIMEOUT_MS, CLAIMS_TIMEOUT_MS,
 } from '../src/render/term/statusfields.js';
-import { taskForSession } from '../src/render/term/stagecache.js';
+import { taskForSession } from '../src/render/term/stagesession.js';
 
 const noGit = () => null;
 const noClaim = () => null;
