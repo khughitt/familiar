@@ -16,6 +16,7 @@ import {
   LOCK_STALE_MS, REFRESHER_PATH, REFRESH_TIMEOUT_MS, cachePaths, lockHeld, mtimeStamp,
   parkStorePath, refreshStage,
 } from '../src/render/term/stagerefresh.js';
+import { readStage } from '../src/render/term/stagecache.js';
 
 const ID = 'fam-8f0f2b';
 const FAKE = (root, name) => `#!/bin/sh
@@ -152,6 +153,35 @@ test('a missing park store stamps null', async (t) => {
   assert.equal(cache.parkStore, f.parkStore);
   assert.equal(cache.parkStoreMtimeNs, null);
   assert.equal(cache.stage, 'designed');
+});
+
+// Review M2: an empty XDG_STATE_HOME (or a relative HOME) gives tasks a relative store path,
+// which tasks resolves in its run directory. The refresher records it resolved there, so the
+// render, running in another directory, stats the same file and agrees the cache is fresh.
+test('a relative park store is recorded resolved against the run directory', async (t) => {
+  const f = fixture(t);
+  const cases = [
+    ['an empty XDG_STATE_HOME', { PATH: f.env.PATH, HOME: f.home, XDG_STATE_HOME: '' }, ['tasks', 'claims', 'fam.toml']],
+    ['a relative HOME', { PATH: f.env.PATH, HOME: 'rel-home' }, ['rel-home', '.local', 'state', 'tasks', 'claims', 'fam.toml']],
+  ];
+  for (const [label, env, parts] of cases) {
+    for (const runDir of [f.worktree, f.cwd]) {
+      if (runDir === f.cwd) rmSync(f.worktree, { recursive: true, force: true });
+      const store = join(runDir, ...parts);
+      writeStore(store);
+      const cache = await f.refresh({ env });
+      assert.equal(cache.parkStore, store, `${label}, run in ${runDir}`);
+      assert.equal(cache.parkStoreMtimeNs, mtimeStamp(store), label);
+      const spawns = [];
+      const out = readStage({
+        stateDir: f.stateDir, task: { id: ID, others: 0, worktree: f.worktree }, cwd: f.cwd,
+        now: Date.parse(cache.refreshedAt), spawnRefresher: (a) => spawns.push(a), pidAlive: () => true,
+      });
+      assert.deepEqual(out, { stage: cache.stage, fault: null }, label);
+      assert.deepEqual(spawns, [], `${label}: the render agrees the cache is fresh`);
+    }
+    mkdirSync(f.worktree, { recursive: true });
+  }
 });
 
 test('a park comes from list --parked', async (t) => {

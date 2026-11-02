@@ -217,7 +217,10 @@ export async function refreshStage({
       const where = tasksJson(run, 'where', ['where', '--json'], opts, whereShape);
       let parkStore;
       try {
-        parkStore = parkStorePath(where.prefix, env);
+        // A relative store path (an empty XDG_STATE_HOME, a relative HOME) is one tasks resolves
+        // in its run directory, which is this one; recorded absolute, so the render, running
+        // elsewhere, stats the same file.
+        parkStore = resolve(opts.cwd, parkStorePath(where.prefix, env));
       } catch (error) {
         throw new TasksFault(`park store: ${error.message}`);
       }
