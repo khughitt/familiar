@@ -14,7 +14,7 @@ export async function loadConfig({ paths, readFile = fsReadFile }) {
   try {
     text = await readFile(paths.configPath, 'utf8');
   } catch (error) {
-    if (error.code === 'ENOENT') return { themeId: DEFAULT_THEME, motionPolicy: 'full' };
+    if (error.code === 'ENOENT') return { themeId: DEFAULT_THEME, families: Object.freeze({}), motionPolicy: 'full' };
     throw error;
   }
   const data = parse(text) ?? {};
@@ -24,7 +24,34 @@ export async function loadConfig({ paths, readFile = fsReadFile }) {
       `config.yaml: motion must be full, reduced, or off (found ${JSON.stringify(motionPolicy)})`
     );
   }
-  return { themeId: data.theme ?? DEFAULT_THEME, motionPolicy };
+  return {
+    themeId: data.theme ?? DEFAULT_THEME,
+    families: parseFamilies(data.families),
+    motionPolicy,
+  };
+}
+
+// `families:` maps a project family to the theme it draws from. Names and theme ids
+// are charset-validated here; whether a named theme is installed is not checked at
+// load, it surfaces per family where the pack is loaded.
+function parseFamilies(raw) {
+  if (raw === undefined || raw === null) return Object.freeze({});
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('config.yaml: families must be a map of family to theme id');
+  }
+  const families = {};
+  for (const [family, theme] of Object.entries(raw)) {
+    assertId(family, 'config.yaml: family', 'guild');
+    assertId(theme, `config.yaml: families.${family}`, 'cats');
+    families[family] = theme;
+  }
+  return Object.freeze(families);
+}
+
+// Every theme the config can make live: the default first, then each family's,
+// distinct. `theme list` and `theme add` use it to say which themes are active.
+export function themeIdsOf({ themeId, families }) {
+  return [...new Set([themeId, ...Object.values(families)])];
 }
 
 // The theme a session's family draws from: its `families:` entry when the family is

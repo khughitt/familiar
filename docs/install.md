@@ -178,6 +178,20 @@ pin that wins is the first matching entry of the first tier that matches:
 5. `project:` naming the main checkout's directory;
 6. otherwise, the hash.
 
+A project belongs to a family, and `config.yaml` maps families to themes:
+
+```yaml
+theme: cats
+families:
+  guild: cats
+  verifiably: plant-nooks
+motion: full
+```
+
+A family named under `families:` uses the theme it names; an unnamed family, or a
+project with no family, uses `theme:`. Config is not checked against the installed
+themes: a named theme that is not installed faults for that family's projects only.
+
 A matching `remote:` pin already covers every worktree and wins over any path
 pin. To give one worktree its own familiar, pin that worktree by path; a
 `project:` pin never beats a path. The winning pin is the whole choice: its slot
