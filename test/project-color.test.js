@@ -35,23 +35,24 @@ test('outside a repository nothing is spawned', async () => {
 });
 
 test('a resolved colour comes back and its warnings are dropped', async () => {
-  assert.deepEqual(await lookup(row({ status: 'resolved', prefix: 'fam', color: '#bc8369' }, ['other: x'])),
-    { prefix: 'fam', color: '#bc8369', warnings: [] });
+  assert.deepEqual(await lookup(row({ status: 'resolved', prefix: 'fam', root: '/reg/fam', color: '#bc8369' }, ['other: x'])),
+    { prefix: 'fam', color: '#bc8369', root: '/reg/fam', warnings: [] });
 });
 
 test('a resolved project without a colour forwards the warnings', async () => {
-  assert.deepEqual(await lookup(row({ status: 'resolved', prefix: 'mind3' }, ['w'])),
-    { prefix: 'mind3', color: null, warnings: ['w'] });
+  assert.deepEqual(await lookup(row({ status: 'resolved', prefix: 'mind3', root: '/reg/mind' }, ['w'])),
+    { prefix: 'mind3', color: null, root: '/reg/mind', warnings: ['w'] });
 });
 
 test('a linked checkout whose project config fails forwards its warning', async () => {
   const warning = 'nexc: its checkout is not matched and its color is not reported (invalid color)';
   assert.deepEqual(await lookup(row({ status: 'unregistered' }, [warning])),
-    { prefix: null, color: null, warnings: [warning] });
+    { prefix: null, color: null, root: null, warnings: [warning] });
 });
 
 test('tasks absent is no project', async () => {
   assert.deepEqual(await lookupProjectColor('/r', { exec: fakeExec([], { code: 'ENOENT' }) }), NO_PROJECT);
+  assert.equal(NO_PROJECT.root, null);
   assert.ok(Object.isFrozen(NO_PROJECT));
   assert.ok(Object.isFrozen(NO_PROJECT.warnings));
 });
@@ -66,7 +67,8 @@ test('every other answer is an error naming the directory', async () => {
     [{ stdout: '{"results":[],"warnings":[]}' }, /expected one result, got 0/],
     [{ stdout: row({ status: 'ambiguous' }) }, /status "ambiguous"/],
     [{ stdout: row({ status: 'invalid' }) }, /status "invalid"/],
-    [{ stdout: row({ status: 'resolved', prefix: 'fam', color: '#BC8369' }) }, /not a #rrggbb colour/],
+    [{ stdout: row({ status: 'resolved', prefix: 'fam', root: '/reg/fam', color: '#BC8369' }) }, /not a #rrggbb colour/],
+    [{ stdout: row({ status: 'resolved', prefix: 'fam', color: '#bc8369' }) }, /resolved project must have a non-empty root/],
     [{ stdout: '{"results":[{"status":"unregistered"}],"warnings":"x"}' }, /warnings/],
   ];
   for (const [answer, message] of cases) {
@@ -89,8 +91,12 @@ test('malformed JSON shapes are rejected at the boundary', async () => {
     row({ status: 'resolved' }),
     row({ status: 'resolved', prefix: '' }),
     row({ status: 'resolved', prefix: 1 }),
-    row({ status: 'resolved', prefix: 'fam', color: null }),
-    row({ status: 'resolved', prefix: 'fam', color: 123 }),
+    row({ status: 'resolved', prefix: 'fam', root: '/reg/fam', color: null }),
+    row({ status: 'resolved', prefix: 'fam', root: '/reg/fam', color: 123 }),
+    row({ status: 'resolved', prefix: 'fam' }),
+    row({ status: 'resolved', prefix: 'fam', root: '' }),
+    row({ status: 'resolved', prefix: 'fam', root: null }),
+    row({ status: 'resolved', prefix: 'fam', root: 1 }),
   ];
   for (const stdout of cases) await assert.rejects(lookup(stdout), /^Error: tasks resolve \/r: /);
 });

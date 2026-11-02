@@ -490,13 +490,13 @@ test('reap reports removed ended evidence in pretty output', async (t) => {
 // A SessionEnd observer runs under relay's tightest teardown budget (codex: 267 ms at the
 // default outer timeout), and most of a cold `familiar observe` was module loading. A
 // teardown drops presentation state and resets the terminal: it never resolves a theme,
-// reads config or draws, so it must not load the theme contract, the YAML parser, or the
-// CLI's other commands. module.registerHooks arrived in Node 22.15, and the admitted
+// reads config or draws, so it must not load the theme contract, the YAML or TOML parsers,
+// or the CLI's other commands. module.registerHooks arrived in Node 22.15, and the admitted
 // session's terminal owner is this test process, which only Linux can target without a tty.
 const traceHook = fileURLToPath(new URL('fixtures/trace-imports.mjs', import.meta.url));
 const traceSkip = typeof nodeModule.registerHooks !== 'function' ? 'module.registerHooks needs Node 22.15 or later'
   : process.platform !== 'linux' ? 'the traced teardown targets a /proc terminal owner' : false;
-const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml)\//.test(url)
+const heavyModule = (url) => /\/node_modules\/(familiar-theme|yaml|smol-toml)\//.test(url)
   || url.endsWith('/bin/familiar-commands.js');
 
 function tracedObserve(t, e, envelope) {
@@ -525,7 +525,7 @@ const envelopeFor = (event, snapshot) => ({
   registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
 });
 
-test('a SessionEnd ends an admitted session without loading the theme contract, YAML or the other commands', { skip: traceSkip }, async (t) => {
+test('a SessionEnd ends an admitted session without loading the theme contract, YAML, TOML or the other commands', { skip: traceSkip }, async (t) => {
   const f = reapFixture(t);
   // The owner is this process with a starttime it never had: dead on every host.
   f.deps.adapterFor = () => ({ resolveSessionPid: () => process.pid, resolveTerminalPid: () => process.pid });
@@ -1718,7 +1718,7 @@ function observerIdentity(e, dir) {
 const basenameOf = (dir) => dir.split('/').at(-1);
 
 const resolvedAs = (color, warnings = []) => JSON.stringify({
-  results: [{ input: 'x', kind: 'path', status: 'resolved', prefix: 'api', ...(color ? { color } : {}) }],
+  results: [{ input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', ...(color ? { color } : {}) }],
   warnings,
 });
 

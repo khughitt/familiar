@@ -274,7 +274,7 @@ test('whoami text names the project colour and its tasks project', (t) => {
   const f = fixture(t);
   fixtureTheme(f);
   f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
-    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', color: '#317d01' },
   ], warnings: [] });
   const r = run(['whoami', gitRepo(t)], f.env);
   assert.equal(r.status, 0, r.stderr);
@@ -286,7 +286,7 @@ test('projects shows the project colour and its source', (t) => {
   const f = fixture(t);
   fixtureTheme(f);
   f.env.FAKE_TASKS_OUTPUT = JSON.stringify({ results: [
-    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', color: '#317d01' },
+    { input: 'x', kind: 'path', status: 'resolved', prefix: 'api', root: '/reg/api', color: '#317d01' },
   ], warnings: [] });
   const r = run(['--color', 'never', 'projects', gitRepo(t)], f.env);
   assert.equal(r.status, 0, r.stderr);
