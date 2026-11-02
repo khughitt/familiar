@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseEnvelope } from './envelope.js';
 import { emitTransition } from './emission.js';
+import { resetOrphanedTerminals } from './orphan-reset.js';
 import { readSessions, writeSessions, sessionIdOf } from '../bus/sessions.js';
 import { projectSnapshot } from '../bus/projection.js';
 import { nextSeq } from '../bus/seq.js';
@@ -123,6 +124,14 @@ export async function observe({ text, deps: given }) {
     if (envelope.type === 'reconcile') {
       const result = await project({ deps });
       lines.push(...result.lines);
+      const reset = await resetOrphanedTerminals({
+        ended: result.sessions.ended, sessions: result.sessions.sessions,
+        emitTransition: deps.emitTransition, paths: deps.paths, renderProcess: deps.renderProcess,
+        hookEnv: deps.env, lockWith: deps.lockWith,
+      });
+      for (const sid of reset) {
+        await acknowledgeEnded({ paths: deps.paths, sessionId: sid, seq: result.sessions.ended[sid].seq, lockWith: deps.lockWith });
+      }
       await cleanup(deps);
       return { exitCode: lines.length ? 1 : 0, lines };
     }

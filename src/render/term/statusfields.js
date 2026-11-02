@@ -59,8 +59,8 @@ export function gitBranch(cwd, { env } = {}) {
 // this is a hang guard, not a budget. Worst case with both git attempts: 750ms of a 2s interval.
 export const CLAIMS_TIMEOUT_MS = 250;
 
-// THE TASK THIS SESSION HAS CLAIMED, as { id, others } or null. A Claude Code claim's `session`
-// IS the session_id on stdin, so a live claim with that session is this session's task. One
+// THE TASK THIS SESSION HAS CLAIMED, as { id, others, worktree } or null. `sessionId` is the claim's
+// `session` (claimSession below), so a live claim with that session is this session's task. One
 // session may hold several: the latest started is shown and the rest are counted.
 //
 // `--json` EXPLICITLY: TASKS_FORMAT=pretty overrides the JSON default, and a pretty table is
@@ -105,14 +105,14 @@ export function claimedTask(sessionId, { env, warn = statuslineWarn } = {}) {
   // failing on it would take every status line's segment down with it.
   const mine = claims
     .filter((c) => c.live === true && c.session === sessionId)
-    .map((c) => ({ id: c.id, at: RFC3339.test(c.started) ? Date.parse(c.started) : NaN }));
-  if (!mine.every((c) => typeof c.id === 'string' && Number.isFinite(c.at))) {
-    warn('tasks claims: unexpected JSON shape: want a string id and an RFC 3339 started');
+    .map((c) => ({ id: c.id, worktree: c.worktree, at: RFC3339.test(c.started) ? Date.parse(c.started) : NaN }));
+  if (!mine.every((c) => typeof c.id === 'string' && typeof c.worktree === 'string' && Number.isFinite(c.at))) {
+    warn('tasks claims: unexpected JSON shape: want a string id and worktree and an RFC 3339 started');
     return null;
   }
   // By time, not by string: `.` sorts before `Z`, so fractional seconds would invert it.
   mine.sort((a, b) => b.at - a.at);
-  return mine.length ? { id: mine[0].id, others: mine.length - 1 } : null;
+  return mine.length ? { id: mine[0].id, others: mine.length - 1, worktree: mine[0].worktree } : null;
 }
 
 // Checked BEFORE Date.parse, which also takes `Oct 26 2026` and reads a zoneless time as local.
@@ -123,15 +123,37 @@ function statuslineWarn(message) {
   process.stderr.write(`familiar: statusline: ${message.replace(/[\r\n]+/g, ' ')}\n`);
 }
 
-export function readFields(payload, { git = gitBranch, claim = claimedTask } = {}) {
+// THE SESSION A CLAIM NAMES. A Claude Code claim's `session` is the session_id on stdin. agy
+// sends the same shape with `product: "antigravity"` and its conversation UUID as session_id,
+// but tasks records an agy claim under relay's agent id, `agy:<uuid>`. An empty session_id
+// (agy before its first conversation) names no session at all.
+export function claimSession(data) {
+  if (!data.session_id) return null;
+  return data.product === 'antigravity' ? `agy:${data.session_id}` : data.session_id;
+}
+
+// THE TASK AND ITS STAGE ARE INJECTED. `taskOf` turns the live claim into the line's task (the
+// status line passes stagesession.js's taskForSession, which keeps a released task); `stageOf`
+// answers that task's stage, and is asked only when there is a task. The status line's stageOf
+// records the task and answers null, and the front door splices the stage in from
+// stagecache.js before the render key is computed. `agents` is the count on the session's bus
+// record. The defaults are the line without any of them: the live claim, no stage, no agent
+// token.
+export function readFields(payload, {
+  git = gitBranch, claim = claimedTask, taskOf = (live) => live, stageOf = () => null, agents = null,
+} = {}) {
   const data = payload ?? {};
   const cwd = data.workspace?.current_dir ?? data.cwd ?? process.cwd();
   const pct = data.context_window?.used_percentage;
+  const branch = git(cwd);
+  const task = taskOf(claim(claimSession(data)));
 
   return {
     project: basename(cwd),
-    branch: git(cwd),
-    claim: claim(data.session_id),
+    branch,
+    claim: task,
+    stage: task ? stageOf(task) : null,
+    agents,
     model: data.model?.display_name ?? null,
     // ABSENT AND null ARE ONE CASE, and this is the line that makes them one. The docs state
     // used_percentage "may be null early in the session"; an existence check alone lets null

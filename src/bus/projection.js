@@ -1,9 +1,15 @@
 import { sameBasis } from './sessions.js';
 
 const sameTerminal = (a, b) => a.pid === b.pid && a.starttime === b.starttime;
+// The status line's agent token: a root row's own background count, when relay reports one.
+const agentsOf = (row) => {
+  const agents = row.background?.agents;
+  return Number.isSafeInteger(agents) && agents > 0 ? { agents } : {};
+};
 const endedRecord = (record, seq) => ({
   sessionId: record.sessionId, harness: record.harness, project: record.project,
   pid: record.pid, starttime: record.starttime, seq,
+  ...(record.holder ? { holder: record.holder } : {}),
 });
 
 export async function projectSnapshot({
@@ -31,6 +37,7 @@ export async function projectSnapshot({
     }
     intent = Object.fromEntries(Object.entries(priorIntent).filter(([sid]) => kept.has(sid)));
   } else {
+    const rootRows = new Map(roots.map((row) => [row.id, row]));
     const folded = new Map(roots.map((row) => [row.id, { ...row }]));
     for (const worker of rows.filter((row) => row.scope === 'worker')) {
       const root = folded.get(worker.root);
@@ -61,7 +68,7 @@ export async function projectSnapshot({
       const old = previous.get(sid);
       let context;
       if (prepared && event?.sessionId === sid && !stale) {
-        context = { ...prepared.context, ...prepared.terminal };
+        context = { ...prepared.context, ...prepared.terminal, ...(prepared.holder ? { holder: prepared.holder } : {}) };
       } else if (old && sameBasis(old.basis, basis)) {
         context = old;
       } else {
@@ -70,9 +77,13 @@ export async function projectSnapshot({
       // Niri orders sessions by their last event or row change, not by reconciles.
       const changed = !old || old.state !== row.state || old.updatedAt !== row.updatedAt
         || (event?.sessionId === sid && !stale);
+      // Taken from the unfolded root row: a worker's background is its own, never the session's.
+      // A count the old record carried is dropped with the rest of it when the row has none.
+      const { agents: _carried, ...base } = context;
       kept.set(sid, {
-        ...context, sessionId: sid, agentId: row.id, harness: row.harness, basis,
+        ...base, sessionId: sid, agentId: row.id, harness: row.harness, basis,
         seq: changed ? seq : old.seq, admitted: old?.admitted ?? seq, state: row.state, updatedAt: row.updatedAt,
+        ...agentsOf(rootRows.get(row.id)),
       });
     }
   }

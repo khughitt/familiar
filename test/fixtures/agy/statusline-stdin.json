@@ -1,0 +1,41 @@
+{
+  "cwd": "<cwd>",
+  "session_id": "6f1c2a9e-4b3d-4e8a-9c71-2d5e8f0a3b64",
+  "conversation_id": "6f1c2a9e-4b3d-4e8a-9c71-2d5e8f0a3b64",
+  "conversation_title": "Fixture conversation",
+  "transcript_path": "/nonexistent/antigravity/brain/6f1c2a9e-4b3d-4e8a-9c71-2d5e8f0a3b64/transcript.jsonl",
+  "model": {
+    "id": "Gemini 4 Argon (High)",
+    "display_name": "Gemini 4 Argon (High)",
+    "effort": "high"
+  },
+  "workspace": {
+    "current_dir": "<cwd>",
+    "project_dir": "<cwd>"
+  },
+  "version": "1.4.12",
+  "context_window": {
+    "total_input_tokens": 92868,
+    "total_output_tokens": 35249,
+    "context_window_size": 1048576,
+    "used_percentage": 8.856582641601562,
+    "remaining_percentage": 91.14341735839844,
+    "current_usage": {
+      "input_tokens": 9154,
+      "output_tokens": 8638,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 78172
+    }
+  },
+  "exceeds_200k_tokens": false,
+  "product": "antigravity",
+  "quota": {},
+  "agent_state": "idle",
+  "vcs": {},
+  "sandbox": {
+    "enabled": false
+  },
+  "plan_tier": "fixture-tier",
+  "email": "fixture@example.invalid",
+  "terminal_width": 160
+}

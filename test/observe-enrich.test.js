@@ -11,6 +11,7 @@ import { EMPTY_SESSIONS } from '../src/bus/sessions.js';
 import { NO_PROJECT } from '../src/bus/project-color.js';
 import { prepareEnrichment, roleFromEnv } from '../src/observe/enrich.js';
 import { printsPlaceholderCells, noTerminalMessage } from '../src/render/harness.js';
+import { HARNESSES } from '../src/bus/harnesses.js';
 
 const { chains } = JSON.parse(readFileSync(new URL(import.meta.resolve('relay/fixtures/ancestry.json')), 'utf8'));
 const handle = { platform: 'linux', host: 'host', bootId: 'boot', pid: 7, start: '123' };
@@ -30,8 +31,8 @@ function fixture(name = 'interactive-codex') {
       relayProcess: {
         ancestors: (pid) => { calls.push(['ancestors', pid]); return chain.rows; },
         handleOf: (pid) => { calls.push(['handle', pid]); return own; },
-        executableOf: (pid) => chain.rows.find((p) => p.pid === pid).exe,
-        argvOf: (pid) => chain.rows.find((p) => p.pid === pid).argv,
+        executableOf: (pid) => { calls.push(['executable', pid]); return chain.rows.find((p) => p.pid === pid).exe; },
+        argvOf: (pid) => { calls.push(['argv', pid]); return chain.rows.find((p) => p.pid === pid).argv; },
       },
       renderProcess: { startTimeOf: (pid) => { calls.push(['starttime', pid]); return 456; } },
       gitContext: async (cwd) => { calls.push(['git', cwd]); return git; },
@@ -54,7 +55,7 @@ test('proven event returns context and root basis for a worker', async () => {
   const result = await prepareEnrichment(args);
   assert.deepEqual(result, {
     ok: true, sessionId: 's', basis: { generation: 'g', agentId: row.id, process: row.process, cwd: row.cwd },
-    terminal: { pid: 7, starttime: 456 },
+    terminal: { pid: 7, starttime: 456 }, holder: { pid: 6, starttime: 456 },
     context: { ...git, cwd: '/repo', projectKey: '/repo', project: 'repo', projectColor: '#abcdef', family: 'guild', role: null }, warnings: ['warning'],
   });
   assert.ok(calls.some(([kind, pid]) => kind === 'handle' && pid === 7));
@@ -62,7 +63,8 @@ test('proven event returns context and root basis for a worker', async () => {
 });
 
 test('relay ancestry fixtures keep session proof separate from the rendered terminal', async () => {
-  for (const name of ['background-daemon-under-interactive', 'nested-headless-claude', 'darwin-codex', 'darwin-opencode']) {
+  for (const name of ['background-daemon-under-interactive', 'nested-headless-claude', 'version-binary-interactive',
+    'version-session-under-interactive', 'darwin-codex', 'darwin-opencode', 'interactive-agy']) {
     const { args, calls } = fixture(name);
     const chain = chains.find((entry) => entry.name === name);
     const result = await prepareEnrichment(args);
@@ -124,6 +126,36 @@ test('no terminal preserves the Codex daemon hint and does no git work', async (
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'the codex process 890 owns no terminal: Codex 0.160+ runs hooks under its shared app-server daemon, where no session can be tied to its terminal -- launch it with `codex --no-daemon`. Chain: 900(node) -> 890(codex) -> 880(timeout)');
   assert.equal(calls.some(([kind]) => kind === 'git'), false);
+});
+
+test('a versioned claude terminal is found through the fixture readers, never the host /proc', async () => {
+  const { args, calls } = fixture('version-binary-interactive');
+  const result = await prepareEnrichment(args);
+  assert.equal(result.terminal?.pid, 600);
+  const handled = calls.findIndex(([kind]) => kind === 'handle');
+  assert.ok(calls.slice(handled).some(([kind, pid]) => kind === 'executable' && pid === 600));
+});
+
+test('an unreadable terminal process is a refusal before git, not a fault', async () => {
+  const { args, calls } = fixture('version-binary-interactive');
+  const handleOf = args.relayProcess.handleOf;
+  args.relayProcess.handleOf = (pid) => {
+    args.relayProcess.executableOf = () => { throw Object.assign(new Error('cannot read process'), { code: 'PROCESS_UNREADABLE' }); };
+    return handleOf(pid);
+  };
+  const result = await prepareEnrichment(args);
+  assert.deepEqual(result, { ok: false, sessionId: 's', exitCode: 1, reason: 'could not read the agent terminal process: PROCESS_UNREADABLE: cannot read process' });
+  assert.equal(calls.some(([kind]) => kind === 'git'), false);
+});
+
+test('a terminal lookup defect still escapes as a fault', async () => {
+  const { args } = fixture('version-binary-interactive');
+  const handleOf = args.relayProcess.handleOf;
+  args.relayProcess.handleOf = (pid) => {
+    args.relayProcess.executableOf = () => { throw new TypeError('defect'); };
+    return handleOf(pid);
+  };
+  await assert.rejects(prepareEnrichment(args), { name: 'TypeError', message: 'defect' });
 });
 
 test('unreadable terminal stamp fails before git', async () => {
@@ -308,7 +340,10 @@ test('git and project color faults remain explicit', async () => {
 });
 
 test('harness presentation policy is explicit and terminal messages show ancestry', () => {
-  for (const [harness, prints] of [['claude-code', true], ['codex', false], ['opencode', false]]) {
+  const policy = [['claude-code', true], ['codex', false], ['opencode', false], ['agy', true]];
+  // Every accepted harness has a presentation policy, or emission would throw for it.
+  assert.deepEqual(policy.map(([harness]) => harness).sort(), [...HARNESSES].sort());
+  for (const [harness, prints] of policy) {
     assert.equal(printsPlaceholderCells(harness), prints);
     assert.equal(noTerminalMessage(harness, [{ pid: 1, comm: 'node', tty: null }]), `could not find the ${harness} process with a terminal among the ancestors: 1(node)`);
   }

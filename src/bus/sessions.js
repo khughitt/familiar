@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { STATES } from 'relay';
 import { writeJsonAtomic } from './store.js';
 import { ID_RE, RESERVED_ROLE } from './id.js';
+import { HARNESSES } from './harnesses.js';
 
 export const EMPTY_SESSIONS = { schema: 1, registry: null, sessions: {}, ended: {} };
 
@@ -10,7 +11,7 @@ const text = (value) => typeof value === 'string' && value.length > 0;
 const nullableText = (value) => value === null || text(value);
 const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const pid = (value) => integer(value) && value > 0 && value <= 0xffffffff;
-const harness = (value) => ['claude-code', 'codex', 'opencode'].includes(value);
+const harness = (value) => HARNESSES.includes(value);
 const nullableId = (value) => value === null || (typeof value === 'string' && ID_RE.test(value));
 const role = (value) => nullableId(value) && value !== RESERVED_ROLE;
 // Records written before family, role and admission existed lack them: the file still
@@ -29,7 +30,8 @@ function validHandle(value) {
 function validEnded(value, key) {
   return object(value) && text(value.sessionId) && value.sessionId === key
     && harness(value.harness) && text(value.project) && pid(value.pid)
-    && integer(value.starttime) && integer(value.seq);
+    && integer(value.starttime) && integer(value.seq)
+    && (value.holder === undefined || (object(value.holder) && pid(value.holder.pid) && integer(value.holder.starttime)));
 }
 
 function validSession(value, key) {
@@ -42,7 +44,8 @@ function validSession(value, key) {
     && nullableText(value.repositoryRoot) && nullableText(value.projectColor)
     && absentOr(value, 'family', nullableId) && absentOr(value, 'role', role)
     && absentOr(value, 'admitted', integer)
-    && STATES.includes(value.state) && integer(value.updatedAt);
+    && STATES.includes(value.state) && integer(value.updatedAt)
+    && (value.agents === undefined || (integer(value.agents) && value.agents > 0));
 }
 
 export async function readSessions(path) {

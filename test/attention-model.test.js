@@ -208,6 +208,68 @@ test('OpenCode working → done → idle → idle keeps one completed turn throu
   assert.equal(Object.hasOwn(t.state.turns, rootKey), false);
 });
 
+test('an agy start → tool → stop turn is one completion for its conversation', () => {
+  const { t, send } = scenario();
+  send('agy', 'SessionStart', { session: 'g' });
+  assert.equal(t.episodesOf('agy:g').length, 0);
+  send('agy', 'PreToolUse', { session: 'g' });
+  send('agy', 'Stop', { session: 'g' });
+  const completed = only(t.episodesOf('agy:g'));
+  assert.equal(completed.kind, 'completion');
+  assert.equal(t.state.sources[t.sourceKeyOf('agy:g')].harness, 'agy');
+  t.restart();
+  assert.equal(only(t.episodesOf('agy:g')).id, completed.id);
+});
+
+// relay maps no prompt or activity event for agy, so a turn answered without a tool goes
+// done → done in the registry; its Stop's first fire is still a new completed turn.
+test('an agy turn answered without a tool is a new completion that ends the previous one', () => {
+  const { t, send } = scenario();
+  send('agy', 'SessionStart', { session: 'g' });
+  send('agy', 'PreToolUse', { session: 'g' });
+  send('agy', 'Stop', { session: 'g' });
+  const first = only(t.episodesOf('agy:g', { open: true }));
+  send('agy', 'Stop', { session: 'g', executionNum: 0 });
+  const second = only(t.episodesOf('agy:g', { open: true }));
+  assert.notEqual(second.id, first.id);
+  assert.equal(second.kind, 'completion');
+  assert.equal(second.delivery.toast.status, 'pending');
+  assert.equal(t.state.episodes[first.id].closed, true);
+  assert.equal(t.state.turns[t.sourceKeyOf('agy:g')].episodeId, second.id);
+});
+
+test('an agy Stop re-fired after a Stop hook block continues the same turn', () => {
+  const { t, send } = scenario();
+  send('agy', 'PreToolUse', { session: 'g' });
+  send('agy', 'Stop', { session: 'g' });
+  const completed = only(t.episodesOf('agy:g'));
+  send('agy', 'Stop', { session: 'g', executionNum: 1 });
+  assert.equal(only(t.episodesOf('agy:g')).id, completed.id);
+  assert.equal(completed.closed, false);
+});
+
+test('an agy first turn, with or without a tool, is exactly one completion', () => {
+  const { t, send } = scenario();
+  send('agy', 'SessionStart', { session: 'bare' });
+  send('agy', 'Stop', { session: 'bare' });
+  assert.equal(only(t.episodesOf('agy:bare')).kind, 'completion');
+  send('agy', 'SessionStart', { session: 'tool' });
+  send('agy', 'PreToolUse', { session: 'tool' });
+  send('agy', 'PreToolUse', { session: 'tool' });
+  send('agy', 'Stop', { session: 'tool' });
+  assert.equal(only(t.episodesOf('agy:tool')).kind, 'completion');
+});
+
+test('a repeated Stop from a harness that reports working is not a second completion', () => {
+  const { t, send } = scenario();
+  send('claude-code', 'UserPromptSubmit', { session: 'c' });
+  send('claude-code', 'Stop', { session: 'c' });
+  const completed = only(t.episodesOf('claude-code:c'));
+  send('claude-code', 'Stop', { session: 'c' });
+  assert.equal(only(t.episodesOf('claude-code:c')).id, completed.id);
+  assert.equal(completed.closed, false);
+});
+
 test('OpenCode init → idle and error → idle are not completions', () => {
   const { t, send } = scenario();
   send('opencode', 'init', { session: 'oc' });
