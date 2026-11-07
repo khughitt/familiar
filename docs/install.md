@@ -54,6 +54,14 @@ removable. Removing a user theme that shadows a shipped one brings the shipped o
 back. A theme that config still names faults wherever it is drawn until config names
 another or it is installed again.
 
+When a configured theme is missing from both the user and shipped theme directories,
+the error names the theme and its recovery. If an install receipt remains, it names
+the recorded local path or HTTPS URL and commit. Remove that receipt, then run
+`familiar theme add SOURCE` with the recorded source. This installs the source's
+current contents; it does not restore the recorded commit. An invalid receipt is
+reported explicitly. With no receipt, choose a source for `familiar theme add SOURCE`;
+`familiar theme list` shows the themes that are installed.
+
 `theme add --replace` validates the new copy first, then moves the installed pack
 and receipt into a backup directory,
 `~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `pack/` and

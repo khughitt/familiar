@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig, loadTone, themeDirFor, themeFor, themeIdsOf } from '../src/config.js';
+import { themeSet } from '../src/observe/context.js';
 
 const paths = {
   configPath: '/cfg/config.yaml',
@@ -22,6 +23,7 @@ function realPaths() {
     schemePath: join(configDir, 'scheme.json'),
     themesDir,
     userThemesDir: join(configDir, 'themes'),
+    themeReceiptsDir: join(configDir, 'theme-receipts'),
   };
 }
 
@@ -72,7 +74,7 @@ test('the DEFAULT readFile() reads the real config.yaml — no injection', async
 test('a user theme shadows a shipped one of the same name', () => {
   // Otherwise ~/.config/familiar/themes/<id> is a directory that silently does
   // nothing, and the "themes are user-authorable" claim is decoration.
-  assert.equal(themeDirFor(paths, 'cats', { exists: () => false }), '/repo/themes/cats');
+  assert.equal(themeDirFor(paths, 'cats', { exists: (p) => p === '/repo/themes/cats' }), '/repo/themes/cats');
   assert.equal(
     themeDirFor(paths, 'cats', { exists: (p) => p === '/cfg/themes/cats' }),
     '/cfg/themes/cats'
@@ -91,12 +93,46 @@ test('a user theme shadows a shipped one of the same name', () => {
 test('the DEFAULT exists() reads the real filesystem — no injection', () => {
   const real = realPaths();
   mkdirSync(join(real.userThemesDir, 'dogs'), { recursive: true });
+  mkdirSync(join(real.themesDir, 'cats'));
 
   // it exists on disk -> the USER's dir shadows the shipped one
   assert.equal(themeDirFor(real, 'dogs'), join(real.userThemesDir, 'dogs'));
   // it does not -> the SHIPPED dir, and no error
   assert.equal(themeDirFor(real, 'cats'), join(real.themesDir, 'cats'));
 });
+
+for (const [label, source] of [
+  ['absent', null],
+  ['HTTPS', { kind: 'https', url: 'https://example.org/cats.git', commit: 'a'.repeat(40) }],
+  ['local', { kind: 'local', path: '/packs/my cats' }],
+  ['invalid', { kind: 'local', path: 'relative' }],
+]) {
+  test(`missing theme resolution reports recovery: ${label} receipt`, async () => {
+    const real = realPaths();
+    const receipt = join(real.themeReceiptsDir, 'cats.json');
+    if (source) {
+      mkdirSync(real.themeReceiptsDir);
+      writeFileSync(receipt, JSON.stringify({ id: 'cats', source, installedAt: '2026-10-17T12:00:00Z' }));
+    }
+    const themes = themeSet({ paths: real, config: { themeId: 'cats', families: {} } });
+    await themes.load(['cats']);
+    assert.throws(() => themes.packFor('cats'), (error) => {
+      assert.match(error.message, /theme "cats".*not installed/);
+      assert.match(error.message, /familiar theme add/);
+      assert.doesNotMatch(error.message, /[\r\n]|ENOENT/);
+      if (source) {
+        assert.ok(error.message.includes(receipt));
+        assert.match(error.message, /remove.*receipt|remove.*cats\.json/);
+        if (label === 'invalid') assert.match(error.message, /invalid receipt.*absolute path/);
+        else {
+          assert.ok(error.message.includes(source.url ?? source.path));
+          if (source.commit) assert.ok(error.message.includes(source.commit));
+        }
+      } else assert.match(error.message, /familiar theme list/);
+      return true;
+    });
+  });
+}
 
 test('a theme id that escapes the themes directory is rejected, not joined', () => {
   // themeDirFor('../../../../etc') resolved to /etc — join() collapses "..", so

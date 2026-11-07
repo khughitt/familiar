@@ -536,9 +536,7 @@ export async function main({ command, args: rest, color, mode }) {
     // name rather than being skipped, since a family whose pets were never compiled is
     // one whose sessions convergence refuses to select.
     const themeIds = themeIdsOf(config);
-    for (const id of themeIds) {
-      if (!existsSync(themeDirFor(paths, id))) throw new Error(`theme "${id}" is not installed`);
-    }
+    for (const id of themeIds) themeDirFor(paths, id);
     await ctx.themes.load(themeIds);
     const packs = themeIds.map((id) => [id, ctx.themes.packFor(id)]);
     const projectSync = values['sync-projects']

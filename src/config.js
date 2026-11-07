@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 import { assertTone } from './theme/ramp.js';
 import { assertId } from 'familiar-theme';
 import { writeJsonAtomic } from './bus/store.js';
+import { readReceipt, receiptPath } from './theme/receipt.js';
 
 const DEFAULT_THEME = 'cats';
 const MOTION = new Set(['full', 'reduced', 'off']);
@@ -77,7 +78,26 @@ export function themeFor({ themeId, families }, family) {
 export function themeDirFor(paths, themeId, { exists = existsSync } = {}) {
   assertId(themeId, 'config.yaml: theme', DEFAULT_THEME);
   const userDir = join(paths.userThemesDir, themeId);
-  return exists(userDir) ? userDir : join(paths.themesDir, themeId);
+  if (exists(userDir)) return userDir;
+  const shippedDir = join(paths.themesDir, themeId);
+  if (exists(shippedDir)) return shippedDir;
+
+  const missing = `theme "${themeId}" is not installed`;
+  const read = readReceipt(paths, themeId);
+  if (read.verdict === 'absent') {
+    throw new Error(`${missing} — run: familiar theme add SOURCE; familiar theme list`);
+  }
+  const receipt = JSON.stringify(receiptPath(paths, themeId));
+  if (read.verdict === 'invalid') {
+    throw new Error(`${missing}; invalid receipt at ${receipt} (${JSON.stringify(read.reason)})`
+      + ' — remove that receipt, then run: familiar theme add SOURCE; familiar theme list');
+  }
+  const { source } = read.receipt;
+  const origin = source.kind === 'https'
+    ? `${JSON.stringify(source.url)} at commit ${source.commit}`
+    : JSON.stringify(source.path);
+  throw new Error(`${missing}; receipt ${receipt} records source ${origin}`
+    + ' — remove that receipt, then run: familiar theme add SOURCE (using the recorded source)');
 }
 
 // SchemeTone is an INPUT. The core never asks a bar what the colorscheme is;
