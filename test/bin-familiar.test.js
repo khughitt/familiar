@@ -79,6 +79,27 @@ function env(over = {}) {
 // test-owned, git is kept off the host's config, and `tasks` is a fake (the suite's own,
 // unless a test brings its own bin dir). Node's directory is on PATH for that fake's shebang.
 const suiteFakeTasks = fileURLToPath(new URL('fixtures/fake-tasks', import.meta.url));
+test('a missing configured theme reports invalid receipt recovery on one CLI line', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-missing-theme-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const e = isolatedEnv({ root });
+  e.FAMILIAR_THEMES_DIR = join(root, 'absent-themes');
+  mkdirSync(e.FAMILIAR_THEMES_DIR);
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\n');
+  const receipts = join(e.FAMILIAR_CONFIG_DIR, 'theme-receipts');
+  mkdirSync(receipts);
+  writeFileSync(join(receipts, 'cats.json'), '{\ninvalid\n}');
+  const result = spawnSync(process.execPath, [bin, '--pretty', 'theme', 'sheet'], {
+    encoding: 'utf8', env: e,
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr.trimEnd().split(/\r\n|\r|\n/).length, 1);
+  assert.match(result.stderr, /theme "cats".*not installed.*invalid receipt/);
+  assert.match(result.stderr, /familiar theme add SOURCE/);
+  assert.doesNotMatch(result.stderr, /ENOENT/);
+});
+
 function isolatedEnv({ root = mkdtempSync(join(tmpdir(), 'familiar-isolated-')), bin: fakeBin = suiteFakeTasks } = {}) {
   const dirs = { home: join(root, 'home'), xdgState: join(root, 'xdg-state'), config: join(root, 'config'), state: join(root, 'state') };
   for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
@@ -1515,7 +1536,7 @@ test('install pets fails by name on a configured theme that is not installed, an
   });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.equal(result.stderr, 'familiar: theme "plant-nooks" is not installed\n');
+  assert.match(result.stderr, /^familiar: theme "plant-nooks" is not installed.*familiar theme add SOURCE.*familiar theme list\n$/);
   assert.equal(existsSync(out), false);
 });
 
