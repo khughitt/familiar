@@ -80,6 +80,17 @@ test('every other answer is an error naming the directory', async () => {
   }
 });
 
+test('command failure details preserve every line as visible escapes', async () => {
+  for (const output of [
+    { stderr: 'error: unavailable\r\nusage: tasks resolve\ntry again\rnow', stdout: 'ignored' },
+    { stderr: '', stdout: 'error: unavailable\r\nusage: tasks resolve\ntry again\rnow' },
+  ]) {
+    await assert.rejects(lookupProjectColor('/r', { exec: fakeExec([], { code: 2, ...output }) }), {
+      message: 'tasks resolve /r: exited 2: error: unavailable\\r\\nusage: tasks resolve\\ntry again\\rnow',
+    });
+  }
+});
+
 test('malformed JSON shapes are rejected at the boundary', async () => {
   const cases = [
     'null', '[]', '{}',

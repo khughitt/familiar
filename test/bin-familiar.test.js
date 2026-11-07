@@ -2580,13 +2580,15 @@ test('without tasks on PATH whoami behaves as before', (t) => {
 
 test('a tasks failure is one error line naming the command', (t) => {
   const { main } = worktreeLayout(t);
-  const e = { ...pinned('identities: []\n'), FAKE_TASKS_EXIT: '2', FAKE_TASKS_OUTPUT: '',
-    FAKE_TASKS_STDERR: "error: unrecognized subcommand 'resolve'" };
+  const e = { ...isolatedEnv(), FAKE_TASKS_EXIT: '2', FAKE_TASKS_OUTPUT: '',
+    FAKE_TASKS_STDERR: "error: unrecognized subcommand 'resolve'\nusage: tasks resolve\r\ntry --help" };
+  writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), '{"mode":"dark","satScale":1}');
   const r = spawnSync(process.execPath, [bin, 'whoami', main], { encoding: 'utf8', env: e });
   assert.equal(r.status, 1);
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /tasks resolve .*: exited 2: error: unrecognized subcommand 'resolve'/);
   assert.equal(r.stderr.trim().split('\n').length, 1);
+  assert.ok(r.stderr.includes('\\nusage: tasks resolve\\r\\ntry --help'));
 });
 
 test('projects writes each tasks warning once', (t) => {

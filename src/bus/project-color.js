@@ -24,7 +24,8 @@ export async function lookupProjectColor(dir, {
       throw Object.assign(fault(`timed out after ${timeoutMs}ms`), { code: 'FAMILIAR_TASKS_TIMEOUT' });
     }
     if (error.code === 'ENOENT') return NO_PROJECT;
-    const detail = error.stderr?.trim() || error.stdout?.trim();
+    const detail = (error.stderr?.trim() || error.stdout?.trim())
+      ?.replaceAll('\r', '\\r').replaceAll('\n', '\\n');
     throw fault(`exited ${error.code}${detail ? `: ${detail}` : ''}`);
   }
 
