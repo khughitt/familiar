@@ -135,7 +135,9 @@ Approach:
 - Familiar emits no graphics escapes into Codex. Codex owns the cells and its native pet
   renderer; familiar installs a spritesheet and `pet.json` on disk.
 - The accepted sheet is 1536x1872: an 8x9 grid of 192x208 frames, or 72 cells total. The current
-  familiar generator uses eight cells and leaves the rest transparent.
+  familiar generator fills cells 0-19: `idle` 0-5, `running` 6, `waiting` 7, `review` 8-13,
+  and `failed` 14-19. Cells 20-71 remain transparent. `pet.json` declares these tracks and
+  holds the final `review` and `failed` cells after their one-shot animations.
 - The current public pet documentation specifies a transparent PNG or WebP, exactly 1536x1872
   and at most 20 MiB. Terminal pets require iTerm2 3.6+, Kitty graphics, or Sixel, and are
   unavailable inside tmux and Zellij.
@@ -143,12 +145,15 @@ Approach:
 The 72 cells are a capacity ceiling, not a target. Animation frame allocation is shared across
 idle and all activity animations, and reduced-motion users receive a still frame.
 
-There is an evidence mismatch to resolve before changing the mapping. Familiar's existing
-test-card probes observed cells 0-5 as the forced idle loop, cell 6 as `running`, cell 7 as a
+These compiler declarations do not establish which tracks the native renderer selects.
+Familiar's historical test-card probes observed cells 0-5 as the forced idle loop, cell 6 as `running`, cell 7 as a
 second busy/`waiting` phase, no pet during approval, and no distinct completion pose. Current
 Codex documentation describes terminal pet states as Running, Needs input, Ready, and Blocked.
 Re-run the test-card probe against the target Codex version before assigning new frames; do not
-infer animation names from labels.
+infer animation names from labels or compiler declarations.
+
+Generator source: `OCCUPIED`, `sampledFrames`, `spritesheet`, and `petFile` in
+[`src/render/codex/pets.js`](../../src/render/codex/pets.js).
 
 Source: [current Codex pets documentation][codex-pets].
 
