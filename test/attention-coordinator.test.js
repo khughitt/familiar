@@ -803,9 +803,9 @@ test('a stop during recovery exits 0 with no heartbeat and leaves the predecesso
   const seeded = await readFile(h.paths.attentionHealthPath, 'utf8');
   let release;
   const held = withLock(h.paths.presentationLockPath, () => new Promise((resolve) => { release = resolve; }));
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await h.until(() => typeof release === 'function', 'the held presentation lock');
   const running = h.start();
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await h.until(() => h.signals.count() === 2, 'recovery signal handlers');
   const handlersDuringRecovery = h.signals.count();
   h.signals.emit('SIGTERM');
   release();
