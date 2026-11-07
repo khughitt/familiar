@@ -12,6 +12,7 @@ import { renderHelp } from '../bin/familiar.js';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 import { decodeRgba, encodeRgba } from 'familiar-theme';
 import { writeTheme } from './helpers/themes.js';
+import { git, initRepo } from './fixtures/git-worktree.mjs';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -36,7 +37,8 @@ function fixture(t) {
     state,
     xdg,
     env: {
-      ...process.env,
+      PATH: process.env.PATH, HOME: root,
+      GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
       FAMILIAR_CONFIG_DIR: config,
       FAMILIAR_STATE_DIR: state,
       XDG_CONFIG_HOME: xdg,
@@ -44,9 +46,7 @@ function fixture(t) {
   };
 }
 
-// The SAME scrub as test/bin-familiar.test.js, for the same reason: fixture().env
-// spreads process.env, so a developer's kitty is inherited unless every marker
-// graphicsCapability() reads is removed -- and its list is the source of truth.
+// Clear every capability marker when a test asks for a specific terminal shape.
 const noGraphics = (base) => {
   const e = { ...base };
   for (const { name } of GRAPHICS_MARKERS) delete e[name];
@@ -73,10 +73,8 @@ function gitRepo(t) {
   const dir = join(root, 'widget');
   mkdirSync(dir);
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const args of [['init'], ['remote', 'add', 'origin', 'https://github.com/acme/widget.git']]) {
-    const result = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-  }
+  initRepo(dir);
+  git(dir, ['remote', 'add', 'origin', 'https://github.com/acme/widget.git']);
   return dir;
 }
 

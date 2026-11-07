@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { loadThemePack } from 'familiar-theme';
 import { convergeCodexProject } from '../src/install/codex-converge.js';
-import { addWorktree, seedRepo } from './fixtures/git-worktree.mjs';
+import { addWorktree, git, initRepo, seedRepo } from './fixtures/git-worktree.mjs';
 import { stampFor, STAMP_FILE } from '../src/install/pet-stamp.js';
 import { SPRITESHEET_PATH, FRAME, petId } from '../src/render/codex/pets.js';
 import { preloadedThemes } from './helpers/themes.js';
@@ -39,11 +39,9 @@ function petsFor(t) {
 function repo(t) {
   const dir = mkdtempSync(join(tmpdir(), 'familiar-converge-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8' });
-  spawnSync('git', ['-C', dir, 'remote', 'add', 'origin',
-    'git@github.com:example/converge.git'], { encoding: 'utf8' });
-  return spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'],
-    { encoding: 'utf8' }).stdout.trim();
+  const root = initRepo(dir);
+  git(root, ['remote', 'add', 'origin', 'git@github.com:example/converge.git']);
+  return root;
 }
 
 const run = (root, petsDir, member, catalog = { identities: [] }, themeId = THEME.id) =>
@@ -129,7 +127,9 @@ test('a member whose assets are missing is NOT selected — a broken selection i
 test('a FIFO at the config path is refused without opening it', async (t) => {
   const root = repo(t);
   mkdirSync(join(root, '.codex'), { recursive: true });
-  if (spawnSync('mkfifo', [join(root, '.codex', 'config.toml')]).status !== 0) return;
+  if (spawnSync('mkfifo', [join(root, '.codex', 'config.toml')], {
+    env: { PATH: process.env.PATH, HOME: root },
+  }).status !== 0) return;
 
   // If this returns at all, the implementation did not read the FIFO.
   const result = await run(root, petsFor(t), 'beta');

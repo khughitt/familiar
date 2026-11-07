@@ -373,7 +373,7 @@ function realGit() {
   const exec = (file, args, options) => {
     calls.push(args);
     assert.equal(args.includes('worktree'), false, `a worktree command was run: ${args.join(' ')}`);
-    return realExecFile(file, args, { ...options, env: fixtureGitEnv() });
+    return realExecFile(file, args, { ...options, env: fixtureGitEnv(args[1]) });
   };
   return { exec, calls };
 }
@@ -400,7 +400,7 @@ test('real Git bare probe prints true before exit 128', (t) => {
     const candidate = name === '.git' ? temp : bare;
     const r = spawnSync('git', ['-C', candidate, 'rev-parse',
       '--is-bare-repository', '--show-toplevel'], { encoding: 'utf8',
-      timeout: 5_000, killSignal: 'SIGKILL', env: fixtureGitEnv() });
+      timeout: 5_000, killSignal: 'SIGKILL', env: fixtureGitEnv(candidate) });
     assert.equal(r.error, undefined);
     assert.equal(r.signal, null);
     assert.equal(r.status, 128);

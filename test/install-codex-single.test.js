@@ -6,12 +6,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 import { loadThemePack } from 'familiar-theme';
 import {
   applyCodexProjectSync, configText, planCodexProjectForPath, planCodexProjectSync, MANAGED_CONFIG,
 } from '../src/install/codex.js';
-import { addWorktree, git, seedRepo } from './fixtures/git-worktree.mjs';
+import { addWorktree, git, initRepo, seedRepo } from './fixtures/git-worktree.mjs';
 import { preloadedThemes } from './helpers/themes.js';
 
 const THEME = await loadThemePack(
@@ -27,11 +26,9 @@ const pair = (memberId, themeId = 'roles-fixture') => ({ themeId, memberId });
 function repo(t, name) {
   const dir = mkdtempSync(join(tmpdir(), `familiar-${name}-`));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  spawnSync('git', ['-C', dir, 'init', '-q'], { encoding: 'utf8' });
-  spawnSync('git', ['-C', dir, 'remote', 'add', 'origin',
-    `git@github.com:example/${name}.git`], { encoding: 'utf8' });
-  return spawnSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'],
-    { encoding: 'utf8' }).stdout.trim();
+  const root = initRepo(dir);
+  git(root, ['remote', 'add', 'origin', `git@github.com:example/${name}.git`]);
+  return root;
 }
 
 test('an unmanaged config in another project does not affect this one', async (t) => {

@@ -6,7 +6,7 @@
 // "malformed stdin yields absent fields" would pass while the CLI could never reach it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -14,6 +14,7 @@ import {
   readFields, gitBranch, claimedTask, BRANCH_TIMEOUT_MS, CLAIMS_TIMEOUT_MS,
 } from '../src/render/term/statusfields.js';
 import { taskForSession } from '../src/render/term/stagesession.js';
+import { fixtureGitEnv, git as fixtureGit, initRepo } from './fixtures/git-worktree.mjs';
 
 const noGit = () => null;
 const noClaim = () => null;
@@ -71,32 +72,32 @@ const repo = (fn) => {
 };
 
 const git = (dir, ...args) =>
-  execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  fixtureGit(dir, args);
 
 const commit = (dir) =>
   git(dir, '-c', 'hook.identity-check.enabled=false', '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'x');
 
 test('gitBranch reads the branch of a real repository', () => {
   repo((dir) => {
-    git(dir, 'init', '-q', '-b', 'trunk');
+    initRepo(dir, { branch: 'trunk' });
     commit(dir);
-    assert.equal(gitBranch(dir), 'trunk');
+    assert.equal(gitBranch(dir, { env: fixtureGitEnv(dir) }), 'trunk');
   });
 });
 
 test('a detached HEAD reads as a short sha', () => {
   repo((dir) => {
-    git(dir, 'init', '-q', '-b', 'trunk');
+    initRepo(dir, { branch: 'trunk' });
     commit(dir);
     const sha = git(dir, 'rev-parse', 'HEAD').trim();
     git(dir, 'checkout', '-q', sha);
-    assert.match(gitBranch(dir), /^[0-9a-f]{7,}$/);
+    assert.match(gitBranch(dir, { env: fixtureGitEnv(dir) }), /^[0-9a-f]{7,}$/);
   });
 });
 
 test('a directory that is not a repository has no branch, and that is not an error', () => {
   repo((dir) => {
-    assert.equal(gitBranch(dir), null);
+    assert.equal(gitBranch(dir, { env: fixtureGitEnv(dir) }), null);
   });
 });
 
@@ -106,7 +107,7 @@ test('a directory that is not a repository has no branch, and that is not an err
 test('a git call that hangs is abandoned, not waited on', () => {
   repo((dir) => {
     const fake = join(dir, 'bin');
-    execFileSync('mkdir', ['-p', fake]);
+    mkdirSync(fake, { recursive: true });
     // `exec /bin/sleep`, by ABSOLUTE PATH. PATH here is the fake dir alone, so a bare `sleep`
     // is not found, git exits instantly, and the test passes without ever exercising the
     // timeout -- a green light for an unbounded subprocess.
@@ -114,7 +115,7 @@ test('a git call that hangs is abandoned, not waited on', () => {
     chmodSync(join(fake, 'git'), 0o755);
 
     const started = Date.now();
-    const result = gitBranch(dir, { env: { ...process.env, PATH: fake } });
+    const result = gitBranch(dir, { env: { ...fixtureGitEnv(dir), PATH: fake } });
     const elapsed = Date.now() - started;
 
     assert.equal(result, null);

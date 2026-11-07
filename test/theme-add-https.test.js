@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync,
-  writeFileSync,
+  realpathSync, writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:https';
-import { devNull, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateThemePack } from 'familiar-theme';
@@ -14,6 +14,7 @@ import { paths } from '../src/bus/paths.js';
 import { addTheme, STAGING_DIR_NAME } from '../src/theme/add.js';
 import { readReceipt } from '../src/theme/receipt.js';
 import { writePack } from './helpers/fixture.js';
+import { fixtureGitEnv, git as fixtureGit, initRepo } from './fixtures/git-worktree.mjs';
 
 // These committed cert/key files are TEST FIXTURES for loopback TLS only.
 // The key protects nothing and is deliberately public. caFile is addTheme's
@@ -35,25 +36,15 @@ for (const key of [
   'http_proxy', 'https_proxy', 'all_proxy',
 ]) process.env[key] = '';
 
-const GIT_ENV = {
-  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key))),
-  GIT_CONFIG_GLOBAL: devNull,
-  GIT_CONFIG_SYSTEM: devNull,
-  GIT_AUTHOR_NAME: 'fixture',
-  GIT_AUTHOR_EMAIL: 'fixture@invalid',
-  GIT_COMMITTER_NAME: 'fixture',
-  GIT_COMMITTER_EMAIL: 'fixture@invalid',
-};
-const git = (args, cwd) => execFileSync('git', args, {
-  cwd, env: GIT_ENV, encoding: 'utf8',
-});
+const git = (args, cwd) => fixtureGit(cwd, args);
 
 function bareRepoFrom(dir) {
-  git(['init', '-q', '-b', 'main'], dir);
+  initRepo(dir);
   git(['add', '-A'], dir);
   git(['commit', '-q', '-m', 'fixture pack'], dir);
   const bare = join(mkdtempSync(join(tmpdir(), 'bare-')), 'repo.git');
-  execFileSync('git', ['clone', '-q', '--bare', dir, bare], { env: GIT_ENV });
+  git(['clone', '-q', '--bare', dir, bare], dir);
+  assert.equal(git(['rev-parse', '--absolute-git-dir'], bare), realpathSync(bare));
   git(['update-server-info'], bare);
   return bare;
 }
@@ -84,7 +75,7 @@ async function serveBare(bareDir) {
 
       const child = spawn('git', ['http-backend'], {
         env: {
-          ...GIT_ENV,
+          ...fixtureGitEnv(bareDir),
           GIT_PROJECT_ROOT: dirname(bareDir),
           GIT_HTTP_EXPORT_ALL: '1',
           PATH_INFO: url.pathname,

@@ -35,7 +35,7 @@ import { setupDocument } from '../src/install/setup.js';
 import { STATES, loadThemePack, parseThemePack } from 'familiar-theme';
 import { preloadedThemes, writeTheme } from './helpers/themes.js';
 import { TINY_PNG } from './helpers/fixture.js';
-import { addWorktree, fixtureGitEnv, git, seedRepo } from './fixtures/git-worktree.mjs';
+import { addWorktree, git, initRepo, seedRepo } from './fixtures/git-worktree.mjs';
 import { reportCommandError, reportCosmeticError } from '../bin/familiar.js';
 import { makePrepareSprites, settleStatusline, sheetRowCaptions } from '../bin/familiar-commands.js';
 
@@ -1077,14 +1077,13 @@ test('pets refuses --sync-projects with --out before loading config or writing o
 });
 
 function codexProjectSyncFixture(t) {
-  const runEnv = env();
+  const runEnv = isolatedEnv();
   const root = mkdtempSync(join(tmpdir(), 'familiar-codex-sync-'));
   const project = join(root, 'project');
   const codexHome = join(root, 'codex-home');
   mkdirSync(project);
   mkdirSync(codexHome);
-  const initialized = spawnSync('git', ['init', '-q'], { cwd: project, encoding: 'utf8' });
-  assert.equal(initialized.status, 0, initialized.stderr);
+  initRepo(project);
 
   runEnv.CODEX_HOME = codexHome;
   mkdirSync(runEnv.FAMILIAR_CONFIG_DIR, { recursive: true });
@@ -1181,8 +1180,7 @@ test('pets --sync-projects writes nothing outside a repository and says which di
 test('pets --sync-projects refuses to manage the user-wide config when the Codex home is the repository', (t) => {
   const { runEnv, codexHome } = unpinnedSyncFixture(t);
   const home = dirname(codexHome);
-  const initialized = spawnSync('git', ['init', '-q'], { cwd: home, encoding: 'utf8' });
-  assert.equal(initialized.status, 0, initialized.stderr);
+  initRepo(home);
   runEnv.CODEX_HOME = join(home, '.codex');
   const userConfig = join(home, '.codex', 'config.toml');
   mkdirSync(join(home, '.codex'), { recursive: true });
@@ -1261,8 +1259,7 @@ test('pets --sync-projects leaves a tracked project config untouched and prints 
   const original = '[features]\njs_repl = true\n';
   mkdirSync(configDir);
   writeFileSync(configPath, original);
-  const added = spawnSync('git', ['add', '-f', '.codex/config.toml'], { cwd: project, encoding: 'utf8' });
-  assert.equal(added.status, 0, added.stderr);
+  git(project, ['add', '-f', '.codex/config.toml']);
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
     cwd: project, encoding: 'utf8', env: runEnv,
@@ -1283,8 +1280,7 @@ test('pets --sync-projects leaves a tracked config symlink untouched as project 
   mkdirSync(configDir);
   writeFileSync(target, original);
   symlinkSync('../tracked-codex.toml', configPath);
-  const added = spawnSync('git', ['add', '-f', '.codex/config.toml'], { cwd: project, encoding: 'utf8' });
-  assert.equal(added.status, 0, added.stderr);
+  git(project, ['add', '-f', '.codex/config.toml']);
 
   const result = spawnSync(process.execPath, [bin, 'install', 'pets', '--sync-projects'], {
     cwd: project, encoding: 'utf8', env: runEnv,
@@ -1374,8 +1370,7 @@ test('project sync refuses an empty marker tracked after preflight', async (t) =
   const pack = await loadThemePack(join(shippedThemesFixture, 'cats'));
   const plan = await planCodexProjectSync({ catalog, themes: preloadedThemes({ cats: pack }) });
   const originalExclude = readFileSync(excludePath, 'utf8');
-  const added = spawnSync('git', ['add', '-f', '.codex'], { cwd: project, encoding: 'utf8' });
-  assert.equal(added.status, 0, added.stderr);
+  git(project, ['add', '-f', '.codex']);
 
   assert.throws(() => applyCodexProjectSync(plan), /project config changed after preflight/);
   assert.equal(readFileSync(marker, 'utf8'), '');
@@ -2507,11 +2502,11 @@ function worktreeLayout(t) {
 }
 
 function pinned(identities) {
-  const e = env();
+  const e = isolatedEnv();
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'config.yaml'), 'theme: cats\nmotion: off\n');
   writeFileSync(join(e.FAMILIAR_CONFIG_DIR, 'identities.yaml'), identities);
-  return fixtureGitEnv(e);
+  return e;
 }
 
 function whoami(e, dir) {
