@@ -228,7 +228,13 @@ export async function runSuite(files, {
         process.execPath, '--test', ...files,
       ], {
         stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
-        env: { ...process.env, TMPDIR: scratch, PATH: `${FAKE_TASKS}:${process.env.PATH ?? ''}` },
+        // Imported subjects spawn subprocesses too; contain the whole worker.
+        env: {
+          PATH: `${FAKE_TASKS}:${process.env.PATH ?? ''}`, HOME: scratch, TMPDIR: scratch,
+          GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+          GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+          GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+        },
       });
       const spawned = new Promise((resolveSpawn, rejectSpawn) => {
         child.once('spawn', resolveSpawn);

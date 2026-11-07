@@ -12,6 +12,8 @@ family picks the theme and the session's `FAMILIAR_ROLE` picks the member
   provisional — see [surfaces](docs/surfaces.md) for what each platform claims.
 - Desktop attention (Niri popup, Noctalia workspace pills, toasts): [docs/attention.md](docs/attention.md).
 - Run tests: `just test` (or `npm test` without [just](https://just.systems))
+  The runner gives workers a temporary home and explicit environment, with host Git
+  configuration and hook redirections excluded. Tests set any other needed variables.
   On macOS, run them with `TMPDIR=/tmp`: the per-user temporary directory is too long
   for the suite's Unix-socket fixtures, and the runner refuses it.
 - Pre-split history: https://github.com/khughitt/familiar-archive (private archive)

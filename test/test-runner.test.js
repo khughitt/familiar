@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import {
-  mkdtempSync, rmSync, utimesSync, writeFileSync,
+  existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,11 +10,37 @@ import { fileURLToPath } from 'node:url';
 import {
   assertSocketRoom, pidNamespaceOf, runSuite, testInventory, withSuiteLease,
 } from '../tools/test-runner.mjs';
+import { fixtureGitEnv, seedRepo } from './fixtures/git-worktree.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 
 test('inventory finds this test', () => {
   assert.ok(testInventory(REPO).includes('test/test-runner.test.js'));
+});
+
+test('suite workers keep in-process installer Git calls inside their fixtures under hook redirection', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-suite-git-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const unrelated = seedRepo(join(root, 'unrelated'));
+  const before = readFileSync(join(unrelated, '.git', 'info', 'exclude'), 'utf8');
+  const previous = process.env;
+  // Only fake hook values reach the RED child; no host environment is copied.
+  process.env = {
+    ...fixtureGitEnv(root), TMPDIR: root,
+    GIT_DIR: join(unrelated, '.git'), GIT_WORK_TREE: unrelated,
+    GIT_INDEX_FILE: join(unrelated, '.git', 'index'),
+  };
+  let code;
+  try {
+    code = await runSuite(['test/fixtures/codex-git-isolation.mjs'], {
+      tmpdir: () => root, reap: () => {}, suiteLease: async (fn) => fn(),
+    });
+  } finally {
+    process.env = previous;
+  }
+  assert.equal(code, 0, 'the installer must resolve and write its own fixture');
+  assert.equal(existsSync(join(unrelated, '.codex')), false);
+  assert.equal(readFileSync(join(unrelated, '.git', 'info', 'exclude'), 'utf8'), before);
 });
 
 test('Darwin suite lease holds the existing file lock around its callback', async () => {
