@@ -20,8 +20,9 @@ tt := "python3 tools/tt"
 # tmux and util-linux `script` and takes seconds; test_cmd runs both modes in turn.
 fast_cmd := "npm test"
 test_cmd := "npm test && npm run test:slow"
-# No formatter, linter, or typechecker in this project yet; `tasks check` is the gate.
-check_cmd := "python3 tools/ops-check && tasks check"
+# No formatter, linter, or typechecker in this project yet; the hygiene checks and
+# `tasks check` are the gate. ops-docs checks the guide regions against identity.toml.
+check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
 
 # Affected-only: the inner loop.
 test-fast:
@@ -36,6 +37,12 @@ check:
     {{tt}} check -- sh -c '{{check_cmd}}'
 
 gate: check test
+
+# Regenerate the identity and family regions of README.md and AGENTS.md from
+# identity.toml and tools/family.toml. The only thing that edits those regions;
+# `check` refuses a commit while they are out of date.
+docs:
+    {{tt}} docs -- python3 tools/ops-docs write
 
 # What the pre-commit hook runs: `check`'s command under its own hook target.
 hook-pre-commit:

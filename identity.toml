@@ -1,0 +1,20 @@
+# What this project is. `tools/ops-docs write` renders it into the identity region of
+# README.md and AGENTS.md; `tools/ops-docs check` refuses a commit while they differ.
+# name, aliases and purpose mirror ops identity-mirror.toml; a new purpose changes the
+# global Projects block and goes through ops `just projects` and lore `just assemble`.
+# Reference: ops docs/project-guides.md
+name = "familiar"
+aliases = []
+# At most 80 characters: this line sits in every agent session in every project.
+purpose = "Agent pets and the session hook bus"
+# One to three sentences, at most 400 characters: what it does and for whom.
+abstract = """
+Gives each coding-agent session a pet that reacts to its lifecycle in the terminal,
+the agent's status line or pet picker, and the desktop. The engine observes session
+events dispatched by relay and renders a member of an installed theme chosen by
+project and role; themes and their art install separately.
+"""
+# Documents that are the authority for what is built or decided; each must be tracked.
+authority = ["docs/surfaces.md", "docs/install.md", "docs/attention.md"]
+# Directories with their own identity.toml, README.md, and AGENTS.md.
+subsystems = []

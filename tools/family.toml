@@ -1,0 +1,104 @@
+# The guild family: its summary, members and README contract. The home is ops, which
+# lists itself as a member and reads this file at its root; each other member holds a
+# copy as tools/family.toml, from which ops-docs renders the family region into the
+# member's guides. Until every member holds a copy, members take it by hand from ops's
+# HEAD (`git -C <ops> show HEAD:family.toml > tools/family.toml`), never through
+# `family publish`, and `bin/ops-docs family check` runs here by hand as the rollout's
+# progress report. Contract and staged adoption: docs/project-guides.md.
+name = "guild"
+summary = """
+guild is the agent tooling behind every project here: the tracker, harness homes,
+instruction context, adapters, flows, evidence, orchestration and companions, built
+to run together on one host.
+"""
+overview = "https://github.com/khughitt/ops#readme"
+
+# Members in nav order, alphabetical by shown text. `name` is the member's identity.toml
+# name; `prefix` its tasks prefix; `label` the hover text of its nav link; optional
+# `title` the nav text in place of the name. band, transponder and forge v2 have no
+# repository yet: their URLs are the names their publication tasks create.
+[[members]]
+name = "band"
+prefix = "band"
+url = "https://github.com/khughitt/band"
+label = "Single- and multi-agent orchestration across harnesses"
+
+[[members]]
+name = "familiar"
+prefix = "fam"
+url = "https://github.com/khughitt/familiar"
+label = "Agent pets and the session hook bus"
+
+[[members]]
+name = "familiar-forge"
+prefix = "forge"
+url = "https://github.com/khughitt/familiar-forge"
+label = "Generative art behind familiar's pet themes"
+
+[[members]]
+name = "flows"
+prefix = "flows"
+url = "https://github.com/khughitt/flows"
+label = "Task states, gates, evidence and the tools that judge them"
+
+[[members]]
+name = "forge v2"
+prefix = "forge2"
+title = "forge"
+url = "https://github.com/khughitt/forge2"
+label = "Pet themes from picked images"
+
+[[members]]
+name = "harness-quarters"
+prefix = "hq"
+title = "hq"
+url = "https://github.com/khughitt/harness-quarters"
+label = "Harness homes, links, settings and session hygiene"
+
+[[members]]
+name = "lore"
+prefix = "lore"
+url = "https://github.com/khughitt/lore"
+label = "Agent context: instructions, profiles, skills"
+
+[[members]]
+name = "obs"
+prefix = "obs"
+url = "https://github.com/khughitt/obs"
+label = "Execution evidence and historical analysis"
+
+[[members]]
+name = "ops"
+prefix = "ops"
+url = "https://github.com/khughitt/ops"
+label = "The hub: shared tooling, profiles and cross-project work"
+
+[[members]]
+name = "relay"
+prefix = "relay"
+url = "https://github.com/khughitt/relay"
+label = "Harness adapters, hook dispatch, live-agent registry"
+
+[[members]]
+name = "tasks"
+prefix = "tasks"
+url = "https://github.com/khughitt/tasks"
+label = "The file-based task tracker every project uses"
+
+[[members]]
+name = "tasks-tui"
+prefix = "tui"
+url = "https://github.com/khughitt/tasks-tui"
+label = "A keyboard-driven terminal front end for tasks"
+
+[[members]]
+name = "transponder"
+prefix = "trans"
+url = "https://github.com/khughitt/transponder"
+label = "A phone inbox for agents' typed questions"
+
+# No status region: a guild README is for an operator, not a maintainer. AGENTS.md keeps
+# the default contract.
+[readme]
+lead = ["purpose", "abstract"]
+sections = ["Install", "Usage", "Configuration", "Layout", "Documentation", "License"]
