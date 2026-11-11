@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 import {
-  existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  assertSocketRoom, pidNamespaceOf, runSuite, testInventory, withSuiteLease,
+  assertSocketRoom, focusedTestFiles, pidNamespaceOf, runSuite, testFiles, testInventory, withSuiteLease,
 } from '../tools/test-runner.mjs';
 import { fixtureGitEnv, seedRepo } from './fixtures/git-worktree.mjs';
 
@@ -16,6 +17,54 @@ const REPO = fileURLToPath(new URL('..', import.meta.url));
 
 test('inventory finds this test', () => {
   assert.ok(testInventory(REPO).includes('test/test-runner.test.js'));
+});
+
+test('focused selection accepts both partitions and integrations in caller order', () => {
+  assert.deepEqual(focusedTestFiles(REPO, [
+    './test/test-runner.test.js', join(REPO, 'test/tmux-pty.slow.test.js'),
+    'integrations/niri-desktop/logic.test.mjs',
+  ]), ['test/test-runner.test.js', 'test/tmux-pty.slow.test.js',
+    'integrations/niri-desktop/logic.test.mjs']);
+});
+
+test('focused selection refuses empty, options, directories, unknown, duplicate and outside paths', () => {
+  for (const args of [[], ['--test'], ['test'], ['test/missing.test.js'],
+    ['test/test-runner.test.js', './test/test-runner.test.js'],
+    ['../test/test-runner.test.js'], ['/test/test-runner.test.js']]) {
+    assert.throws(() => focusedTestFiles(REPO, args), /test|file|select|argument/i);
+  }
+});
+
+test('focused selection leaves fast and slow inventory membership unchanged', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'test'));
+  mkdirSync(join(root, 'integrations/example'), { recursive: true });
+  for (const file of ['test/a.test.js', 'test/b.slow.test.js',
+    'integrations/example/c.test.mjs', 'integrations/example/d.slow.test.mjs']) {
+    writeFileSync(join(root, file), '');
+  }
+  assert.deepEqual(testFiles(root, 'fast'), ['test/a.test.js', 'integrations/example/c.test.mjs']);
+  assert.deepEqual(testFiles(root, 'slow'), ['test/b.slow.test.js', 'integrations/example/d.slow.test.mjs']);
+  assert.deepEqual(focusedTestFiles(root, ['integrations/example/d.slow.test.mjs', 'test/a.test.js']),
+    ['integrations/example/d.slow.test.mjs', 'test/a.test.js']);
+});
+
+test('focused CLI refuses overlong TMPDIR before scratch or suite lease acquisition', (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'selection-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const temp = join(home, 'long'.repeat(30));
+  mkdirSync(temp);
+  const result = spawnSync('just', ['test-one', 'test/test-runner.test.js'], {
+    cwd: REPO, encoding: 'utf8', timeout: 10_000,
+    env: { ...fixtureGitEnv(home), USER: 'fixture', TMPDIR: temp,
+      TT_LOG: join(home, 'runs.jsonl'), FAKE_TASKS_OUTPUT: '{"project":null}' },
+  });
+  assert.ifError(result.error);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout + result.stderr, /too long.*Unix-socket fixtures/);
+  assert.doesNotMatch(result.stdout + result.stderr, /another suite|could not acquire suite lease/);
+  assert.deepEqual(readdirSync(temp), []);
 });
 
 test('suite workers keep in-process installer Git calls inside their fixtures under hook redirection', async (t) => {

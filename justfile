@@ -1,53 +1,52 @@
-# Front door for tests. Inner loop: `just test-fast`. Full suite: `just test`.
-# Gates: `just check` at pre-commit, `just gate` at pre-push. The git hooks call
-# `hook-pre-commit` and `hook-pre-push`, which run the very same commands under their own
-# target names so the report can price the hooks separately from the targets people type.
-# Fresh clone: `git config core.hooksPath .githooks` to install the hooks.
-# Every recipe runs through the vendored timing wrapper `tools/tt` (source of truth:
-# ops `bin/tt`), which appends one line per run to the shared timing log.
-# Design: ops docs/specs/2026-09-04-test-ci-audit-design.md.
-
+# Front door for recorded testing. Work on explicit modules with test-one;
+# test-fast is the fixed fast partition and test adds the slow partition.
+# Install hooks in a fresh clone: git config core.hooksPath .githooks.
+# Reference: docs/testing.md; tools/tt is vendored from ops.
 set quiet
+set positional-arguments
 
 tt := "python3 tools/tt"
-
-# The three commands, each written once, so a hook can never drift from the gate it
-# stands in for. `npm test` rather than the runner directly: package.json stays the one
-# definition of what the suite is.
-#
-# fast_cmd is the fast partition: everything that is not `*.slow.test.js`. The slow
-# partition holds the real-tmux pty test (test/tmux-pty.slow.test.js), which needs
-# tmux and util-linux `script` and takes seconds; test_cmd runs both modes in turn.
 fast_cmd := "npm test"
 test_cmd := "npm test && npm run test:slow"
-# No formatter, linter, or typechecker in this project yet; the hygiene checks and
-# `tasks check` are the gate. ops-docs checks the guide regions against identity.toml.
+one_cmd := "node tools/test-runner.mjs one"
 check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
 
-# Affected-only: the inner loop.
+# Coverage stays undeclared until the reviewed hosted qualification succeeds.
+ci_remote := "origin"
+ci_suite_refs := ""
+
 test-fast:
     {{tt}} test-fast -- sh -c '{{fast_cmd}}'
 
-# The full suite.
+# Pass each argument intact, outside the command string.
+test-one +args:
+    {{tt}} test-one -- sh -c '{{one_cmd}} "$@" 2>&1' test-one "$@"
+
 test:
     {{tt}} test -- sh -c '{{test_cmd}}'
 
-# Seconds, not minutes.
+# Only the inner test invocation records a timing row.
+test-full:
+    TT_FORCE=1 just test
+
 check:
     {{tt}} check -- sh -c '{{check_cmd}}'
 
 gate: check test
 
-# Regenerate the identity and family regions of README.md and AGENTS.md from
-# identity.toml and tools/family.toml. The only thing that edits those regions;
-# `check` refuses a commit while they are out of date.
+# Regenerate guide regions from identity.toml and tools/family.toml.
 docs:
     {{tt}} docs -- python3 tools/ops-docs write
 
-# What the pre-commit hook runs: `check`'s command under its own hook target.
 hook-pre-commit:
     {{tt}} hook-pre-commit -- sh -c '{{check_cmd}}'
 
-# What the pre-push hook runs: the same commands as `gate`, under one hook target.
+# Hook timers cover hygiene only; broad children record their own decisions.
 hook-pre-push:
-    {{tt}} hook-pre-push -- sh -c '{{check_cmd}} && {{test_cmd}}'
+    {{tt}} hook-pre-push -- sh -c '{{check_cmd}}'
+    just test
+
+# The shared hook selects this route only for declared hosted coverage.
+hook-pre-push-fast:
+    {{tt}} hook-pre-push-fast -- sh -c '{{check_cmd}}'
+    just test-fast

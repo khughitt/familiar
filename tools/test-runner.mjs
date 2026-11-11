@@ -5,7 +5,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { withLock } from '../src/bus/lock.js';
@@ -194,6 +194,21 @@ export function testFiles(root = process.cwd(), mode = 'fast') {
       : !name.endsWith('.slow.test.js') && !name.endsWith('.slow.test.mjs'));
 }
 
+export function focusedTestFiles(root, args) {
+  if (args.length === 0) throw new Error('select at least one test file');
+  const inventory = new Set(testInventory(root));
+  const selected = new Set();
+  for (const arg of args) {
+    const file = relative(resolve(root), resolve(root, arg));
+    if (arg.startsWith('-') || !inventory.has(file)) {
+      throw new Error(`not a discovered test file: ${arg}`);
+    }
+    if (selected.has(file)) throw new Error(`duplicate test file: ${arg}`);
+    selected.add(file);
+  }
+  return [...selected];
+}
+
 export async function runSuite(files, {
   tmpdir: getTmpdir = tmpdir, mkdtemp = mkdtempSync, spawn: spawnChild = spawn,
   rm = rmSync, realpath = realpathSync, rename = renameSync, reap = reapSuiteRoots,
@@ -277,9 +292,10 @@ export async function runSuite(files, {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const [mode = 'fast', ...extra] = process.argv.slice(2);
-  if (extra.length) {
-    throw new Error('usage: test-runner.mjs [fast | slow]');
+  if (mode !== 'one' && extra.length) {
+    throw new Error('usage: test-runner.mjs [fast | slow | one <file>...]');
   }
+  const files = mode === 'one' ? focusedTestFiles(process.cwd(), extra) : testFiles(process.cwd(), mode);
   assertSocketRoom(tmpdir());
-  process.exitCode = await runSuite(testFiles(process.cwd(), mode));
+  process.exitCode = await runSuite(files);
 }

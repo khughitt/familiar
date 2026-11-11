@@ -22,14 +22,21 @@ Install the hooks in a fresh clone with `git config core.hooksPath .githooks`.
 
 ## Gates
 
-Every recipe records its wall time through `tools/tt`. `just test-fast` runs the fast
-partition (`npm test`, i.e. `tools/test-runner.mjs fast`: everything but
-`*.slow.test.js`); `just test` runs it and then the slow partition, the real-tmux pty
-test, which needs tmux and util-linux `script`. `just check` is the pre-commit gate:
-`tools/ops-check`, `tools/ops-docs check` and `tasks check`. `just gate` is the
-pre-push one, check plus the full suite. `just docs` regenerates the identity and
-family regions of README.md and AGENTS.md from identity.toml and tools/family.toml;
-never edit inside those regions.
+Every executing target records its wall time through `tools/tt`. Work on explicit
+modules with `just test-one test/test-runner.test.js` (one or more discovered file
+paths, including slow/integration modules; no name filters). `just test-fast` runs
+the fixed fast partition (`npm test`); `just test` runs fast and then slow. The slow
+set is four JavaScript test modules plus the Noctalia cadence integration module;
+the real-tmux pty cases need tmux and util-linux `script`. `just test-full` deliberately
+forces the full suite and records only its inner target.
+
+`just check` is the mandatory pre-commit gate: `tools/ops-check`, `tools/ops-docs check`
+and `tasks check`. Both push routes run that hygiene first, then request full or
+fast tests through tt. Policy is absent and remote coverage remains undeclared in
+this preparation, so broad checks run and pushes take the full route. `just gate`
+is hygiene plus the full route. See [testing](docs/testing.md) for focused selection,
+policy/force behavior, coverage limits, timing boundaries and rollback. `just docs`
+regenerates guide regions from identity.toml and tools/family.toml; never edit them.
 
 ## Layout
 

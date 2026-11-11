@@ -87,7 +87,13 @@ MIT, with the exceptions in [LICENSING.md](LICENSING.md); see [LICENSE](LICENSE)
 
 ## Development
 
-Run tests with `just test` (or `npm test` without [just](https://just.systems)).
+Use `just test-one test/test-runner.test.js` while working on explicit modules.
+`just test-fast` runs the fast partition; `just test` runs fast and slow. Without
+[just](https://just.systems), `npm test` runs fast only and `npm run test:slow` runs
+slow. The slow set covers attention, relay, tmux pty and Noctalia cadence.
+`just test-full` forces the full suite; `just check` runs mandatory hygiene.
+Broad checks remain enabled during preparation, with remote coverage undeclared.
+See [testing](docs/testing.md) for commands, hook behavior, timing and rollback.
 The runner gives workers a temporary home and explicit environment, with host Git
 configuration and hook redirections excluded. Tests set any other needed variables.
 On macOS, run them with `TMPDIR=/tmp`: the per-user temporary directory is too long
