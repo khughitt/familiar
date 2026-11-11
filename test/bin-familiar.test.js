@@ -2369,12 +2369,11 @@ test('a line whose image is still provisional is rendered again on every poll', 
   const ledger = JSON.stringify({ seq: 1, pid: record.pid, starttime: record.starttime, ended: false,
     presented: 'working', held: { provisional: true, transport: 'tmux:not-this-terminal' } });
   writeFileSync(entryPath, ledger);
-  // This session owns its terminal, so the settle is not superseded; the made-up transport
-  // keeps it from writing to the runner's terminal. The requirement under test is only that a
-  // provisional ledger is never cached, whichever noop the settle answers.
+  // Another session owns the terminal, so settling stops before any platform's tty probe.
+  // The provisional ledger must still prevent caching even when settling is superseded.
   const owner = terminalOwnerPaths(paths(e).transmitDir, record);
   mkdirSync(dirname(owner.entryPath), { recursive: true });
-  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'provisional', seq: 1 }));
+  writeFileSync(owner.entryPath, JSON.stringify({ sessionId: 'another-session', seq: 2 }));
   const payload = { session_id: 'provisional', cwd: process.cwd() };
   for (let i = 0; i < 2; i++) {
     const result = statusline(e, [], payload);

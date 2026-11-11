@@ -395,7 +395,11 @@ test('a lock older than LOCK_STALE_MS or naming a dead pid is broken', async (t)
   writeFileSync(lock, JSON.stringify({ pid: process.pid, at: new Date(Date.now() - LOCK_STALE_MS - 1000).toISOString() }));
   assert.equal((await f.refresh()).stage, 'designed');
   assert.equal(existsSync(lock), false);
-  const dead = spawnSync('/bin/true', [], { env: { PATH: '/usr/bin:/bin' } }).pid;
+  const exited = spawnSync('true', [], { env: { PATH: '/usr/bin:/bin', HOME: f.home } });
+  assert.equal(exited.error, undefined);
+  assert.equal(exited.status, 0);
+  assert.ok(exited.pid > 0, 'the dead owner must be a real process, not a failed spawn');
+  const dead = exited.pid;
   writeFileSync(lock, JSON.stringify({ pid: dead, at: new Date().toISOString() }));
   assert.equal((await f.refresh()).stage, 'designed');
   assert.equal(existsSync(lock), false);

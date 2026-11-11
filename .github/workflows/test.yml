@@ -83,7 +83,7 @@ jobs:
             process.stdin.on("data", chunk => text += chunk);
             process.stdin.on("end", () => {
               const value = JSON.parse(text);
-              const names = ["familiar", "familiar-opencode", "familiar-teardown"];
+              const names = ["familiar", "familiar-opencode", "familiar-teardown", "familiar-teardown-codex"];
               const bins = new Set(value.subscribers.map(entry => entry.argv[0]));
               const [bin] = bins;
               if (value.schema !== 1
