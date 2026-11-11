@@ -193,7 +193,7 @@ test('a temporary root too long for the socket fixtures is refused with the reme
       && /suite root 78 bytes, at most 47/.test(error.message) && /set TMPDIR to a shorter directory/.test(error.message)
   );
   assertSocketRoom('/private/tmp', { platform: 'darwin', realpath });
-  assertSocketRoom('/Users/runner/work/_temp', { platform: 'darwin', realpath });
+  assertSocketRoom('/Volumes/ci/work/_temp', { platform: 'darwin', realpath });
   assertSocketRoom('/tmp', { platform: 'linux', realpath });
   assert.throws(() => assertSocketRoom(`/tmp/${'d'.repeat(30)}`, { platform: 'linux', realpath }), /at most 51/);
   // The canonical path is what binds, so a short symlink to a long directory is refused.
