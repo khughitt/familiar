@@ -75,6 +75,12 @@ retaining its Darwin output assertions and linked-command smoke. The Ubuntu Node
 26 clean-install smoke preserves its unlocked dependency install. Every job has a
 20-minute timeout, standard runners and read-only repository permission.
 
+Mac streams stdout through tee, captures stderr separately, then appends stderr to
+the same displayed log before checking the suite status and Darwin assertions.
+Node can make an inherited pipe nonblocking; merging it with the Python timing
+collector's stdout can lose output under backpressure. Separate stderr preserves
+the complete log and the original failure status; stderr appears after stdout.
+
 Suite jobs run portable hygiene only after npm ci and the pinned Luau fetch.
 They do not run tasks check or consult a developer task registry. The independent
 install smoke deliberately lacks Luau hydration and does not run that hygiene.

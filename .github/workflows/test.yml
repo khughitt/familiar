@@ -70,7 +70,11 @@ jobs:
           TMPDIR: /tmp
         run: |
           set -o pipefail
-          just test-fast 2>&1 | tee "$RUNNER_TEMP/familiar-tests.log"
+          # Keep Node's inherited stderr off tt's synchronous stdout pipe.
+          suite_status=0
+          just test-fast 2>"$RUNNER_TEMP/familiar-tests.stderr.log" | tee "$RUNNER_TEMP/familiar-tests.log" || suite_status=$?
+          cat "$RUNNER_TEMP/familiar-tests.stderr.log" | tee -a "$RUNNER_TEMP/familiar-tests.log"
+          if [ "$suite_status" -ne 0 ]; then exit "$suite_status"; fi
           # Not `! grep`: errexit ignores a negated command, so that form never fails the
           # step. Node prints a skipped test's name too, so the name checks below need this.
           if grep -F 'requires Darwin' "$RUNNER_TEMP/familiar-tests.log"; then exit 1; fi
