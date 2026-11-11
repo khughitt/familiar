@@ -70,7 +70,7 @@ automatic retry until green. Hosted coverage remains unqualified until the revie
 preparation revision and later activated head actually pass.
 
 TT_FORCE=1 is explicit at workflow scope. Ubuntu Node 22 and 26 each run the fast
-and slow partitions once via `just test`. macOS 14 Node 22 uses `just test-fast`,
+and slow partitions once via `just test`. macOS 15 Node 22 uses `just test-fast`,
 retaining its Darwin output assertions and linked-command smoke. The Ubuntu Node
 26 clean-install smoke preserves its unlocked dependency install. Every job has a
 20-minute timeout, standard runners and read-only repository permission.

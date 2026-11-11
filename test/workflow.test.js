@@ -40,7 +40,7 @@ test('the existing Linux matrix, clean-install smoke and macOS Node/platform cov
   assert.equal(workflow.jobs.test['runs-on'], 'ubuntu-latest');
   assert.deepEqual(workflow.jobs.test.strategy.matrix.node, ['22', '26']);
   assert.equal(workflow.jobs.smoke['runs-on'], 'ubuntu-latest');
-  assert.equal(workflow.jobs.macos['runs-on'], 'macos-14');
+  assert.equal(workflow.jobs.macos['runs-on'], 'macos-15');
   for (const [name, node] of [['smoke', '26'], ['macos', '22']]) {
     assert.equal(workflow.jobs[name].steps.find(s => s.uses === 'actions/setup-node@v4').with['node-version'], node);
   }
