@@ -577,12 +577,18 @@ test('a hundred focus changes with nothing unseen take no presentation lock', as
 });
 
 test('one seen transition takes one lock; repeated focus takes none', async (t) => {
-  const h = await harness(t, { windows: onWorkspace({ 101: 2 }) });
+  let releaseToast;
+  const toastGate = new Promise((resolve) => { releaseToast = resolve; });
+  t.after(() => releaseToast());
+  const h = await harness(t, { windows: onWorkspace({ 101: 2 }), send: () => toastGate });
   await h.boot();
   await h.capture('codex', 'PermissionRequest', { session: 'a' }, 101);
   h.touch('attention.json');
   await h.until(async () => Object.keys((await h.state()).desktop.origins).length === 1, 'attribution');
   await h.quiesce();
+  // Quiescence can precede a slow initial toast's finish; exclude that lock.
+  releaseToast();
+  await h.until(async () => episodeOf(await h.state(), 'codex:a').delivery.toast.status === 'delivered', 'initial toast finished');
   h.calls.locks = 0;
   h.stream.push({ WorkspaceActivated: { id: 2, focused: true } });
   await h.until(async () => episodeOf(await h.state(), 'codex:a').seen, 'seen');
