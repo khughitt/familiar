@@ -21,6 +21,7 @@ import { writeJsonAtomic } from '../src/bus/store.js';
 import { runLuau } from './helpers/luau.mjs';
 import { writeTheme } from './helpers/themes.js';
 import { loadContext } from '../src/observe/context.js';
+import { defaultProcessOps } from '../src/bus/proc.js';
 
 const skip = process.platform !== 'linux' ? 'requires Linux /proc ancestry' : false;
 const FAMILIAR = fileURLToPath(new URL('../bin/familiar', import.meta.url));
@@ -60,7 +61,7 @@ else if (command === 'notification-show') {
 } else process.exit(2);
 `;
 
-async function world(t) {
+async function world(t, { inspectLock = () => {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'familiar-attention-e2e-'));
   const relayDir = join(root, 'relay');
   const fakeBin = join(root, 'bin');
@@ -98,7 +99,7 @@ async function world(t) {
   // A terminal (sh) hosting an agent (sleep), so ancestry is real /proc ancestry.
   const terminal = async () => {
     // The agent gets no stdout, so killing it closes everything this test holds.
-    const shell = spawn('sh', ['-c', 'sleep 600 >/dev/null 2>&1 & echo $!; wait'], { env: { PATH: '/usr/bin:/bin' }, stdio: ['ignore', 'pipe', 'ignore'] });
+    const shell = spawn('sh', ['-c', 'sleep 600 >/dev/null 2>&1 & echo $!; wait'], { env: { PATH: '/usr/bin:/bin', HOME: root }, stdio: ['ignore', 'pipe', 'ignore'] });
     owned.push(shell);
     const [chunk] = await once(shell.stdout, 'data');
     const agent = Number(String(chunk).trim());
@@ -114,11 +115,15 @@ async function world(t) {
   setDesktop({});
   const deps = {
     paths, relay: { readSnapshot: () => readSnapshot({ paths: relayPaths }) }, relayProcess: processOps,
-    renderProcess: { startTimeOf: () => 20, ownerAlive: () => true, lockHolderAlive: () => true, pidExists: () => true },
+    // Real participants must recognize this observer as the live lock holder.
+    renderProcess: defaultProcessOps,
     adapterFor: () => ({ resolveSessionPid: () => t1.agent, resolveTerminalPid: () => t1.terminal }),
     gitContext: async () => ({ remote: null, repoRoot: null, repositoryRoot: null }),
     lookupProjectColor: async () => ({ color: null, root: null, warnings: [] }),
-    loadContext: () => loadContext({ paths }),
+    loadContext: () => {
+      inspectLock(paths.presentationLockPath);
+      return loadContext({ paths });
+    },
     emitTransition: async (args) => ({ kind: args.next ? 'unchanged' : 'ended' }),
   };
   // A harness hook: relay publishes the row, then familiar's observer runs.
@@ -215,6 +220,20 @@ function popupConsumer(w) {
 
 const settled = (state) => Object.values(state.episodes).every((e) => e.closed
   || !['pending', 'eligible', 'reserved'].includes(e.delivery.toast.status));
+
+test('the observer fixture holds a lock the real coordinator recognizes as live', { skip }, async (t) => {
+  let inspected = false;
+  const w = await world(t, { inspectLock(path) {
+    inspected = true;
+    const [pid, starttime] = readFileSync(path, 'utf8').split(':').map(Number);
+    assert.equal(pid, process.pid);
+    assert.equal(defaultProcessOps.ownerAlive(pid, { starttime }), true,
+      'a real participant must not reclaim the live observer lock');
+  } });
+  const result = await w.hook('claude-code', 'SessionStart', { session: 'boot' }, w.t1);
+  assert.equal(result.exitCode, 0, result.lines.join('\n'));
+  assert.equal(inspected, true);
+});
 
 test('one marker, one popup and one toast per episode, through repeat, rename, reconcile and restart', { skip, timeout: 120_000 }, async (t) => {
   const w = await world(t);
