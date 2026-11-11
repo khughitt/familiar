@@ -82,6 +82,24 @@ test('policy skips both broad recipes without launching a child or reporting an 
   }
 });
 
+test('installed checkout policy skips broad routes while force preserves child failure', (t) => {
+  const f = fixture(t, { policy: false });
+  const policyPath = join(REPO, '.tt.toml');
+  if (existsSync(policyPath)) copyFileSync(policyPath, join(f.root, '.tt.toml'));
+  for (const route of ['test', 'test-fast']) succeeds(f.just([route]));
+  assert.deepEqual(f.markers(), []);
+  assert.deepEqual(f.rows().map(({ target, execution }) => [target, execution]), [
+    ['test', 'skipped'], ['test-fast', 'skipped'],
+  ]);
+  for (const row of f.rows()) {
+    for (const field of ['exit', 'tests', 'selection', 'content', 'slowest']) assert.equal(row[field], null);
+  }
+  assert.notEqual(f.just(['test'], { TT_FORCE: '1', CHILD_EXIT: '7' }).status, 0);
+  assert.deepEqual(f.markers().map(m => m.kind), ['full']);
+  assert.equal(f.rows().at(-1).execution_reason, 'forced');
+  assert.equal(f.rows().at(-1).exit, 7);
+});
+
 for (const route of ['hook-pre-push', 'hook-pre-push-fast']) {
   test(`${route} runs only mandatory hygiene when broad policy is off`, (t) => {
     const f = fixture(t, { enabled: false });

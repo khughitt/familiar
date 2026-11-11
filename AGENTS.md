@@ -24,23 +24,26 @@ Install the hooks in a fresh clone with `git config core.hooksPath .githooks`.
 
 Every executing target records its wall time through `tools/tt`. Work on explicit
 modules with `just test-one test/test-runner.test.js` (one or more discovered file
-paths, including slow/integration modules; no name filters). `just test-fast` runs
-the fixed fast partition (`npm test`); `just test` runs fast and then slow. The slow
+paths, including slow/integration modules; no name filters). `just test-fast` selects
+the fixed fast partition (`npm test`); `just test` selects fast and then slow. Both
+broad recipes skip under the local policy unless explicitly forced. The slow
 set is four JavaScript test modules plus the Noctalia cadence integration module;
 the real-tmux pty cases need tmux and util-linux `script`. `just test-full` deliberately
 forces the full suite and records only its inner target.
 
 `just check` is the mandatory pre-commit gate: `tools/ops-check`, `tools/ops-docs check`
 and `tasks check`. Both push routes run that hygiene first, then request full or
-fast tests through tt. Policy is absent and remote coverage remains undeclared in
-this preparation, so broad checks run and pushes take the full route. `just gate`
-is hygiene plus the full route. Hosted jobs set TT_FORCE=1 explicitly: Linux Node
-22/26 run full, Mac Node 22 runs fast plus linked smoke, and Linux Node 26 checks
-clean installation. Jobs skip internal PR events, retain fork PRs and cancel older
-runs on the same workflow/ref; cancelled runs are unverified. Qualification and
-activation remain pending. See [testing](docs/testing.md) for focused selection,
-policy/force behavior, coverage limits, timing boundaries and rollback. `just docs`
-regenerates guide regions from identity.toml and tools/family.toml; never edit them.
+fast tests through tt. `.tt.toml` disables automatic `test`/`test-fast` execution;
+run fresh focused tests for changed behavior and always run hygiene. `just gate`
+is hygiene plus the full route's policy decision. Covered origin branches/tags
+select the fast push route; uncovered pushes warn and select full, whose broad
+child also skips. Hosted jobs set TT_FORCE=1 explicitly: Linux Node 22/26 run full,
+Mac Node 22 runs fast plus linked smoke, and Linux Node 26 checks clean installation.
+Jobs skip internal PR events, retain fork PRs and cancel older runs on the same
+workflow/ref; cancelled runs are unverified. See [testing](docs/testing.md) for
+focused selection, policy/force behavior, coverage limits, timing and rollback.
+`just docs` regenerates guide regions from identity.toml and tools/family.toml;
+never edit them.
 
 ## Layout
 

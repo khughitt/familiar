@@ -17,8 +17,9 @@ selections, options, directories, unknown paths, paths outside the checkout and
 normalized duplicates fail before a worker starts. It does not support name filters
 or automatic change selection. Do not list the entire inventory to evade policy.
 
-`test-fast` runs the fixed fast partition, also exposed by `npm test`. `test` runs
-fast and then slow (`npm run test:slow`). The slow inventory has four modules under
+`test-fast` selects the fixed fast partition, also defined by `npm test`. `test`
+selects fast and then slow (`npm run test:slow`); both broad recipes skip under the
+local policy unless forced. The slow inventory has four modules under
 test—attention signals, attention episodes, relay integration and real-tmux pty—and
 one Noctalia cadence integration module. Both .js and .mjs slow suffixes are excluded
 from fast runs. The pty cases require tmux and util-linux script; focused runs of a
@@ -36,21 +37,17 @@ are created because Unix-socket paths are short on that platform.
 recipes run the same hygiene first; failure prevents their broad child. The full
 route then calls `just test`; the fast route calls `just test-fast`.
 
-Preparation has no .tt.toml policy file and leaves `ci_suite_refs` empty, so local
-broad checks still run and every push takes the full route. `ci_remote` is origin.
-The hook uses the shared template and checks SSH keepalive before starting a gate.
-
-At the separately authorized activation, policy comes only from .tt.toml at the
-invoking code checkout's Git top level, validated by its tt wrapper. Detached records
-and sibling checkouts never supply it. The planned broad targets are test and
-test-fast; focused tests and hygiene remain mandatory. A policy skip launches no
-broad child and records null outcomes, rather than a passing suite. Invalid policy
-is an error. Explicit `TT_FORCE=1 just test` or `just test-full` deliberately runs
-broad verification; test-full records only the inner test invocation. Never persist
+The checkout's .tt.toml sets automatic_broad=false for test and test-fast. Policy
+comes only from that file at the invoking code checkout's Git top level, validated
+by its tt wrapper; detached records and sibling checkouts never supply it. Use
+fresh focused tests for changed behavior and always-run hygiene. A broad policy
+skip launches no child and records null outcomes, not a passing suite. Invalid
+policy is an error. `TT_FORCE=1 just test` or `just test-full` deliberately runs
+broad verification; test-full records only its inner test invocation. Never persist
 TT_FORCE in host configuration.
 
-Coverage is undeclared during preparation. After qualification, the intended refs
-are `refs/heads/* refs/tags/*` on origin, including branch names with slashes.
+The shared hook checks SSH keepalive before starting a gate. Declared hosted
+coverage is `refs/heads/* refs/tags/*` on origin, including branch names with slashes.
 Only a valid push whose non-deleted refs are all covered selects the fast recipe.
 Malformed input, another remote or uncovered refs select the full recipe. Policy-off
 still skips that broad child, and an uncovered push warns about undeclared hosted
@@ -61,13 +58,13 @@ verification is deferred separately; Linux evidence is not native Darwin evidenc
 
 ## Hosted verification
 
-The workflow is prepared for all branch and tag pushes and manual dispatch.
+The workflow runs on all branch and tag pushes and manual dispatch.
 In-repository PR events skip all verification jobs because their push already
 runs them; fork PR events retain verification. Workflow/ref concurrency cancels
 an older run on the same ref. A cancelled or incomplete revision is unverified;
-manual reruns require the rollout's explicit invocation allowance rather than an
-automatic retry until green. Hosted coverage remains unqualified until the reviewed
-preparation revision and later activated head actually pass.
+diagnose failures before rerunning and back off for known provider outages. Coverage
+declarations describe configured routes; check the actual latest-head job results
+to confirm execution.
 
 TT_FORCE=1 is explicit at workflow scope. Ubuntu Node 22 and 26 each run the fast
 and slow partitions once via `just test`. macOS 15 Node 22 uses `just test-fast`,
@@ -102,10 +99,9 @@ Historically hook-pre-push timed hygiene and the suite together. Its new series
 (and hook-pre-push-fast) measures hygiene only; broad children have their own timing
 rows. Do not compare those hook medians as if their workloads were identical.
 
-Activation requires separate accepted hosted qualification and authority. To roll
-it back, change automatic_broad to true in .tt.toml, update the installed-policy
-behavior assertion in test/test-routes.test.js to expect an executed child, and
-restore enabled test cadence in this guide and AGENTS.md. Preserve forced failure
+To restore automatic local broad tests, change automatic_broad to true in .tt.toml,
+update the installed-policy behavior assertion in test/test-routes.test.js to expect
+an executed child, and restore enabled test cadence in this guide and AGENTS.md. Preserve forced failure
 checks, the remote workflow, both push recipes and declared coverage refs. Covered
 pushes then run hygiene plus the fast partition; uncovered pushes run hygiene plus
 the full suite. Use test-full for deliberate full verification. Record the rollback's

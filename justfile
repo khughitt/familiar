@@ -11,9 +11,9 @@ test_cmd := "npm test && npm run test:slow"
 one_cmd := "node tools/test-runner.mjs one"
 check_cmd := "python3 tools/ops-check && python3 tools/ops-docs check && tasks check"
 
-# Coverage stays undeclared until the reviewed hosted qualification succeeds.
+# Hosted full-suite coverage includes every origin branch and tag.
 ci_remote := "origin"
-ci_suite_refs := ""
+ci_suite_refs := "refs/heads/* refs/tags/*"
 
 test-fast:
     {{tt}} test-fast -- sh -c '{{fast_cmd}}'

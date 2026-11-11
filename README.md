@@ -87,17 +87,18 @@ MIT, with the exceptions in [LICENSING.md](LICENSING.md); see [LICENSE](LICENSE)
 
 ## Development
 
+The test suite requires [just](https://just.systems).
 Use `just test-one test/test-runner.test.js` while working on explicit modules.
-`just test-fast` runs the fast partition; `just test` runs fast and slow. Without
-[just](https://just.systems), `npm test` runs fast only and `npm run test:slow` runs
-slow. The slow set covers attention, relay, tmux pty and Noctalia cadence.
-`just test-full` forces the full suite; `just check` runs mandatory hygiene.
-Broad checks remain enabled during preparation, with remote coverage undeclared.
-The prepared workflow forces both Linux full-suite matrix jobs, Mac fast/linked
-checks and the Linux install smoke. Internal PRs avoid duplicate suites, while fork
-PRs keep verification; cancellation is not a passing result. Hosted qualification
-and policy activation remain separate gates. See [testing](docs/testing.md) for
-commands, coverage limits, timing and rollback.
+`just test-fast` selects the fast partition; `just test` selects fast and slow.
+Both broad recipes skip automatically under `.tt.toml`; `just test-full` deliberately
+forces the full suite. `just check` always runs mandatory hygiene. The npm scripts
+are the underlying partition commands, and the slow set covers attention, relay,
+tmux pty and Noctalia cadence.
+The hosted workflow explicitly forces both Linux full-suite jobs, Mac fast/linked
+checks and the Linux install smoke on origin branch/tag pushes. Internal PRs avoid
+duplicate suites, while fork PRs keep verification. Cancellation is not a passing
+result. See [testing](docs/testing.md) for commands, coverage limits, timing and
+rollback.
 The runner gives workers a temporary home and explicit environment, with host Git
 configuration and hook redirections excluded. Tests set any other needed variables.
 On macOS, run them with `TMPDIR=/tmp`: the per-user temporary directory is too long
