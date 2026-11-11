@@ -59,6 +59,37 @@ optional absent in-tree theme fixtures and physical-terminal/live-desktop calibr
 outside automated coverage; a pty pass does not certify every terminal. Physical Mac
 verification is deferred separately; Linux evidence is not native Darwin evidence.
 
+## Hosted verification
+
+The workflow is prepared for all branch and tag pushes and manual dispatch.
+In-repository PR events skip all verification jobs because their push already
+runs them; fork PR events retain verification. Workflow/ref concurrency cancels
+an older run on the same ref. A cancelled or incomplete revision is unverified;
+manual reruns require the rollout's explicit invocation allowance rather than an
+automatic retry until green. Hosted coverage remains unqualified until the reviewed
+preparation revision and later activated head actually pass.
+
+TT_FORCE=1 is explicit at workflow scope. Ubuntu Node 22 and 26 each run the fast
+and slow partitions once via `just test`. macOS 14 Node 22 uses `just test-fast`,
+retaining its Darwin output assertions and linked-command smoke. The Ubuntu Node
+26 clean-install smoke preserves its unlocked dependency install. Every job has a
+20-minute timeout, standard runners and read-only repository permission.
+
+Suite jobs run portable hygiene only after npm ci and the pinned Luau fetch.
+They do not run tasks check or consult a developer task registry. The independent
+install smoke deliberately lacks Luau hydration and does not run that hygiene.
+
+Before preparation, Linux CI wrote separate fast/slow records under ci-test;
+it now writes one test record with reason forced. macOS changes from ci-test to
+test-fast/forced. These new series include hosted alongside local requests: separate
+by execution reason and host context, and keep the dated local before figures
+separate. Neither target renaming nor combining partitions measures a speedup.
+
+Qualification must account for actual counts, skips, modules with skips, zero
+excluded modules and capability omissions in all four jobs. Platform-specific cases,
+optional missing theme fixtures and physical terminal/desktop calibration remain
+explicit limits. Missing Luau or pty prerequisites must not become accepted skips.
+
 ## Timing and rollback
 
 Historically hook-pre-push timed hygiene and the suite together. Its new series

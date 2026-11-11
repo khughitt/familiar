@@ -93,7 +93,11 @@ Use `just test-one test/test-runner.test.js` while working on explicit modules.
 slow. The slow set covers attention, relay, tmux pty and Noctalia cadence.
 `just test-full` forces the full suite; `just check` runs mandatory hygiene.
 Broad checks remain enabled during preparation, with remote coverage undeclared.
-See [testing](docs/testing.md) for commands, hook behavior, timing and rollback.
+The prepared workflow forces both Linux full-suite matrix jobs, Mac fast/linked
+checks and the Linux install smoke. Internal PRs avoid duplicate suites, while fork
+PRs keep verification; cancellation is not a passing result. Hosted qualification
+and policy activation remain separate gates. See [testing](docs/testing.md) for
+commands, coverage limits, timing and rollback.
 The runner gives workers a temporary home and explicit environment, with host Git
 configuration and hook redirections excluded. Tests set any other needed variables.
 On macOS, run them with `TMPDIR=/tmp`: the per-user temporary directory is too long

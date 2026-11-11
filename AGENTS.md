@@ -34,7 +34,11 @@ forces the full suite and records only its inner target.
 and `tasks check`. Both push routes run that hygiene first, then request full or
 fast tests through tt. Policy is absent and remote coverage remains undeclared in
 this preparation, so broad checks run and pushes take the full route. `just gate`
-is hygiene plus the full route. See [testing](docs/testing.md) for focused selection,
+is hygiene plus the full route. Hosted jobs set TT_FORCE=1 explicitly: Linux Node
+22/26 run full, Mac Node 22 runs fast plus linked smoke, and Linux Node 26 checks
+clean installation. Jobs skip internal PR events, retain fork PRs and cancel older
+runs on the same workflow/ref; cancelled runs are unverified. Qualification and
+activation remain pending. See [testing](docs/testing.md) for focused selection,
 policy/force behavior, coverage limits, timing boundaries and rollback. `just docs`
 regenerates guide regions from identity.toml and tools/family.toml; never edit them.
 
