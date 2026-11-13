@@ -10,7 +10,7 @@ renderer ownership. This is operational guidance, not the full persisted-state s
 | Piece | Where | Role |
 | --- | --- | --- |
 | Reducer | `src/attention/model.js` | Episodes from relay's raw registry rows; dispositions; delivery reservations. Portable, no I/O. |
-| Store | `src/attention/store.js` | `attention.json` under the presentation lock; `attention-health.json` without it; the health rule. |
+| Store | `src/attention/store.js` | `$FAMILIAR_STATE_DIR/attention.json` under the presentation lock; `$FAMILIAR_STATE_DIR/attention-health.json` without it; the health rule. |
 | Observer capture | `src/observe/run.js` | Every relay observer envelope is captured before anything visual can fail (a teardown drops its visual first). |
 | CLI | `familiar attention status / dismiss / popup`, `familiar niri focus ID` | The only control surface. |
 | Coordinator | `familiar-niri watch` (`integrations/niri/coordinator.js`) | Attribution, workspace feed, heartbeat, toasts. One per desktop session. |
@@ -18,8 +18,8 @@ renderer ownership. This is operational guidance, not the full persisted-state s
 | Bar plugin | `integrations/noctalia-plugin/` (Noctalia 5.3, API 34) | Workspace pills, Alerts panel, health notice. |
 
 All files live in familiar's state directory (`FAMILIAR_STATE_DIR`, default
-`~/.local/state/familiar`): `attention.json`, `attention-health.json`,
-`attention-coordinator.lock` and `niri-workspaces.json`. An override must be an absolute
+`~/.local/state/familiar`): `$FAMILIAR_STATE_DIR/attention.json`, `$FAMILIAR_STATE_DIR/attention-health.json`,
+`$FAMILIAR_STATE_DIR/attention-coordinator.lock` and `$FAMILIAR_STATE_DIR/niri-workspaces.json`. An override must be an absolute
 path: the CLI, the popup and the bar plugin each refuse an empty or relative one.
 
 ## Episodes
@@ -86,13 +86,13 @@ surface plays it, and finally `delivered`, `failed`, `suppressed`, `interrupted`
 
 ## Coordinator, feed and health
 
-`familiar-niri watch` holds `attention-coordinator.lock` for its life (a second copy
+`familiar-niri watch` holds `$FAMILIAR_STATE_DIR/attention-coordinator.lock` for its life (a second copy
 refuses to start). It keeps three paths apart so none can stall another:
 
-- **Workspace feed** (`niri-workspaces.json`): Niri's event stream reduced to stable
+- **Workspace feed** (`$FAMILIAR_STATE_DIR/niri-workspaces.json`): Niri's event stream reduced to stable
   workspace IDs and published immediately, refreshed every second, with no lock. A delta
   before Niri's full snapshot fails the stream for restart rather than guessing.
-- **Heartbeat** (`attention-health.json`): every 2 s, with the boot ID and `NIRI_SOCKET`.
+- **Heartbeat** (`$FAMILIAR_STATE_DIR/attention-health.json`): every 2 s, with the boot ID and `NIRI_SOCKET`.
   A starting coordinator first records itself in the saved state with the desktop
   `unknown`, so nothing is claimed or classified on its predecessor's readings.
   It is healthy only while under 10 s old, from this boot and this desktop session, and

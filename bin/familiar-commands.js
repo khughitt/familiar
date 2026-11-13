@@ -999,7 +999,7 @@ export async function main({ command, args: rest, color, mode }) {
           // C=1 (the image does not move the cursor) and then advances by hand
           // with exactly `rows` newlines, so consecutive images always stack
           // vertically. Side by side would need a placement-capable
-          // emitter that does not exist — see the spec's docs/terminal-rendering.md#failure-and-evidence-gaps.
+          // emitter that does not exist — see docs/terminal-rendering.md#failure-and-evidence-gaps.
           rendered = transmit(readFileSync(assets.idle.terminal), { rows: viewRows, frame });
         }
       } catch (error) {

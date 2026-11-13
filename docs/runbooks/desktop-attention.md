@@ -387,7 +387,7 @@ and requires the same three restarts immediately after the downgrade.
 
 ## Corrupt-state recovery
 
-The observer and coordinator report a corrupt `attention.json` and leave its bytes
+The observer and coordinator report a corrupt `$FAMILIAR_STATE_DIR/attention.json` and leave its bytes
 alone; the independent heartbeat may still look healthy. Preserve that file with the
 operation record if needed for diagnosis, then remove only
 `"${FAMILIAR_STATE_DIR:-$HOME/.local/state/familiar}/attention.json"`. Leave the other

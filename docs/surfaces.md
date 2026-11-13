@@ -106,7 +106,7 @@ are different evidence; see [the native boundary](terminal-rendering.md#native-p
 
 ## Codex selection
 
-Trusted project `.codex/config.toml` can override the user config. Familiar uses
+Trusted project `<project>/.codex/config.toml` can override the user config. Familiar uses
 stable `custom:familiar-<theme>--<member>` ids, separating theme/member to avoid
 collisions. The compiler stamps the sheet hash; convergence refuses missing,
 incomplete or differently compiled pets, and tracked/unmanaged project configs.

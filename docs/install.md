@@ -64,8 +64,8 @@ reported explicitly. With no receipt, choose a source for `familiar theme add SO
 
 `theme add --replace` validates the new copy first, then moves the installed pack
 and receipt into a backup directory,
-`~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `pack/` and
-`receipt.json`. It installs the new pack, writes its receipt, and only then deletes
+`~/.config/familiar/themes/.replace-backup/<id>-<instant>/`, as `<backup>/pack/` and
+`<backup>/receipt.json`. It installs the new pack, writes its receipt, and only then deletes
 the backup and, when no other backup remains, the `.replace-backup` directory itself. If the install fails after the old theme was moved aside, the new copy
 is removed and the old pack and receipt are moved back; the error names the cause.
 `theme add` and `theme remove` share one lock, so neither runs while another is
@@ -85,7 +85,7 @@ to <theme-receipts>/<id>.json, or remove it
 ```
 
 It names only the entries still in the backup. If the old pack already went back and
-only its receipt did not, it names only `receipt.json`, and `themes/<id>` then holds
+only its receipt did not, it names only `<backup>/receipt.json`, and `themes/<id>` then holds
 the old pack: leave that directory alone. Make exactly the moves it names. The
 commands below make the same moves, each only when the backup still holds that entry:
 
@@ -236,7 +236,7 @@ familiar install pets --sync-projects
 ```
 
 Run it from inside the project you want a pet in. Codex draws nothing until a
-`[tui] pet` setting exists, so on a machine with no `identities.yaml` — which is
+`[tui] pet` setting exists, so on a machine with no `~/.config/familiar/identities.yaml` — which is
 what a fresh `familiar theme add` leaves — the current repository is the only
 thing to select, and this is what selects it.
 
@@ -254,7 +254,7 @@ selection is the repository's face: the member its family's theme gives it with 
 role. A Codex session started with `FAMILIAR_ROLE` set leaves the selection as it is
 and says so in one line, so a per-launch role is never written into the repository.
 
-**Single-theme pet ids.** Familiar recognises a managed `.codex/config.toml` only
+**Single-theme pet ids.** Familiar recognises a managed `<project>/.codex/config.toml` only
 when it names a per-theme id. A managed file that names a single-theme id
 `custom:familiar-<member>` is therefore not Familiar's: `install pets --sync-projects`
 refuses it by path, and convergence reports it, with the same
@@ -275,10 +275,10 @@ Pet directories under `~/.codex/pets/` named `familiar-<member>`, with no `--` i
 the name, are never selected and can be deleted. Keep every
 `familiar-<theme>--<member>` directory: those are the current pets.
 
-Familiar creates managed project `.codex/config.toml` files and excludes them
+Familiar creates managed project `<project>/.codex/config.toml` files and excludes them
 from each repository. In a Git worktree the config is written in that worktree
 only, with the member its repository's pins choose; the exclusion is one line in
-the repository's shared `info/exclude`, so it covers every worktree and is never
+the repository's shared `<git-common-dir>/info/exclude`, so it covers every worktree and is never
 duplicated. Pinned paths and the current directory are the only targets: other
 worktrees are not discovered. It never overwrites an existing tracked config; review
 its printed setting instead. It refuses an existing unmanaged untracked config,
@@ -295,7 +295,7 @@ pet = "custom:familiar-cats--ginger"
 For a project-specific pet, use `familiar whoami <project>` to find the assigned
 member (`familiar projects <dir>...` draws several at once, each sprite over its
 name, and says whether the project colour, a pin or the project's hash chose
-each slot), then set `pet = "custom:familiar-<theme>--<member>"` in that trusted project's `.codex/config.toml`.
+each slot), then set `pet = "custom:familiar-<theme>--<member>"` in that trusted project's `<project>/.codex/config.toml`.
 Restart an existing Codex session after syncing.
 
 ## OpenCode
@@ -303,7 +303,7 @@ Restart an existing Codex session after syncing.
 Relay installs the server plugin; Familiar installs the sprite renderer. Plan the relay change, review it, and
 apply it before installing the sprite. Save relay's exact postimage before
 Familiar removes the old server entry; rollback needs those bytes. With plain
-`opencode.json` and `tui.json` (no `.jsonc` siblings), run:
+`$OPENCODE_DIR/opencode.json` and `$OPENCODE_DIR/tui.json` (no `.jsonc` siblings), run:
 
 ```sh
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
@@ -328,8 +328,8 @@ cp -p "$OPENCODE_DIR/tui.json" "$INSTALL_BACKUP/tui.after-familiar"
 
 Create the OpenCode config directory first if it is absent. Relay preserves
 JSONC comments and existing server plugin entries. Familiar registers only the
-sprite renderer in `tui.json` and removes its old server plugin from
-`opencode.json` when its ownership is verifiable; it preserves unrelated entries.
+sprite renderer in `$OPENCODE_DIR/tui.json` and removes its old server plugin from
+`$OPENCODE_DIR/opencode.json` when its ownership is verifiable; it preserves unrelated entries.
 
 If you keep `tui.jsonc`, Familiar prints the renderer entry to add by hand and
 exits nonzero until that manual work is done. An old Familiar server plugin in
@@ -504,9 +504,9 @@ Start the desktop coordinator once per Niri session:
 spawn-sh-at-startup "familiar-niri watch"
 ```
 
-It holds `attention-coordinator.lock`, so a second copy refuses to start. It writes the
-session map (`niri-windows.json`), the workspace feed (`niri-workspaces.json`) and the
-heartbeat (`attention-health.json`), attributes agent attention to the workspace that
+It holds `$FAMILIAR_STATE_DIR/attention-coordinator.lock`, so a second copy refuses to start. It writes the
+session map (`$FAMILIAR_STATE_DIR/niri-windows.json`), the workspace feed (`$FAMILIAR_STATE_DIR/niri-workspaces.json`) and the
+heartbeat (`$FAMILIAR_STATE_DIR/attention-health.json`), attributes agent attention to the workspace that
 hosts each agent, and sends one generic desktop toast per new request through
 `noctalia msg notification-show`. On niri-material it also sets each terminal's
 `familiar` window signal, which a glass ring whose color source is `familiar` draws in

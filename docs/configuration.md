@@ -7,7 +7,7 @@ where those choices appear. Theme formats belong to the
 
 ## Files and defaults
 
-Familiar reads `~/.config/familiar/config.yaml`, `scheme.json` and `identities.yaml`.
+Familiar reads `~/.config/familiar/config.yaml`, `~/.config/familiar/scheme.json` and `~/.config/familiar/identities.yaml`.
 `FAMILIAR_CONFIG_DIR` replaces that directory; `FAMILIAR_STATE_DIR` replaces the
 state directory and must be absolute and nonempty. `FAMILIAR_THEMES_DIR` overrides
 the shipped-theme search directory. User themes shadow shipped themes by id.
@@ -64,7 +64,7 @@ and its `members:` map.
   checkout declared with `git config core.worktree <main checkout>`; until then
   every hook that discovers identity reports an error naming `core.worktree`
   (session-end hooks skip discovery). Metadata stored in a directory named
-  `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
+  `.git` elsewhere, as in `<example-store>/.git`, looks to Git like a repository at
   `store` and is not always detectable: declare `core.worktree` there too.
 - **After upgrading.** Records from before the identity upgrades may lack a
   repository anchor, `projectColor`, `family` or `role`. They leave the bus until each session's
@@ -82,7 +82,7 @@ cannot be parsed, a `name` that is not an id, a file over 65536 bytes, or a syml
 path that leaves the root is an error: the hook prints one line and writes nothing.
 The family is read once per session and checkout, with the colour.
 
-The family selects the theme. `config.yaml` names the default theme and maps families to
+The family selects the theme. `~/.config/familiar/config.yaml` names the default theme and maps families to
 themes:
 
 ```yaml
@@ -130,7 +130,7 @@ $ FAMILIAR_ROLE=reviewer familiar whoami
 also carry a world: a background per locale, with places where members stand. Every
 session shows the `home` locale. `familiar theme validate <dir>` prints a theme's roles
 and the default member, and its world's locales with their place counts (or
-`world none`). The identity in `intent.json` carries the family, theme, role, member
+`world none`). The identity in `$FAMILIAR_STATE_DIR/intent.json` carries the family, theme, role, member
 source and, when the theme has a world, the locale image and its places.
 
 ## Project colour
@@ -158,7 +158,7 @@ familiar scheme set dark --sat 1
 familiar-noctalia scheme-sync
 ```
 
-`scheme set` writes `scheme.json` with `mode` and `satScale`. The Noctalia adapter
+`scheme set` writes `~/.config/familiar/scheme.json` with `mode` and `satScale`. The Noctalia adapter
 is a separate writer of that same input; set its dark-mode hook to the final
 command when Noctalia should choose the scheme. Missing/invalid scheme data is
 an explicit error. The core never asks a bar for its colours.
