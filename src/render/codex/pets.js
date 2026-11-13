@@ -15,7 +15,7 @@ export const SPRITESHEET_PATH = 'assets/sheet.png';
 // an id, so the pair decodes uniquely (`forest-cats`/`ginger` and `forest`/`cats-ginger`
 // differ only in where the `--` falls). Codex 0.166.0 loads and draws a custom pet so
 // named (probed 2026-11-02 by the method of
-// docs/specs/2026-09-05-codex-identity-parity-design.md §6.1).
+// docs/terminal-rendering.md#native-pet-boundary).
 const PET_PREFIX = 'familiar-';
 const PET_SEPARATOR = '--';
 

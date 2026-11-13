@@ -25,7 +25,7 @@ export function bindingFields(intent) {
 
 const sameBinding = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-// THE EMISSION CRITICAL SECTION (docs/specs/2026-09-18-tmux-rendering-design.md §3.5).
+// THE EMISSION CRITICAL SECTION (docs/terminal-rendering.md#participants-and-emission-ownership).
 //
 // Everything that decides create-versus-update-versus-nothing, and every byte written to
 // the agent's terminal, happens inside `lock`, in this order: read the ledger, gate on

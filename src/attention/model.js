@@ -2,7 +2,7 @@
 // surface has done about it. It reads relay's raw registry rows (never familiar's folded
 // pet state), so a worker's activity cannot erase its root's request. It knows nothing
 // of sprites, compositors or files; callers persist its state and supply the desktop.
-// Spec: docs/specs/2026-10-24-desktop-attention-design.md.
+// Current behavior: docs/attention.md#episodes.
 import { createHash } from 'node:crypto';
 import { adapterFor } from 'relay';
 import { HARNESSES } from '../bus/harnesses.js';

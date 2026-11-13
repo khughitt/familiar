@@ -5,7 +5,7 @@
 // notification IPC. The heartbeat has its own file and timer, so a held lock or a
 // quiet desktop never looks like a dead coordinator. Attention work is debounced,
 // takes the lock only for a real change, and does its IPC outside it.
-// Spec: docs/specs/2026-10-24-desktop-attention-design.md.
+// Current behavior: docs/attention.md#coordinator-feed-and-health.
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { reduceAttention } from '../../src/attention/model.js';

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 
-// Offline check of a returned §11 trace against the evidence contract in
-// docs/specs/2026-08-22-macos-support-design.md §11.1. Every check is internal to one
+// Offline check of a returned trace against the evidence contract in
+// docs/terminal-rendering.md#trace-records. Every check is internal to one
 // record: the emitter's own expectation travels with the bytes it produced, so this
 // never has to reconstruct intent from the byte stream or correlate two records.
 
-// The ringing states, taken from the DESIGN (§11.2), not from transition.js. If this list and
+// The ringing states, specified in docs/terminal-rendering.md#transport, not from transition.js. If this list and
 // transition.js's RINGS ever disagree, the gate fails -- which is the entire point of not
 // letting the code under test tell us what it was supposed to do.
 const RINGING = new Set(['needs-input', 'needs-approval', 'error']);

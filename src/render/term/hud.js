@@ -39,7 +39,7 @@ export const GLYPHS = Object.freeze({
   idle: '●',
   working: '⚡',
   'needs-input': '?',
-  // UNREACHABLE ON THIS SURFACE. surfaces.md:120 measured the status line disappearing while
+  // UNREACHABLE ON THIS SURFACE. docs/surfaces.md#terminal-and-statusline records it disappearing while
   // a permission dialog is up, and the docs say the same. Kept for the other surfaces, and so
   // that GLYPHS covers STATES exactly rather than five of six.
   'needs-approval': '!',

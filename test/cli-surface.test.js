@@ -1,5 +1,5 @@
 // familiar's declared command table equals its rows in tools/cli.toml, and the binary
-// behaves as the CLI vocabulary requires (ops docs/specs/2026-09-20-cli-conventions-design.md).
+// behaves as the CLI vocabulary requires (tools/cli.toml and tools/cli_surface.py).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';

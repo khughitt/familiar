@@ -6,7 +6,7 @@ import {
 import { petUsable } from './pet-stamp.js';
 
 // ONE REPOSITORY, ONE LAUNCH LATE BY CONSTRUCTION.
-// docs/specs/2026-09-05-codex-identity-parity-design.md §6.1 measured it: Codex
+// docs/surfaces.md#codex-selection records the bounded observation: Codex
 // reads `[tui] pet` at TUI start and no hook runs before the first turn, so what
 // this writes is read by the NEXT launch. That is the ceiling, not a bug to fix
 // here -- which is why nothing below tries to signal Codex.
