@@ -1,9 +1,9 @@
 # Desktop attention
 
-When an agent needs you, familiar's popup, the bar's workspace pill and a desktop toast
-agree about what happened and where. This page describes how that works today. Design
-decision record: `docs/specs/2026-10-24-desktop-attention-design.md`; activation and
-rollback: `docs/runbooks/desktop-attention-rollout.md`.
+Type: guide; document types 1. Diagnose current attention behavior across the
+popup, workspace pills and toasts. [Desktop operations](runbooks/desktop-attention.md)
+covers startup, native acceptance and rollback; [surfaces](surfaces.md) explains
+renderer ownership. This is operational guidance, not the full persisted-state schema.
 
 ## Pieces
 
@@ -165,7 +165,7 @@ requiring and doing what they did, so alerts keep working between crashes. The p
 logic validates schema 2 but does not compute `crashes`.
 `familiar attention status` reports `health.crashes` beside `health.status`.
 
-## The bar plugin
+## Workspace pills
 
 The plugin's service reads the feed every 50 ms and attention and health every 250 ms,
 and shares what it read through `noctalia.state`. Each bar's widget draws pills for its

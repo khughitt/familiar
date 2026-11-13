@@ -1,5 +1,9 @@
 # Testing
 
+Type: guide; document types 1. Run the project’s focused checks, hygiene and explicit
+broad verification. See [installation](install.md) and the [terminal contract](terminal-rendering.md)
+for prerequisites and evidence boundaries.
+
 Use the just front door so each invocation is timed by `tools/tt`:
 
 ```sh
@@ -82,11 +86,9 @@ Suite jobs run portable hygiene only after npm ci and the pinned Luau fetch.
 They do not run tasks check or consult a developer task registry. The independent
 install smoke deliberately lacks Luau hydration and does not run that hygiene.
 
-Before preparation, Linux CI wrote separate fast/slow records under ci-test;
-it now writes one test record with reason forced. macOS changes from ci-test to
-test-fast/forced. These new series include hosted alongside local requests: separate
-by execution reason and host context, and keep the dated local before figures
-separate. Neither target renaming nor combining partitions measures a speedup.
+Timing series combine hosted and local requests: separate execution reason and host
+context before comparing them. Renaming a target or combining partitions is not a
+measured speedup; historical before-series comparisons belong with their evidence.
 
 Qualification must account for actual counts, skips, modules with skips, zero
 excluded modules and capability omissions in all four jobs. Platform-specific cases,

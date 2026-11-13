@@ -15,6 +15,10 @@ events dispatched by relay and renders a member of an installed theme chosen by
 project and role; themes and their art install separately.
 """
 # Documents that are the authority for what is built or decided; each must be tracked.
-authority = ["docs/surfaces.md", "docs/install.md", "docs/attention.md"]
+authority = ["docs/surfaces.md", "docs/install.md", "docs/attention.md", "docs/terminal-rendering.md"]
 # Directories with their own identity.toml, README.md, and AGENTS.md.
 subsystems = []
+
+[documents]
+standard = 1
+references = ["docs/runbooks/desktop-attention.md"]

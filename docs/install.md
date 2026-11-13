@@ -1,11 +1,12 @@
 # Install
 
-Familiar requires Node.js 22 or newer and Git 2.31 or newer. Themes install
-separately; this engine ships no art.
+Type: guide; document types 1.
 
-## Shared setup (macOS and Linux)
+Requires Node.js 22+ and Git 2.31+. Art installs separately. See
+[configuration](configuration.md), [surface support](surfaces.md) and the
+[desktop operations guide](runbooks/desktop-attention.md).
 
-Install a checkout and choose a scheme and theme:
+## Fresh installation
 
 ```sh
 git clone https://github.com/khughitt/familiar.git
@@ -14,33 +15,32 @@ npm install
 npm link
 familiar scheme set dark
 familiar theme add <theme-url-or-directory>
+familiar theme list
 ```
 
-`familiar theme add` accepts a public HTTPS repository or a local theme
-directory, such as your working checkout. It installs only the pack itself
-(`theme.yaml`, licence files, and each member's sprite directory), validates
-exactly those files, and atomically installs them into
-`~/.config/familiar/themes/<id>`. Anything else in the checkout (tool
-workspaces, docs, build output) is left behind. A theme that is already installed
-refuses a second `theme add`; see [Replacing and removing
-themes](#replacing-and-removing-themes).
+`theme add` installs art; it does not select it. Set `theme: <installed-id>` in
+`~/.config/familiar/config.yaml`, preserving any other settings, then run
+`familiar whoami`. The id comes from the pack's `theme.yaml` and `theme list`.
+See [theme selection](configuration.md) for family overrides. A fresh clone
+has no art and the default theme name alone cannot make a pet.
 
-macOS agent lifecycle is supported. The portable core is CI-backed, and the
-Darwin agent resolver was activated on live-hook evidence captured on a physical
-Mac on 2026-08-23 (`docs/ref/2026-08-23-macos-agent-process-spike.md`), covering
-Claude Code, Codex, and OpenCode in both Kitty and Ghostty.
+Use stable explicit executables throughout harness setup:
 
-Familiar's own terminal rendering — graphics, tint, and bell — is confirmed for
-**Claude Code and Codex** in Kitty 0.46.2 and Ghostty 1.3.1 on macOS 26.6.2, under
-Node 22 and Node 25, by a byte-level physical-Mac gate run 2026-08-24 to 2026-08-28
-(`docs/ref/2026-08-24-macos-terminal-smoke.md`). That claim covers exactly those
-terminal and agent versions. **The OpenCode sprite renderer remains provisional**:
-the same gate exercised it and found the sprite never changes pose. tmux is supported
-inside Kitty and Ghostty with the limits in `docs/surfaces.md` (full-width panes on tmux
-≤ 3.7c; status-line colour depth; multiple attached clients with different outer
-terminals are not addressed). Intel Macs, macOS 13, and other terminals stay unclaimed.
+```sh
+FAMILIAR_BIN="$PWD/bin/familiar"
+RELAY_BIN="$PWD/node_modules/.bin/relay"
+```
 
-### Replacing and removing themes
+`npm install` installs the pinned relay dependency too; the second path is its
+CLI. Keep this checkout and its dependencies available to installed commands.
+A shared npm link is optional when invoking these paths directly.
+
+`theme add` accepts a public HTTPS repository or a local directory. It copies only
+`theme.yaml`, licence files and each member's sprite directory, validates that copy
+and atomically installs it under `~/.config/familiar/themes/<id>`. Checkout docs,
+workspaces and build output are excluded. A second add refuses unless replacing.
+
+## Themes
 
 ```sh
 familiar theme add --replace <theme-url-or-directory>   # install a new copy over an installed theme
@@ -71,7 +71,7 @@ is removed and the old pack and receipt are moved back; the error names the caus
 `theme add` and `theme remove` share one lock, so neither runs while another is
 under way.
 
-#### Rolling back from a surviving backup
+## Theme recovery
 
 If moving the old theme back fails too, the backup stays where it is and nothing
 deletes it: not a later `theme add`, whose staging sweep never reaches it, nor
@@ -123,52 +123,29 @@ Two other errors leave a backup directory that is not a rollback:
 
 With `FAMILIAR_CONFIG_DIR` set, every `~/.config/familiar` above is that directory.
 
-### Relay observers and lifecycle hooks (operator cutover)
+## Relay and harness setup
 
-Familiar consumes relay's registry as an observer. Relay owns lifecycle hooks,
-process admission, and the agent registry; Familiar owns presentation state.
-The steps below change harness configuration and are the **operator cutover**,
-tracked separately as `hq-539508`. Updating this checkout does not perform them.
-
-Before upgrading in place or editing configuration, retain a complete, working
-pre-migration Familiar checkout at a stable absolute path, including its installed
-dependencies. Install the new revision in a different checkout. Keep the old
-`bin/familiar` (which still accepts `hook`), `integrations/opencode/plugin.js`,
-its imported modules, and sprite renderer available until cutover is accepted.
-An old hook command pointing at the new CLI, or a restored plugin entry pointing
-at a deleted file, is **not** a working rollback.
-
-While harnesses are stopped, ensure all old Familiar hook commands, Claude
-`statusLine`, OpenCode server/TUI plugin entries and Familiar service/launcher
-references resolve into that retained checkout. If the original checkout was
-already upgraded, first recover the previous revision and its dependencies into
-a separate checkout and change those references to its absolute paths. Inspect
-commands and imported plugin files there before recording the rollback baseline.
-Do not delete old Familiar state during this cutover.
-
-Create a fresh private backup directory (replace the example path):
+Relay owns lifecycle hooks, process admission and the agent registry; Familiar
+observes events and owns presentation state. Stop the affected harness before
+editing its configuration. Choose a new durable private backup directory:
 
 ```sh
-FAMILIAR_NEW=/absolute/path/to/new/familiar/bin/familiar
-CUTOVER_BACKUP=/absolute/path/to/retained-cutover-backup
-mkdir -m 700 "$CUTOVER_BACKUP"
+INSTALL_BACKUP=/absolute/path/to/private-install-backup
+mkdir -m 700 "$INSTALL_BACKUP"
+SUBSCRIBERS="${XDG_CONFIG_HOME:-$HOME/.config}/relay/subscribers.json"
 ```
 
-The cutover commands below invoke the new checkout explicitly, so they do not
-depend on which version a shared launcher selects. Keep the backup directory,
-old checkout, and relay's artifacts for the whole rollback window. Before each configuration edit, save its exact bytes, permissions, and
-whether it existed; save the result after each edit too. This includes relay's
-subscribers file and any launcher/service changes. Restoring an absent file means
-removing only the file created by that operation. Stop on unexpected drift rather
-than overwrite later edits. The examples below assume existing plain JSON harness
-files; JSONC/manual edits need the same before/after snapshots of the actual files.
+Before every edit, retain exact bytes, permissions and whether the target existed;
+retain its postimage too. An absent preimage is restored by removing only the
+created file. Stop on drift rather than overwrite subsequent changes. Include
+subscribers and any launcher/service changes. Keep artifacts for the rollback window.
+The examples below use plain JSON; JSONC manual edits need the same exact snapshots.
 
-Install relay and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/main/docs/runbooks/hook-install-rollback.md),
-including the platform evidence gates. Make the relay CLI available on `PATH`
-from that installation. Generate Familiar's observer document:
+Use the relay CLI installed above and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/main/docs/runbooks/hook-install-rollback.md),
+including the platform evidence gates. Generate Familiar's observer document:
 
 ```sh
-"$FAMILIAR_NEW" setup relay
+"$FAMILIAR_BIN" setup relay
 ```
 
 Review stdout and merge its `subscribers` entries into relay's
@@ -183,7 +160,7 @@ when starting OpenCode.
 
 Relay's installer plans by default. Inspect the JSON plan, then repeat the same
 arguments with `--apply --artifact <file>` to write the configuration and save a
-rollback artifact. Keep that artifact; `relay rollback --artifact <file>` restores
+rollback artifact. Keep that artifact; `"$RELAY_BIN" rollback --artifact <file>` restores
 the recorded preimages only while each target still matches its saved before or
 after bytes. Later edits to the same file must be reversed first. Relay's artifact
 covers only relay's changes, not Familiar's installer, status line, subscribers,
@@ -194,41 +171,43 @@ hook commands, relay records the Node executable used by its installer; use its
 under a version manager. Existing guard subscribers may require `--evidence`;
 follow relay's guide rather than removing them to make installation pass.
 
-### Claude Code
+## Claude Code
 
 Familiar's Claude Code settings fragment now carries only its status line:
 
 ```sh
-"$FAMILIAR_NEW" setup claude-code
+"$FAMILIAR_BIN" setup claude-code
 ```
 
+Create the parent and an empty JSON object if the target is absent; never replace
+an existing file with an empty one. Record that absence for rollback.
 Save the baseline before merging stdout into `~/.claude/settings.json`; save
 that merged result before relay's edit. Then plan and apply relay's hooks,
-retiring Familiar's old hook entries:
+using the current lifecycle adapter:
 
 ```sh
-cp -p "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.before-familiar"
+cp -p "$HOME/.claude/settings.json" "$INSTALL_BACKUP/claude.before-familiar"
 # Merge the reviewed statusLine fragment now, then:
-cp -p "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.after-familiar"
-relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
-  --target "$HOME/.claude/settings.json" --retire familiar --json
+cp -p "$HOME/.claude/settings.json" "$INSTALL_BACKUP/claude.after-familiar"
+"$RELAY_BIN" install --harness claude-code --subscribers "$SUBSCRIBERS" \
+  --target "$HOME/.claude/settings.json" --json
 # After reviewing the plan:
-relay install --harness claude-code --subscribers "$HOME/.config/relay/subscribers.json" \
-  --target "$HOME/.claude/settings.json" --retire familiar \
-  --apply --artifact "$CUTOVER_BACKUP/claude-code-install.json"
+"$RELAY_BIN" install --harness claude-code --subscribers "$SUBSCRIBERS" \
+  --target "$HOME/.claude/settings.json" \
+  --apply --artifact "$INSTALL_BACKUP/claude-code-install.json"
 ```
 
-### Codex lifecycle hooks
+## Codex
 
 Plan and apply relay's Codex hooks instead of generating Familiar hooks:
 
 ```sh
-relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.json" \
-  --target "$HOME/.codex/hooks.json" --retire familiar --json
+"$RELAY_BIN" install --harness codex --subscribers "$SUBSCRIBERS" \
+  --target "$HOME/.codex/hooks.json" --json
 # After reviewing the plan:
-relay install --harness codex --subscribers "$HOME/.config/relay/subscribers.json" \
-  --target "$HOME/.codex/hooks.json" --retire familiar \
-  --apply --artifact "$CUTOVER_BACKUP/codex-install.json"
+"$RELAY_BIN" install --harness codex --subscribers "$SUBSCRIBERS" \
+  --target "$HOME/.codex/hooks.json" \
+  --apply --artifact "$INSTALL_BACKUP/codex-install.json"
 ```
 
 The hook targets must already contain valid configuration; for a fresh target,
@@ -246,268 +225,7 @@ This launch requirement applies to Familiar's presentation and automatic project
 selection. Codex's native pet renderer works independently, using the installed
 art and `[tui] pet` setting described [below](#codex-pets).
 
-### Moving a host to spec-version 2 themes
-
-A theme pack at spec-version 1 (members declare `slot` or `slots`, no `roles`) is
-refused by a build that reads spec-version 2, and every session on the host faults on
-it until the pack is replaced. A spec-version 2 pack declares `roles:` on its members
-with exactly one `default` holder. Run these per host, in order; each host's owner runs
-them, and the window between steps 1 and 2 is the time it takes to type them.
-
-1. Install the new familiar build. When the checkout that `familiar` on `PATH` resolves
-   to is the one being updated (`readlink -f "$(command -v familiar)"` names a file in
-   it), pulling or merging into that checkout is the install moment: from then on every
-   hook exits with the launcher's missing-dependency line until `npm ci` has run there,
-   and every session faults on the spec-version 1 pack until step 2. Run `npm ci` in
-   that checkout immediately and go straight to step 2. A fresh install runs
-   `npm install` and `npm link` in the checkout instead.
-2. Keep a copy of each installed v1 theme and its receipt outside the themes directory,
-   for a rollback, then replace the theme from its spec-version 2 source. The copy holds
-   the pack as `<id>` and its receipt as `<id>.json`; the receipt's `source.url` and
-   `source.commit` (or `source.path` for a local source) say where the pack came from:
-
-   ```sh
-   keep=~/familiar-v1-themes   # any directory outside ~/.config/familiar/themes
-   mkdir -p "$keep"
-   cp -a ~/.config/familiar/themes/<id> "$keep/<id>"
-   cp -a ~/.config/familiar/theme-receipts/<id>.json "$keep/<id>.json"
-   familiar theme add --replace <theme-url-or-directory>
-   ```
-
-   A plain `familiar theme add` refuses an installed theme and names `--replace`;
-   `--replace` backs the installed pack up, installs the new one and removes the
-   backup once the new pack is receipted.
-
-   Then restart `familiar-niri watch`, which keeps the code and theme it started with
-   in memory: its attention art is lost and its window tags follow the old config until
-   it restarts. Stop it and wait for it to exit before starting the new one, which
-   refuses to start while the old one holds `attention-coordinator.lock`. Define this
-   helper once in the shell you run the restart in; it stops one pid (refusing an empty
-   or multi-pid argument) and waits up to 10 s for it to be gone:
-
-   ```sh
-   stop_and_wait() {  # stop_and_wait <pid>
-     case "$1" in
-       ''|*[!0-9]*) echo "stop_and_wait: need exactly one positive pid, got: '$1'" >&2; return 1 ;;
-     esac
-     [ "$1" -gt 0 ] || { echo "stop_and_wait: pid must be positive" >&2; return 1; }
-     kill "$1" || { echo "could not stop pid $1" >&2; return 1; }
-     for _ in $(seq 100); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.1; done
-     echo "pid $1 still running after 10 s" >&2; return 1
-   }
-   ```
-
-   Where the supervised `familiar-attention` user unit runs the watcher
-   ([Niri workspace awareness](#niri-workspace-awareness-desktop-attention-and-moments)),
-   restart the unit; a plain stop is a clean exit that nothing restarts:
-
-   ```sh
-   systemctl --user restart familiar-attention
-   ```
-
-   Where Niri starts it (`spawn-sh-at-startup "familiar-niri watch"` in the Niri
-   config), stop it and relaunch it through Niri:
-
-   ```sh
-   stop_and_wait "$(pgrep -f '^([^ ]*/)?node .*/bin/familiar-niri watch$')" &&
-   niri msg action spawn-sh -- "familiar-niri watch"
-   ```
-
-   The anchored pattern matches only the watcher's own command line. The same
-   procedure, with the unit's creation, is in `docs/runbooks/desktop-attention-rollout.md`.
-
-3. Check the result. The member of the default role shows with source `default`:
-
-   ```sh
-   familiar whoami
-   ```
-
-4. If any pet is compiled for Codex, recompile and re-select:
-   `familiar install pets --sync-projects`. It refuses each repository whose managed
-   `.codex/config.toml` still names a single-theme pet id, naming the file; remove those
-   as [Single-theme pet ids](#codex-pets) describes, then run the command again.
-5. Records written by the previous build lack `family` and `role`. They fault once and
-   each session's next hook rewrites its record. Pins and `identities.yaml` are untouched.
-
-**Rolling back.** The new build refuses spec-version 1 packs, so the theme goes back only
-after familiar does, and nothing is removed before its replacement is at hand. Do the
-first two steps while the new build is still checked out, so the time the host spends
-on the previous build with the spec-version 2 pack installed is only step 4's wait for
-`theme add`:
-
-1. If a `theme add` left an empty backup root, remove it, since the previous build
-   rejects it as an invalid theme id and `theme list`, `theme show` and `theme preview`
-   fail while it exists. The command refuses a root that still holds a backup, which
-   [Rolling back from a surviving backup](#rolling-back-from-a-surviving-backup) covers:
-
-   ```sh
-   rmdir ~/.config/familiar/themes/.replace-backup
-   ```
-
-2. Have the v1 pack available as a local directory. The copy kept in step 2 of the
-   upgrade is `"$keep/<id>"`. With no copy, clone the source from the receipt and check
-   out the commit it records:
-
-   ```sh
-   git clone <source.url> <dir> && git -C <dir> checkout <source.commit>
-   ```
-
-   An `https` source cannot be added at a commit directly: `theme add <url>` clones the
-   default branch, which may already be spec-version 2.
-3. Check out the previous build in the checkout `familiar` resolves to and run `npm ci`
-   there (the previous build has no `theme remove`). From here until step 4 completes,
-   the previous build faults on the installed spec-version 2 pack.
-4. Delete the installed spec-version 2 pack and its receipt, then add the v1 pack. Set
-   `keep` again to the directory the upgrade used (or use `<dir>` from the clone); the
-   removal runs only when that directory holds a v1 pack:
-
-   ```sh
-   keep=~/familiar-v1-themes
-   test -f "$keep/<id>/theme.yaml" &&
-   rm -rf ~/.config/familiar/themes/<id> ~/.config/familiar/theme-receipts/<id>.json &&
-   familiar theme add "$keep/<id>"
-   ```
-
-5. Restart `familiar-niri watch` as in step 2 of the upgrade (the unit or the Niri
-   relaunch, with `stop_and_wait`), so it runs the previous build and reads the
-   restored theme.
-
-Codex: the previous build recognises a managed `.codex/config.toml` by a `pet` value of
-`custom:familiar-` followed by letters, digits and hyphens, so it treats a per-theme
-selection (`custom:familiar-<theme>--<member>`) as its own and rewrites it. Run the
-previous build's `familiar install pets --sync-projects` to write single-theme
-selections; its pets must be compiled, so run `familiar install pets` there first if
-the `~/.codex/pets/familiar-<member>` directories were deleted. If it refuses a file
-(`refusing unmanaged project config <path>`), that file is not one of Familiar's three
-managed lines and stays yours.
-
-Session records: the previous build's `sessions.json` validator (under the familiar state
-directory) checks the keys it knows and ignores others, so records carrying `family`,
-`role` and `admitted` are read as they are and need no step.
-
-## Project identity and Git worktrees
-
-A registered project's colour chooses its familiar as described below. Without
-a project colour, a hash of the project's identity chooses its familiar;
-`~/.config/familiar/identities.yaml` pins one deliberately by `remote:`, `path:`
-or `project:` (basename). A Git worktree follows its repository: a pin on the main checkout applies to every
-worktree of it, including one stored outside the checkout or reached through a
-symlink, while an unrelated repository nested inside it never inherits. The
-pin that wins is the first matching entry of the first tier that matches:
-
-1. the effective `remote:` (normalized origin) of the checkout you are in;
-2. `path:` of the current checkout;
-3. `path:` of the repository's main checkout;
-4. `project:` naming the current checkout's directory;
-5. `project:` naming the main checkout's directory;
-6. otherwise, the hash.
-
-A matching `remote:` pin already covers every worktree and wins over any path
-pin. To give one worktree its own familiar, pin that worktree by path; a
-`project:` pin never beats a path. The winning pin is the whole choice: its slot
-and its `members:` map.
-
-- **Labels and keys.** A worktree keeps its own directory name as its label, so
-  several working contexts stay distinguishable. Without a remote, the hash key
-  is the main checkout's path, so a repository and its worktrees share one
-  automatic familiar; moving or renaming a worktree does not change it.
-- **Bare repositories.** A worktree of a bare repository takes the bare
-  directory as its repository. Its name is kept verbatim (`familiar.git`
-  matches `project: familiar.git`, not `project: familiar`), and a bare
-  directory named just `.git` contributes no repository name.
-- **Separated Git metadata.** A main checkout whose metadata lives elsewhere
-  (`git init --separate-git-dir`) works as is. Its worktrees need the real main
-  checkout declared with `git config core.worktree <main checkout>`; until then
-  every hook that discovers identity reports an error naming `core.worktree`
-  (session-end hooks skip discovery). Metadata stored in a directory named
-  `.git` elsewhere, as in `store/.git`, looks to Git like a repository at
-  `store` and is not always detectable: declare `core.worktree` there too.
-- **After upgrading.** Records from before the identity upgrades may lack a
-  repository anchor, `projectColor`, `family` or `role`. They leave the bus until each session's
-  next hook re-admits it; a status line may show no identity until then. Pins
-  are untouched.
-
-### Family, role and world
-
-A family is a named set of projects. A project declares its family in a family file at
-its registered root (the `root` that `tasks resolve` returns, so a worktree whose branch
-predates the file still has the family): `tools/family.toml`, else `family.toml`, the
-first that exists. Familiar reads one key, `name`, an id (lowercase letters and digits
-joined by single hyphens). A project with no family file has no family. A file that
-cannot be parsed, a `name` that is not an id, a file over 65536 bytes, or a symlink or
-path that leaves the root is an error: the hook prints one line and writes nothing.
-The family is read once per session and checkout, with the colour.
-
-The family selects the theme. `config.yaml` names the default theme and maps families to
-themes:
-
-```yaml
-theme: cats
-families:
-  guild: cats
-  verifiably: plant-nooks
-motion: full
-```
-
-A family named under `families:` uses the theme it names; an unnamed family, or a
-project with no family, uses `theme:`. Config is not checked against the installed
-themes: a named theme that is not installed faults for that family's projects only.
-A pin's `members:` map is keyed by theme id, so a pin applies to whichever theme the
-family resolves to, and an entry for another theme is inert.
-
-The theme's cast then gives the member. A member declares `roles:` in the pack, and one
-member holds the reserved role `default`. A session's role is the environment variable
-`FAMILIAR_ROLE`, an id, set by whatever launches the agent
-(`FAMILIAR_ROLE=reviewer claude`); unset or empty means no role. An invalid value, or
-`default` itself, is a refused event: the observer prints one error line, exits 0 and
-writes nothing, so the session keeps its previous record. The member is:
-
-| role | the theme holds the role | pin names a member of this theme | member | source shown |
-| --- | --- | --- | --- | --- |
-| none | not applicable | no | the `default` holder | `default` |
-| none | not applicable | yes | the pinned member | `pin` |
-| set | yes | either | the role's member | `role` |
-| set | no | no | the `default` holder | `unmapped` |
-| set | no | yes | the pinned member | `pin` |
-
-A pin replaces the `default` holder for its project and never overrides a role the theme
-covers. A role the theme does not cover is not a fault; `familiar whoami` shows
-`unmapped` so a theme author sees which roles the cast lacks. The hue is the project's,
-as in [Project colour](#project-colour); roles never change it.
-
-```text
-$ FAMILIAR_ROLE=reviewer familiar whoami
-<project>
-  family  guild · theme cats (family)
-  role    reviewer · member <label> (role)
-```
-
-`family` shows `—` when there is none and `role` shows `—` when unset. A theme may
-also carry a world: a background per locale, with places where members stand. Every
-session shows the `home` locale. `familiar theme validate <dir>` prints a theme's roles
-and the default member, and its world's locales with their place counts (or
-`world none`). The identity in `intent.json` carries the family, theme, role, member
-source and, when the theme has a world, the locale image and its places.
-
-### Project colour
-
-A registered project's colour comes from `tasks resolve`, so every Git worktree
-shows the registered colour. The project label uses that exact colour, the
-chrome uses its hue, and the pet uses the nearest hue slot (greys use the grey
-familiar). A matching pin on a registered project with a colour must name that
-slot; a conflict is an error naming both the pinned slot and the colour's slot.
-
-Unregistered checkouts, projects without a colour, and hosts without `tasks`
-(or with `tasks` off the hook's `PATH`) keep pins and the hash. When tasks
-returns no colour, its warnings appear as `familiar: tasks:` lines. Familiar
-reads the colour once per session and checkout: an edit in tasks reaches a
-running session at its next checkout change or next session.
-Use `familiar --color auto projects` for coloured swatches in a TTY; the CLI
-defaults to plain output.
-
-## macOS integration
-
-### Codex pets
+## Codex pets
 
 Install the pets of every configured theme (`theme:` and each `families:` entry)
 and select one for the repository you are in, along with every `path:` entry in
@@ -523,7 +241,7 @@ what a fresh `familiar theme add` leaves — the current repository is the only
 thing to select, and this is what selects it.
 
 Compiling the pets is a prerequisite, not a convenience. After the first
-`install pets`, the [relay lifecycle setup](#codex-lifecycle-hooks) lets Familiar's
+`install pets`, the [relay lifecycle setup](#codex) lets Familiar's
 observer maintain a Codex session's project selection from its first turn onward.
 It refuses to select a member whose pet has not been compiled for the active
 theme, and says so. Re-run `familiar install pets` after switching themes or
@@ -580,10 +298,9 @@ name, and says whether the project colour, a pin or the project's hash chose
 each slot), then set `pet = "custom:familiar-<theme>--<member>"` in that trusted project's `.codex/config.toml`.
 Restart an existing Codex session after syncing.
 
-### OpenCode
+## OpenCode
 
-Relay installs the server plugin; Familiar installs the sprite renderer. This is
-also part of the operator cutover above. Plan the relay change, review it, and
+Relay installs the server plugin; Familiar installs the sprite renderer. Plan the relay change, review it, and
 apply it before installing the sprite. Save relay's exact postimage before
 Familiar removes the old server entry; rollback needs those bytes. With plain
 `opencode.json` and `tui.json` (no `.jsonc` siblings), run:
@@ -592,21 +309,21 @@ Familiar removes the old server entry; rollback needs those bytes. With plain
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 mkdir -p "$OPENCODE_DIR"
 if test -e "$OPENCODE_DIR/tui.json"; then
-  cp -p "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.before-familiar"
+  cp -p "$OPENCODE_DIR/tui.json" "$INSTALL_BACKUP/tui.before-familiar"
 else
-  touch "$CUTOVER_BACKUP/tui.before-familiar.absent"
+  touch "$INSTALL_BACKUP/tui.before-familiar.absent"
 fi
-relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
+"$RELAY_BIN" install --harness opencode --subscribers "$SUBSCRIBERS" \
   --config-dir "$OPENCODE_DIR" --json
 # After reviewing the plan:
-relay install --harness opencode --subscribers "$HOME/.config/relay/subscribers.json" \
+"$RELAY_BIN" install --harness opencode --subscribers "$SUBSCRIBERS" \
   --config-dir "$OPENCODE_DIR" \
-  --apply --artifact "$CUTOVER_BACKUP/opencode-install.json"
-cp -p "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-relay"
-"$FAMILIAR_NEW" install opencode --config-dir "$OPENCODE_DIR"
+  --apply --artifact "$INSTALL_BACKUP/opencode-install.json"
+cp -p "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-relay"
+"$FAMILIAR_BIN" install opencode --config-dir "$OPENCODE_DIR"
 # After a successful install (or completing its manual edits):
-cp -p "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-familiar"
-cp -p "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.after-familiar"
+cp -p "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-familiar"
+cp -p "$OPENCODE_DIR/tui.json" "$INSTALL_BACKUP/tui.after-familiar"
 ```
 
 Create the OpenCode config directory first if it is absent. Relay preserves
@@ -623,10 +340,12 @@ A malformed configuration prevents any Familiar writes.
 Restart OpenCode after installation. For server-side errors, inspect relay's
 `~/.local/state/relay/opencode-plugin.log` (or the log under `RELAY_STATE_DIR`).
 
-#### Coordinated rollback
+## Rollback
+
+These commands apply only to the sequence recorded above.
 
 Stop the affected harnesses and Familiar jobs first. Reverse completed operations
-in reverse order, using only artifacts and snapshots from this cutover. If an
+in reverse order, using only artifacts and snapshots from this installation. If an
 install stopped partway, inspect its artifact and actual files first; do not run
 steps for edits that never happened. Preserve any subsequent user edits separately
 and reconcile them before restoring snapshots.
@@ -638,16 +357,16 @@ server/TUI changes, verifies relay's exact postimage, and rolls relay back:
 ```sh
 (
   set -e
-  cmp "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-familiar"
-  cmp "$OPENCODE_DIR/tui.json" "$CUTOVER_BACKUP/tui.after-familiar"
-  cp -p "$CUTOVER_BACKUP/opencode.after-relay" "$OPENCODE_DIR/opencode.json"
-  if test -e "$CUTOVER_BACKUP/tui.before-familiar.absent"; then
+  cmp "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-familiar"
+  cmp "$OPENCODE_DIR/tui.json" "$INSTALL_BACKUP/tui.after-familiar"
+  cp -p "$INSTALL_BACKUP/opencode.after-relay" "$OPENCODE_DIR/opencode.json"
+  if test -e "$INSTALL_BACKUP/tui.before-familiar.absent"; then
     rm "$OPENCODE_DIR/tui.json"
   else
-    cp -p "$CUTOVER_BACKUP/tui.before-familiar" "$OPENCODE_DIR/tui.json"
+    cp -p "$INSTALL_BACKUP/tui.before-familiar" "$OPENCODE_DIR/tui.json"
   fi
-  cmp "$OPENCODE_DIR/opencode.json" "$CUTOVER_BACKUP/opencode.after-relay"
-  relay rollback --artifact "$CUTOVER_BACKUP/opencode-install.json"
+  cmp "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-relay"
+  "$RELAY_BIN" rollback --artifact "$INSTALL_BACKUP/opencode-install.json"
 )
 ```
 
@@ -657,39 +376,65 @@ Familiar removed the old plugin from relay's saved postimage. Do not edit the
 artifact or bypass that check. For JSONC, restore the exact saved post-relay `.jsonc` bytes before relay rollback, and restore the TUI file's own
 preimage; regenerating equivalent JSON is insufficient.
 
-For Codex, `relay rollback --artifact "$CUTOVER_BACKUP/codex-install.json"`
+For Codex, `"$RELAY_BIN" rollback --artifact "$INSTALL_BACKUP/codex-install.json"`
 restores the old hook commands. For Claude, the status line was changed **before**
 relay, so reverse relay first, then the status line:
 
 ```sh
 (
   set -e
-  relay rollback --artifact "$CUTOVER_BACKUP/claude-code-install.json"
-  cmp "$HOME/.claude/settings.json" "$CUTOVER_BACKUP/claude.after-familiar"
-  cp -p "$CUTOVER_BACKUP/claude.before-familiar" "$HOME/.claude/settings.json"
+  "$RELAY_BIN" rollback --artifact "$INSTALL_BACKUP/claude-code-install.json"
+  cmp "$HOME/.claude/settings.json" "$INSTALL_BACKUP/claude.after-familiar"
+  cp -p "$INSTALL_BACKUP/claude.before-familiar" "$HOME/.claude/settings.json"
 )
 ```
 
-If the status line was edited after relay instead, first restore the saved exact
-post-relay settings bytes, then roll relay back. Finally restore the subscribers
-file and any services/launchers from their separately recorded preimages. Check
-that every restored hook executable and plugin import resolves into the retained
-compatible Familiar checkout, then restart harnesses and jobs and smoke-test them.
-Do not restore a launcher to this migration's CLI: it has no `hook` command.
-Neither rollback nor updating this checkout authorizes a live host cutover.
+If the status line was edited after relay instead, restore the exact post-relay
+settings bytes first, then roll relay back. See Upgrade for compatible old-checkout
+restoration when undoing an upgrade.
 
-OpenCode renderer graphics, tint, bell, and live terminal delivery remain
-provisional. The 2026-08-24 physical-Mac gate exercised the renderer in Kitty and
-Ghostty and recorded two failures: the sprite never changed pose, and
-`needs-approval` never reached Familiar's bus, so the pet could not signal an
-approval. Familiar's hook-side tint and bell for OpenCode verified clean in the same
-run. Both defects have since been found and fixed — a watch callback filtered on a
-filename macOS never reports, and a permission ask bound to nothing on the stable
-event stream — but neither fix has been exercised against a live OpenCode, so the
-label stands until those two cells are re-run. See
-`docs/ref/2026-08-24-macos-terminal-smoke.md`.
+For an originally absent Claude target, remove only the file you created after
+verifying its saved postimage, instead of copying a nonexistent preimage. Finally
+restore subscribers and launcher/service changes from their own preimages. Inspect
+restored executables and plugin imports before restarting and smoke-testing harnesses.
+Relay's artifact covers relay edits only; it does not cover Familiar, subscribers,
+status lines or services. Never bypass its drift refusal.
 
-### Reap abandoned sessions
+## Upgrade
+
+Only existing installs using pre-relay hooks or spec-version 1 themes need this
+section. A fresh installation follows the steps above.
+
+Retain a working old Familiar checkout and dependencies, old plugin imports, theme
+pack, receipt and exact configuration preimages before changing code. Resolve every
+old hook/launcher to that retained checkout during the rollback window. An old hook
+pointing at the new CLI is not a rollback: the current CLI has no old hook verb.
+Use a separate new checkout; keep existing state. Apply the current relay/harness
+steps, adding `--retire familiar` to relay's Claude/Codex installation only when
+retiring verified old Familiar entries. Preserve the pre/postimages at each stage.
+
+Spec-version 1 packs (`slot`/`slots`, no `roles`) are refused by a version 2 reader.
+Retain the old compatible build, pack and receipt; replace the pack with a validated
+version 2 pack with exactly one `default` role holder. Keep the build/pack mismatch
+window short with harnesses stopped. Install dependencies before launching the new
+build, update configured theme/family ids, compile and reselect Codex pets, and restart
+loaded OpenCode and desktop consumers. [Desktop restart order](runbooks/desktop-attention.md#restart-and-upgrade)
+covers the coordinator, shell and popup. Check each configured theme before resuming.
+
+To roll back, stop affected harnesses/jobs, reverse Familiar's changes before relay
+where specified above, restore configuration preimages, old pack and receipt, then
+the compatible old code/dependencies and all executable/plugin paths. Recompile or
+restore that build's native pets and restart consumers. Restore a pack and build as
+a compatible pair; do not let a v2 reader run against a restored v1 pack. Do not delete
+state or backups until the rollback window ends. One-time host rollout history is
+not required to install the current engine.
+
+## Platform setup
+
+Harness setup above applies to Linux and macOS. Optional reap jobs reconcile dead
+sessions without emitting terminal bytes; a subsequent live event handles delivery.
+
+## macOS reap
 
 An agent that exits without `SessionEnd` can leave state behind. `familiar reap`
 prunes relay's dead records and reconciles Familiar's presentation files even
@@ -729,36 +474,15 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.familiar.reap.plist
 launchctl kickstart gui/$(id -u)/dev.familiar.reap
 ```
 
-### Known macOS difference: the status line branch field
 
-Familiar gives `git symbolic-ref` a 250 ms budget when it fills the status
-line's branch field, and falls back to a short commit sha if that budget is
-exceeded. On macOS a cold `git` — first run after boot, or one being scanned by
-security software — can exceed it on its own, so the same repository may show a
-sha on macOS where it shows a branch name on Linux. It corrects itself once git
-is warm. Nothing is wrong with the repository or the status line.
+Inspect with `launchctl print gui/$(id -u)/dev.familiar.reap`; stop with
+`launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/dev.familiar.reap.plist`.
 
-### Terminal checklist for unclaimed combinations
-
-The physical-Mac gate covers Claude Code and Codex in Kitty 0.46.2 and Ghostty
-1.3.1 only. On any other terminal, on Intel or macOS 13, or with the OpenCode
-renderer, smoke-test before relying on rendering: check launch/idle,
-working, approval when exposed, done/error, session exit, and `familiar reap`
-after abnormal termination. Record the agent and terminal versions and any
-failure; passing a checklist is not a live-terminal support claim.
-
-Inside tmux: `tmux set -g allow-passthrough all`, use a full-width pane, check the status
-line renders 24-bit colour, and expect the cat at the first state change after attaching a
-client. `FORCE_COLOR=3` in the tmux environment is an untested workaround for the status-line
-colour downgrade. When multiple clients with different outer terminals are attached, tmux
-may select one for the probe and the transmission ledger tracks that client; this case is
-not addressed.
-
-## Linux-only integrations
+## Linux desktop
 
 The following integrations are Linux-only and do not apply to macOS.
 
-### Niri workspace awareness, desktop attention and moments
+### Niri
 
 Start the desktop coordinator once per Niri session:
 
@@ -774,7 +498,7 @@ hosts each agent, and sends one generic desktop toast per new request through
 `familiar` window signal, which a glass ring whose color source is `familiar` draws in
 that session's hue. Run it as a supervised user service with restart-on-failure when
 native agent toasts are turned off, so a dead coordinator is noticed:
-`docs/runbooks/desktop-attention-rollout.md`.
+`[desktop operations](runbooks/desktop-attention.md)`.
 
 Optionally start the focused-output moments:
 
@@ -787,14 +511,14 @@ turn that the coordinator made eligible, on the focused output. It reserves each
 through `familiar attention popup`, so `familiar` must be on its `PATH`, as must `qs`.
 Set `motion: full`, `reduced`, or `off` in `~/.config/familiar/config.yaml`.
 
-### Noctalia workspace pills
+### Noctalia
 
 `integrations/noctalia-plugin` is a Noctalia 5.3 plugin (`khughitt/familiar`): link it
 into `~/.local/share/noctalia/plugins/`, enable it, and use
 `khughitt/familiar:workspaces` in a bar section in place of the built-in `workspaces`.
 Left click focuses a workspace, right click dismisses its alerts, middle click opens the
-widget's settings, and the ⚑ button opens the Alerts panel. `familiar` must be on
-Noctalia's `PATH`. Behaviour: `docs/attention.md`.
+widget's settings, and the Alerts button opens the Alerts panel. `familiar` must be on
+Noctalia's `PATH`. Behaviour: [attention](attention.md).
 
 ### Keep the scheme aligned with Noctalia
 
@@ -837,3 +561,8 @@ Enable it:
 systemctl --user daemon-reload
 systemctl --user enable --now familiar-reap.timer
 ```
+
+Inspect with `systemctl --user status familiar-reap.timer`; stop with
+`systemctl --user disable --now familiar-reap.timer` and restore/remove only your
+own unit files. For desktop use, prefer the supervised coordinator in the linked
+runbook over an unsupervised startup command. These host edits need the host owner's approval.
