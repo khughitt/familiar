@@ -421,13 +421,27 @@ build, update configured theme/family ids, compile and reselect Codex pets, and 
 loaded OpenCode and desktop consumers. [Desktop restart order](runbooks/desktop-attention.md#restart-and-upgrade)
 covers the coordinator, shell and popup. Check each configured theme before resuming.
 
-To roll back, stop affected harnesses/jobs, reverse Familiar's changes before relay
-where specified above, restore configuration preimages, old pack and receipt, then
-the compatible old code/dependencies and all executable/plugin paths. Recompile or
-restore that build's native pets and restart consumers. Restore a pack and build as
-a compatible pair; do not let a v2 reader run against a restored v1 pack. Do not delete
-state or backups until the rollback window ends. One-time host rollout history is
-not required to install the current engine.
+To roll back a v2 theme upgrade, stop harnesses/jobs and retain every replacement
+before removing anything. While the new build is available, remove an **empty**
+`.replace-backup` root with `rmdir`; a root still holding a pack needs Theme recovery
+first. Older readers reject that root as a theme id. Have the v1 pack locally: use
+the saved copy, or clone the receipt's source URL and check out its recorded commit.
+Adding an HTTPS URL fetches its current default branch, not that old commit.
+
+Restore the compatible old code and run `npm ci` there **before** restoring the v1
+pack. Keep consumers stopped while that old reader sees the installed v2 pack.
+Only after confirming the v1 source contains `theme.yaml`, remove the installed v2
+pack and receipt and run the old build's `theme add <local-v1-directory>`. The old
+build has no theme-remove command. Restart the coordinator using the linked stop/
+wait procedure so its in-memory code and theme match. Restore/recompile its native
+pets and run that build's `install pets --sync-projects`; per-theme managed ids are
+rewritten by the old build, while unmanaged configs remain yours. Old session
+validators ignore added family/role/admitted keys, so no state deletion is needed.
+
+For a relay rollback, reverse Familiar's edits and relay's edits in the order under
+Rollback, restore saved subscribers/configuration, and restore every old executable
+and plugin import to the retained compatible checkout before restarting harnesses.
+Keep pack receipts, code/dependencies, configuration and backups through acceptance.
 
 ## Platform setup
 
