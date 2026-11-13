@@ -6,7 +6,7 @@ import { assertId, RESERVED_ROLE } from '../bus/id.js';
 import { noTerminalMessage } from '../render/harness.js';
 
 // The session's role, from the hook's environment: the one source in this piece (spec
-// §5.5). Unset or empty is no role. Anything else must be an id, and an invalid value is
+// docs/configuration.md#family-role-and-world). Unset or empty is no role. Anything else must be an id, and an invalid value is
 // an error, never null: a misspelled role that silently showed the default is the
 // anti-goal. `default` is reserved for an agent with no role.
 export function roleFromEnv(env) {
@@ -21,7 +21,7 @@ export function roleFromEnv(env) {
 
 // The colour and family of a checkout, reused from the session's own record while it is
 // in the same checkout and owns both, so the hook pays for `tasks resolve` and the family
-// file once per session and checkout (spec §3, §5.3). A record that owns a colour but no
+// file once per session and checkout (docs/configuration.md#family-role-and-world). A record that owns a colour but no
 // family (written before the family existed) is looked up afresh, both together.
 async function projectFacts(old, repoRoot, lookupProjectColor, lookupFamily) {
   if (repoRoot === null) return { color: null, family: null, warnings: [] };

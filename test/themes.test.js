@@ -11,7 +11,7 @@ import { loadThemePackSync, STATES } from 'familiar-theme';
 // committed engine fixture (always present, so this file always proves at
 // least one theme). Guarded, not required: post-split the engine repo ships
 // no themes/, and the real-cats proof relocates to the cats conformance gate
-// (spec §4).
+// (docs/install.md#themes).
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const shippedThemesDir = join(REPO, 'themes');
 const shippedThemes = existsSync(shippedThemesDir) ? readdirSync(shippedThemesDir) : [];

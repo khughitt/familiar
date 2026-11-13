@@ -186,7 +186,7 @@ export async function observe({ text, deps: given }) {
         // The managed config is the repository's face, read by every later launch, so a
         // per-launch role is never persisted into it. A roled session's member is the
         // role's, not the repository's, and resolving a second identity here to find the
-        // repository's is not worth its cost on the hook path (spec §5.7).
+        // repository's is not worth its cost on the hook path (docs/surfaces.md#codex-selection).
         if (role !== null) {
           lines.push(line(`codex: session role "${role}" set — repository pet selection left unchanged`));
         } else {

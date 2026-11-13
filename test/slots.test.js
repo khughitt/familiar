@@ -34,7 +34,7 @@ test('the engine fails to LOAD when the hue table and the slot count disagree', 
   //
   // NOT `assert.equal(SLOTS.length, SLOT_COUNT)`: that is a second copy of the
   // comparison the guard itself makes, and it passes with the guard deleted --
-  // which leaves the load-time failure the spec asked for (§6) untested. So
+  // which leaves the load-time failure the spec asked for (docs/configuration.md#family-role-and-world) untested. So
   // mutate the module and prove the IMPORT rejects.
   const source = readFileSync(SLOT_HUES, 'utf8');
   const short = source.replace('  { slot: 11, hue: 0, sat: 6 },\n', '');

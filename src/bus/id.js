@@ -4,7 +4,7 @@
 // FAMILIAR_ROLE reader and the sessions.json validator share this one copy.
 export const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-// The one reserved role: the member an agent with no role gets (spec §5.1). A record
+// The one reserved role: the member an agent with no role gets (docs/configuration.md#family-role-and-world). A record
 // says null for that agent, never the word.
 export const RESERVED_ROLE = 'default';
 

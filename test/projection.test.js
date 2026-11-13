@@ -44,7 +44,7 @@ test('a fresh prepared event admits its session with every context and terminal 
 });
 
 // `seq` moves on every event and state change, so it is no arrival order; `admitted` is
-// the seq at which a record entered sessions.json, kept while it stays (spec §5.6).
+// the seq at which a record entered sessions.json, kept while it stays (the local state contract).
 test('a new record is admitted at its seq, keeps it while it stays, and is admitted again on return', async () => {
   const a = row('a');
   const admit = await project({ snapshot: snapshot(a), event: { sessionId: 'a' }, prepared: prepared(a), seq: 5 });

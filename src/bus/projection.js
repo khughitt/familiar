@@ -29,7 +29,7 @@ export async function projectSnapshot({
   // `admitted` is the seq at which a record entered sessions.json, kept while it stays:
   // `seq` moves on every event and state change, so it orders nothing by arrival. One
   // that leaves and returns is admitted again; one written before admission existed
-  // gets the current seq, its true order being gone (spec §5.6).
+  // gets the current seq, its true order being gone (the local state contract).
   if (mode === 'drop-only') {
     const present = new Set(roots.map((row) => row.sessionId));
     for (const [sid, record] of previous) {

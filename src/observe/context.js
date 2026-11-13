@@ -183,7 +183,7 @@ export function makePrepareSprites(ctx, {
 
     // The theme's `home` locale, proven once per theme per invocation: `null` for a pack
     // without a world (localeAssetFor is not called for it), else the image path, size and
-    // places. A failed proof throws, and the record resolving to that theme faults (§5.8).
+    // places. A failed proof throws, and the record resolving to that theme faults (the local state contract).
     // A failure is cached too, so every record of the theme reports the same fault.
     const worlds = new Map();
     const worldFor = (theme) => {

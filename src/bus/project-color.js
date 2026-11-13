@@ -4,7 +4,7 @@ import { assertHexColor } from '../protocol/color.js';
 
 export const TASKS_TIMEOUT_MS = 2_000;
 // `root` is the registered root `tasks resolve` names: where the project's family file
-// lives (src/bus/family.js), never the checkout, which may be a worktree (spec §5.3).
+// lives (src/bus/family.js), never the checkout, which may be a worktree (docs/configuration.md#project-colour).
 export const NO_PROJECT = Object.freeze({
   prefix: null, color: null, root: null, warnings: Object.freeze([]),
 });

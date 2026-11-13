@@ -89,7 +89,7 @@ test('wrong schema and malformed sessions or ended records fail closed', async (
 });
 
 // A record written before family, role and admission existed must still read: the file
-// validator checks those fields' shape only when present (spec §3, §5.6), or the first
+// validator checks those fields' shape only when present (src/bus/sessions.js validation rules), or the first
 // hook after the upgrade would refuse the whole file and nothing would ever rewrite it.
 test('family, role and admitted are optional, and checked as ids and a seq when present', async (t) => {
   const path = await fixture(t);

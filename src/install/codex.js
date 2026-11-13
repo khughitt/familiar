@@ -16,7 +16,7 @@ const MANAGED_HEADER = '# Managed by Familiar. Run `familiar install pets --sync
 // The per-theme text only: `custom:familiar-<theme>--<member>`, each half an id. A
 // managed file naming a single-theme id (`custom:familiar-<member>`) is therefore a
 // conflict like any unmanaged file, refused by path; no v1 shape is recognised (spec
-// §5.7). Each half is ID_RE itself, anchors stripped, so this text and petId accept the
+// docs/install.md#codex-pets). Each half is ID_RE itself, anchors stripped, so this text and petId accept the
 // same ids and cannot drift apart.
 const ID = ID_RE.source.replace(/^\^(.*)\$$/, '$1');
 if (ID === ID_RE.source) throw new Error('codex: ID_RE must be anchored with ^ and $');

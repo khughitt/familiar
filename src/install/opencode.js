@@ -8,7 +8,7 @@ import { parse, printParseErrorCode } from 'jsonc-parser';
 // `jsoncText` is passed through VERBATIM — no `|| '{}'` blank fallback. A MISSING file is the
 // caller's job (installOpencode maps read()===null to the literal '{}'); by the time text reaches
 // here, an empty or whitespace-only string means a PRESENT-but-blank config, which is malformed and
-// must be refused, not silently rewritten into a fresh {} (design §5). `allowEmptyContent: true` is
+// must be refused, not silently rewritten into a fresh {} (docs/install.md#opencode). `allowEmptyContent: true` is
 // deliberate: WITHOUT it, jsonc-parser records a `ValueExpected` error for blank/whitespace input,
 // so a blank file would throw the generic "unparseable JSONC" below; WITH it, blank input parses to
 // `undefined` with NO error, and the non-object-root guard rejects it with the specific, friendly

@@ -89,7 +89,7 @@ export function createSpriteState(pid, {
 
   // The pending change, WITHOUT consuming it — or null if nothing is pending OR the pending
   // change already FAILED to write at the current generation. That gate is the whole of the
-  // "retry on the next watch event" contract (design §6): a persistent failure (a missing PNG)
+  // "retry on the next watch event" contract (docs/surfaces.md#opencode): a persistent failure (a missing PNG)
   // is offered once per generation, and generation only advances on a real event (apply / decay),
   // so the frame never re-reads a broken file and floods the log at 60fps. It stays idempotent
   // within a generation, so a transient failure is still retried on the next event.

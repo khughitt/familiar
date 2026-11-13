@@ -1,5 +1,5 @@
 // The project family, read from the published family file at the project's registered
-// root (spec §5.3). This runs on the hook path, once per session and checkout, so the
+// root (docs/configuration.md#family-role-and-world). This runs on the hook path, once per session and checkout, so the
 // read is bounded, never follows a symlink out of the root, and loads the TOML parser
 // only once a family file is found: a checkout without one never pays for it, and a
 // SessionEnd teardown never reaches this module (test/bin-familiar.test.js traces it).

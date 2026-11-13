@@ -52,7 +52,7 @@ if (args[0] === '-h' || args[0] === '--help') {
   process.stdout.write(HELP);
 } else try {
   const { project, configDir: explicit } = parseArgs(args);
-  // Distribution target (spec §5). Default: the GLOBAL opencode config dir. `--project-dir <dir>`
+  // Distribution target (docs/install.md#opencode). Default: the GLOBAL opencode config dir. `--project-dir <dir>`
   // writes the project-local `<dir>/.opencode/` fallback (the one opencode dependency-auto-installs
   // into). `--config-dir <dir>` overrides both (used by the tests).
   const configDir = explicit

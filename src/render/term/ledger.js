@@ -7,7 +7,7 @@ import { memoizeFor } from '../../bus/memo.js';
 // What the terminal holds, as opposed to what the bus intended. The bus's intent record
 // is written by the transaction whether or not any byte reached a terminal; this file is
 // written only by the one section that writes the terminal (emit.js), inside the lock
-// that serializes those writes. Spec §3.5.
+// that serializes those writes. Spec docs/terminal-rendering.md#participants-and-emission-ownership.
 export const EMPTY_ENTRY = Object.freeze({ seq: 0, held: null });
 
 // Sized to wait 30 s at withLock's default 20 ms delay: inside Claude Code's 60 s hook

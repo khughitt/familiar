@@ -60,7 +60,7 @@ test('wrapForTmux frames the escapes in DCS passthrough and doubles every ESC, p
   const asBuffer = wrapForTmux(Buffer.from(apc));
   assert.ok(Buffer.isBuffer(asBuffer));
   assert.equal(asBuffer.toString('latin1'), wrapped);
-  // 9 bytes of framing plus one per ESC: the overhead the spec states (§3.3).
+  // 9 bytes of framing plus one per ESC: the overhead the spec states (docs/terminal-rendering.md#tmux).
   assert.equal(wrapped.length, apc.length + 9 + 2);
 });
 

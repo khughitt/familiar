@@ -12,11 +12,11 @@ export const DEFAULT_GROWTH_LIMIT_BYTES = 4 * LIMITS.MAX_TOTAL_BYTES;
 
 // A run directory holds the acquired pack at <run>/pack. A clone first lands
 // at <run>/clone and is copied from there, so both transports promote exactly
-// the pack content the gate validated (spec 2026-10-14 §3).
+// the pack content the gate validated (the local acquisition contract).
 export const PACK_DIR_NAME = 'pack';
 export const CLONE_DIR_NAME = 'clone';
 
-// Transport rule (spec §1): HTTPS URLs and local directories, nothing else.
+// Transport rule (the local acquisition contract): HTTPS URLs and local directories, nothing else.
 // Credentialed URLs are refused because the given URL is persisted in the
 // receipt and printed by `theme list` — accepting one stores and displays a
 // secret. Private repos use a local clone plus `theme add ./dir`.
@@ -58,7 +58,7 @@ export function classifySource(raw, { stat = statSync } = {}) {
 // Remote git diagnostics are untrusted terminal input. ANSI stripping alone
 // leaves bare \r (git progress uses it), backspace and BEL live, any of
 // which can rewrite the visible line — so after stripping ANSI, CR/LF both
-// split lines and every remaining C0/C1 control is replaced (spec §4).
+// split lines and every remaining C0/C1 control is replaced (the local acquisition contract).
 export function collapseStderr(text) {
   return stripVTControlCharacters(String(text))
     .split(/\r\n|\r|\n/)
@@ -77,12 +77,12 @@ function descriptorTooLarge(path, size) {
   );
 }
 
-// The selection comes from the STAGED descriptor (spec §3): the bytes that
+// The selection comes from the STAGED descriptor (the local acquisition contract): the bytes that
 // choose what is copied are the bytes the gate validates. The walk never
 // touches the root theme.yaml again, so this copy is the only one.
 // Bounds are checked on the STAGED file before it is read: the source check
 // alone cannot bound it, because a source can grow while it streams. Staging is
-// written only by this installer under the lock (spec §3), so a stat of the
+// written only by this installer under the lock (the local acquisition contract), so a stat of the
 // completed copy is sufficient.
 async function stageDescriptor(traversal, task, signal, copyFile) {
   const src = join(traversal, 'theme.yaml');
@@ -104,17 +104,17 @@ async function stageDescriptor(traversal, task, signal, copyFile) {
   return parseThemePack(bytes.toString('utf8'), task.to, { descriptorLabel: 'theme.yaml' });
 }
 
-// The defensive copy (spec §3). The gate still validates only AFTER acquisition (the
+// The defensive copy (the local acquisition contract). The gate still validates only AFTER acquisition (the
 // staged descriptor is parsed during the copy only to select pack content), so
 // the copy itself must refuse what it cannot safely materialize. On Linux,
 // directories are opened no-follow and traversed through their /proc fd
 // identity, so a pathname swap cannot redirect a queued walk. On Darwin,
 // traversal uses the verified pathname with parent identity checks; a hostile
 // writer can still swap a directory away and back between those checks, the
-// accepted Darwin race ceiling (spec §§5, 12). Static symlinks, FIFOs, sockets
+// accepted Darwin race ceiling (the local acquisition contract). Static symlinks, FIFOs, sockets
 // and devices are rejected by lstat before open; a raced file replacement is
 // opened no-follow/nonblocking and rejected through the handle.
-// Only pack content is copied (spec 2026-10-14 §3): `theme.yaml` is staged first
+// Only pack content is copied (the local acquisition contract): `theme.yaml` is staged first
 // and parsed from the staged bytes, then each entry's `packEntryRole` decides.
 // `outside` entries are skipped by name and never `lstat`ed. `.git` at any depth
 // is excluded, and git is never invoked on the source.
@@ -229,7 +229,7 @@ async function openDirectory(path) {
   return open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
 }
 
-// Git isolation (spec §3). The machine's own configuration must not shape
+// Git isolation (the local acquisition contract). The machine's own configuration must not shape
 // what an untrusted clone does. Isolation is applied after caller input; the
 // sole TLS seam is caFile -> GIT_SSL_CAINFO.
 export function buildCloneEnv({ caFile } = {}, base = process.env) {

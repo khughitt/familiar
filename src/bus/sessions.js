@@ -16,7 +16,7 @@ const nullableId = (value) => value === null || (typeof value === 'string' && ID
 const role = (value) => nullableId(value) && value !== RESERVED_ROLE;
 // Records written before family, role and admission existed lack them: the file still
 // reads, each such record faults in resolveIdentities until its next hook, and its next
-// projection assigns `admitted` (spec §3, §5.6). A field is checked only when present.
+// projection assigns `admitted` (src/bus/sessions.js validation rules). A field is checked only when present.
 const absentOr = (record, key, valid) => !Object.hasOwn(record, key) || valid(record[key]);
 
 function validHandle(value) {

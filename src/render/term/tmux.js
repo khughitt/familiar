@@ -78,7 +78,7 @@ export function wrapForTmux(escapes) {
   return `\x1bPtmux;${escapes.replaceAll('\x1b', '\x1b\x1b')}\x1b\\`;
 }
 
-// The identity the transmission ledger keys `held` on (spec §3.5). Outside tmux the
+// The identity the transmission ledger keys `held` on (docs/terminal-rendering.md#tmux). Outside tmux the
 // agent's own pid/starttime already identify its pty, so `direct` needs no more.
 export function transportFor(tmux) {
   if (!tmux || !tmux.ok) return 'direct';
