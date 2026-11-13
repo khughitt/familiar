@@ -49,6 +49,38 @@ and OSC 112. A reap reconciles files without terminal bytes, so an abandoned
 terminal can stay tinted until a later live event or manual terminal reset.
 Familiar does not own the terminal title.
 
+## Capabilities
+
+This table describes current Familiar policy, not the latest upstream feature set.
+It applies to Familiar's terminal emitter, not Codex's native pet renderer.
+
+| Identified terminal | Capability | Playback with motion full |
+| --- | --- | --- |
+| Kitty | kitty-animation | Animated packs may animate; static packs remain static. |
+| Ghostty | static-graphics | Static pose, even for an animated pack. |
+| Unknown or unsupported transport | none | No pet graphics. |
+
+Outside tmux, explicit `TERM_PROGRAM=ghostty` wins over inherited Kitty markers.
+Inside tmux, the probed attached client's identity and passthrough setting determine
+capability; the server's inherited terminal variables cannot establish it. Reduced
+motion selects a static pose; motion off suppresses pet graphics for every capability.
+See [the classifier](../src/render/term/capability.js) and
+[playback selection](../src/animation/program.js).
+
+Familiar reserves Kitty animation/frame-composition commands for its Kitty path.
+Ghostty is not a portable animation path under this policy: do not rely on
+retransmitting a displayed image ID as an in-place update. The emitter permits
+update only with animation capability and valid held evidence; static output uses
+a fresh create instead. Changing that policy needs a cross-terminal probe, not an
+inference from current upstream issue status. See [emission](../src/render/term/emit.js).
+
+Visual acceptance must judge transparent art in both terminals on light and dark
+backgrounds: byte-level agreement does not establish identical alpha/gamma blending
+across renderers or platforms. Record or pin terminal and frontend versions for
+that comparison, especially when a frontend auto-updates. These retained portability
+cautions add no new physical result; [platform support](surfaces.md#platform-support)
+keeps the exact measured version/date boundaries.
+
 ## Tmux
 
 Probe the server/pane and attached outer client before drawing. The pane must

@@ -34,6 +34,8 @@ on 2026-08-23 for Claude Code, Codex and OpenCode in Kitty/Ghostty. A physical g
 on 2026-08-24 through 2026-08-28 confirmed Familiar terminal output for **Claude
 Code and Codex**, Kitty 0.46.2/Ghostty 1.3.1, macOS 26.6.2, Node 22/25 only.
 Those observations do not qualify newer versions or another terminal/platform.
+Current [capability policy](terminal-rendering.md#capabilities) uses Kitty animation
+and Ghostty static graphics, with separate retransmission and visual-acceptance limits.
 Intel Macs, macOS 13 and other terminal combinations remain unclaimed.
 
 OpenCode's own renderer remains provisional: that gate found a pose-change fault
