@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-# cli_surface 3: the conformance half of docs/specs/2026-09-20-cli-conventions-design.md.
+# cli_surface 4: the conformance half of docs/cli-conventions.md.
 """Build a CLI's parser surface and compare it with its rows in cli.toml.
 
-Vendored from ops as tools/cli_surface.py beside tools/cli.toml; never edited in a project.
 Vendored from https://github.com/khughitt/ops (bin/cli_surface.py); never edit the copy, see tools/README.md.
-Design: ops docs/specs/2026-09-20-cli-conventions-design.md.
+Adopted as tools/cli_surface.py beside tools/cli.toml. Reference: ops docs/cli-conventions.md.
 A surface is a set of rows, each a tuple, so two surfaces compare as sets:
 
     ("command", path, summary)
@@ -121,7 +120,7 @@ def argparse_rows(parser, path=(), summary=None):
                 default = action.default is True
             elif action.default not in (None, argparse.SUPPRESS, [], ()):
                 default = str(action.default)
-            arity = "1.." if action.nargs in ("+", "*") else "1"
+            arity = "1.." if action.nargs in ("+", "*") else str(action.nargs) if type(action.nargs) is int and action.nargs >= 2 else "1"
             repeatable = isinstance(action, (argparse._AppendAction, argparse._ExtendAction))
             rows.add(_opt_row(path, action.option_strings, kind, values, default, arity, repeatable, action.required))
         else:
@@ -169,7 +168,8 @@ def click_rows(group, path=()):
             if implied(names, path) or set(names) & {"--help"}:
                 continue
             kind, values = ("none", ()) if param.is_flag else _click_kind(param)
-            rows.add(_opt_row(path, names, kind, values, _click_default(param, kind), "1", param.multiple, param.required))
+            arity = str(param.nargs) if type(param.nargs) is int and param.nargs >= 2 else "1"
+            rows.add(_opt_row(path, names, kind, values, _click_default(param, kind), arity, param.multiple, param.required))
         else:
             kind, values = _click_kind(param)
             rows.add(("arg", tuple(path), index, param.name.replace("_", "-"), kind, values, bool(param.required), param.nargs == -1))

@@ -1,7 +1,7 @@
 # The shared CLI vocabulary and the inventory of every in-scope CLI's commands.
 # Vendored from https://github.com/khughitt/ops (cli.toml); never edit the copy, see tools/README.md.
 #
-# Design: ops docs/specs/2026-09-20-cli-conventions-design.md. This file is the authority:
+# Reference: ops docs/cli-conventions.md. This file is the authority:
 # each project vendors it byte-identical as tools/cli.toml and has one conformance test
 # that builds its live parser surface and asserts set equality with its rows here. A new
 # option or command anywhere is an edit here first; then each project runs ops's
@@ -10,12 +10,14 @@
 # its implementation. Never hand-copy a table.
 #
 # Row shapes (spec "The table"):
-#   option: names | shared (+ role), value, values, default, arity, repeatable, required, exception
-#   arg:    name, value, values, required, variadic
+#   header:  project, tier, default_output, env, protocol, exception, commands
+#   option:  names | shared (+ role), value, values, default, arity, repeatable, required, exception
+#   arg:     name, value, values, required, variadic
 #   command: path, summary, verb, output, protocol, exception, args, options
-# `exception` carries the reason wherever a row departs from the vocabulary on purpose: on a
-# command row for its verb, on a shared option row for a value kind that differs from the
-# vocabulary entry's or for a repeatable filter whose repeats narrow instead of widening.
+# `exception` carries the reason wherever a CLI or row departs from the vocabulary on purpose:
+# on a CLI header for a CLI-wide departure such as third-party service credential environment
+# names, on a command row for its verb, on a shared option row for a value kind that differs
+# from the vocabulary entry's or for a repeatable filter whose repeats narrow instead of widening.
 # Any other key on a row is a validation error.
 # --json, --pretty, -h/--help, -V/--version, and --color on typed CLIs are implied by the
 # CLI header and never rows; a protocol CLI implies only the help and version ones. The
@@ -181,6 +183,37 @@ tier = "typed"
 default_output = "json"
 env = "TASKS"
 
+[[cli.tasks.commands]]
+path = ["retained"]
+summary = "Query retained state and execute verified lifecycle operations"
+
+[[cli.tasks.commands]]
+path = ["retained", "state"]
+summary = "Read retained intent and observations at an immutable records revision"
+args = [{ name = "id", value = "ref", required = true }]
+options = [
+  { names = ["--at"], value = "string" },
+  { names = ["--host"], value = "string" },
+]
+
+[[cli.tasks.commands]]
+path = ["retained", "checkpoint"]
+summary = "Verify and publish a resumable retained host checkpoint"
+args = [{ name = "id", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "transfer"]
+summary = "Transfer retained custody after durable receiver publication"
+args = [{ name = "from", value = "ref", required = true }, { name = "to", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
+[[cli.tasks.commands]]
+path = ["retained", "reconcile"]
+summary = "Reconcile pending lifecycle operations while preserving custody"
+args = [{ name = "coordinator", value = "ref", required = true }]
+options = [{ names = ["--request"], value = "path", required = true }]
+
 [cli.mindful]
 project = "mind6"
 tier = "typed"
@@ -205,12 +238,6 @@ tier = "typed"
 default_output = "pretty"
 env = "FAMILIAR"
 
-[cli.forge]
-project = "forge"
-tier = "automation"
-default_output = "pretty"
-env = "FORGE"
-
 [cli.relay]
 project = "relay"
 tier = "automation"
@@ -229,14 +256,12 @@ tier = "automation"
 default_output = "pretty"
 env = "LIT"
 
-# quarry reads service credential variables under each service's own name (NCBI_API_KEY and
-# the like): an exception to <NAME>_<OPTION>, recorded here because a CLI header has no
-# `exception` field (ops-1aa74e).
 [cli.quarry]
 project = "quarry"
 tier = "automation"
 default_output = "pretty"
 env = "QUARRY"
+exception = "reads service credential variables under each service's own name (NCBI_API_KEY and the like)"
 
 [cli.science]
 project = "sci"
@@ -264,6 +289,7 @@ path = []
 options = [
   { shared = "chdir", value = "path" },
   { names = ["--headers"], value = "none" },
+  { names = ["--no-headers"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -282,6 +308,16 @@ summary = "Move one task to another registered project under a new id, leaving a
 args = [{ name = "id", value = "ref", required = true }]
 options = [
   { names = ["--to"], value = "string", required = true },
+  { names = ["--explain"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["migrate"]
+summary = "Carry, drop or close every open task of a project into its successor from a reviewed decision list"
+args = [{ name = "list", value = "path", required = false }]
+options = [
+  { names = ["--to"], value = "string" },
+  { names = ["--draft"], value = "path" },
   { names = ["--explain"], value = "none" },
 ]
 
@@ -355,6 +391,21 @@ summary = "The project, canonical id, or live prefix for an id, prefix, or path,
 args = [{ name = "inputs", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--stdin"], value = "none" },
+  { shared = "all", value = "none" },
+  { names = ["--freshness"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["identity"]
+summary = "The identity snapshot in each records entry"
+
+[[cli.tasks.commands]]
+path = ["identity", "refresh"]
+summary = "Refresh records-entry identity snapshots from each registered root's committed identity.toml"
+args = [{ name = "prefixes", value = "string", required = false, variadic = true }]
+options = [
+  { shared = "all", value = "none" },
+  { names = ["--from"], value = "path" },
 ]
 
 [[cli.tasks.commands]]
@@ -379,6 +430,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--related"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -431,7 +483,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -463,7 +515,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -493,7 +545,7 @@ options = [
   { names = ["--complexity"], value = "enum", values = ["low", "mid", "high", "none"], repeatable = true },
   { names = ["--process"], value = "enum", values = ["direct", "planned", "none"], repeatable = true },
   { names = ["--origin"], value = "enum", values = ["user", "agent", "mixed", "none"], repeatable = true },
-  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/specs/2026-09-30-task-filters-design.md" },
+  { shared = "tag", role = "filter", value = "string", repeatable = true, exception = "repeats narrow: a task must carry every tag given (all-of), kept from before the vocabulary so existing callers keep their meaning; see tasks docs/user-guide.md (Select work without losing context)" },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--owner"], value = "string" },
   { names = ["--source"], value = "string" },
@@ -570,6 +622,8 @@ options = [
   { names = ["--rm-ref"], value = "string", repeatable = true },
   { names = ["--no-refs"], value = "none" },
   { names = ["--no-depends"], value = "none" },
+  { names = ["--rm-related"], value = "ref", repeatable = true },
+  { names = ["--no-related"], value = "none" },
   { names = ["--body", "-b"], value = "string" },
   { names = ["--priority", "-p"], value = "enum", values = ["0", "1", "2", "3", "4"] },
   { names = ["--size"], value = "enum", values = ["xs", "s", "m", "l", "xl"] },
@@ -584,6 +638,7 @@ options = [
   { shared = "tag", role = "set", value = "string", repeatable = true },
   { names = ["--need"], value = "string", repeatable = true },
   { names = ["--depends"], value = "ref", repeatable = true },
+  { names = ["--related"], value = "ref", repeatable = true },
   { names = ["--ref"], value = "string", repeatable = true },
   { names = ["--spec"], value = "string" },
   { names = ["--plan"], value = "string" },
@@ -596,8 +651,9 @@ options = [
 [[cli.tasks.commands]]
 path = ["note"]
 summary = "Append a timestamped note"
-args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = true }]
+args = [{ name = "id", value = "ref", required = true }, { name = "text", value = "string", required = false }]
 options = [
+  { names = ["--stdin"], value = "none" },
   { names = ["--stamp"], value = "none" },
   { names = ["--reviewed"], value = "none" },
   { names = ["--no-reviewed"], value = "none" },
@@ -606,12 +662,25 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["attach"]
-summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note"
-args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false }]
+summary = "Copy a file into the task's tasks/files/<id>/ and record it in a ledger note; --multipart accepts exactly one source and conflicts with --clipboard"
+args = [{ name = "id", value = "ref", required = true }, { name = "source", value = "string", required = false, variadic = true }]
 options = [
   { names = ["--caption"], value = "string" },
   { names = ["--clipboard"], value = "none" },
   { names = ["--name"], value = "string" },
+  { names = ["--multipart"], value = "none" },
+]
+
+[[cli.tasks.commands]]
+path = ["export"]
+summary = "Export or verify a task attachment, optionally at a Git revision"
+protocol = "Exactly one of --output or --verify is required; they conflict. --output - writes raw attachment bytes to stdout"
+exception = "attachment export to stdout is raw even under JSON/pretty flags"
+args = [{ name = "id", value = "ref", required = true }, { name = "name", value = "string", required = true }]
+options = [
+  { names = ["--at"], value = "ref" },
+  { names = ["-o", "--output"], value = "path" },
+  { names = ["--verify"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -733,9 +802,13 @@ options = [
 
 [[cli.tasks.commands]]
 path = ["commit"]
-summary = "Commit every uncommitted file under tasks/ in one commit"
+summary = "Commit uncommitted task records or records-relative paths in one commit"
+args = [
+  { name = "targets", value = "string", required = false, variadic = true },
+]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
+  { names = ["--message", "-m"], value = "string" },
 ]
 
 [[cli.tasks.commands]]
@@ -810,9 +883,12 @@ options = [
 path = ["goals"]
 summary = "The goals you asked for across projects: progress, recent activity, and what needs attention"
 options = [
+  { shared = "sort", role = "select", value = "enum", values = ["project", "activity", "priority"], default = "project" },
+  { shared = "reverse", value = "none" },
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "all_projects", value = "none" },
   { names = ["--group"], value = "string" },
+  { names = ["--closed"], value = "none" },
 ]
 
 [[cli.tasks.commands]]
@@ -1002,7 +1078,7 @@ path = ["index"]
 summary = "index local harness transcripts"
 options = [
   { names = ["--full"], value = "none" },
-  { names = ["--replay"], value = "path", repeatable = true },
+  { names = ["--replay"], value = "path", arity = "2", repeatable = true },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
   { shared = "project", role = "select", value = "string", repeatable = false },
 ]
@@ -1013,8 +1089,8 @@ summary = "snapshot static harness context"
 
 [[cli.obs.commands]]
 path = ["report"]
-summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings or profile"
-args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "profile"], required = true }]
+summary = "query context, growth, cache, calibration, skills, cost, quiet, hooks, tests, recurrences, doc_findings, long_doing or profile"
+args = [{ name = "view", value = "enum", values = ["context", "growth", "cache", "calibration", "skills", "cost", "quiet", "hooks", "tests", "recurrences", "doc_findings", "long_doing", "profile"], required = true }]
 options = [
   { shared = "project", role = "select", value = "string", repeatable = false },
   { shared = "harness", role = "filter", value = "enum", values = ["claude-code", "codex"], repeatable = false },
@@ -1079,8 +1155,32 @@ options = [
 
 [[cli.obs.commands]]
 path = ["dashboard", "summary"]
-summary = "print live attention and the snapshot's headline numbers"
+summary = "print the health view: a typical session per harness and model against its 30-day normal"
 options = [
+  { names = ["--window"], value = "enum", values = ["24h", "7d", "30d"], default = "24h" },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "tasks"]
+summary = "print missed recurrences, aged doc findings and long-doing tasks"
+options = [
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "attention"]
+summary = "print live findings and grouped drift findings"
+options = [
+  { shared = "all", value = "none" },
+  { names = ["--out"], value = "path" },
+]
+
+[[cli.obs.commands]]
+path = ["dashboard", "changes"]
+summary = "print change markers and integrated tooling commits"
+options = [
+  { names = ["--window"], value = "enum", values = ["7d", "30d"], default = "7d" },
   { names = ["--out"], value = "path" },
 ]
 
@@ -1269,6 +1369,59 @@ options = [
   { names = ["--verify", "--no-verify"], value = "none", default = "true" },
 ]
 
+[[cli.lit.commands]]
+path = ["questions"]
+summary = "Extract, cluster, and rank scientific questions from held article texts"
+options = [
+  { shared = "config", value = "path", default = "lit.toml" },
+]
+
+[[cli.lit.commands]]
+path = ["questions", "prepare"]
+summary = "Sample held arXiv/PubMed records, join world, and extract passages"
+options = [
+  { names = ["--mode"], value = "string", default = "pilot" },
+  { names = ["--arxiv-json"], value = "path" },
+  { names = ["--pubmed-xml-dir"], value = "path" },
+  { names = ["--world-dir"], value = "path" },
+  { names = ["--output-dir"], value = "path" },
+  { shared = "seed", value = "int", default = "20261106" },
+  { names = ["--allowed-tier"], value = "string" },
+  { names = ["--exclude-ids"], value = "path" },
+  { names = ["--max-date"], value = "string" },
+  { names = ["--benchmark-manifest"], value = "path" },
+]
+
+[[cli.lit.commands]]
+path = ["questions", "run"]
+summary = "Run Method A and Method B question extraction, clustering, and topic mapping"
+options = [
+  { names = ["--mode"], value = "string", default = "pilot" },
+  { names = ["--output-dir"], value = "path" },
+  { names = ["--world-dir"], value = "path" },
+  { names = ["--allowed-tier"], value = "string" },
+  { names = ["--max-date"], value = "string" },
+]
+
+[[cli.lit.commands]]
+path = ["questions", "evaluate"]
+summary = "Score extracted spans, clusters, and full-text yield against frozen benchmarks"
+options = [
+  { names = ["--mode"], value = "string", default = "pilot" },
+  { names = ["--output-dir"], value = "path" },
+  { names = ["--allowed-tier"], value = "string" },
+  { names = ["--benchmark"], value = "path" },
+  { names = ["--judgments"], value = "path" },
+]
+
+[[cli.lit.commands]]
+path = ["questions", "describe"]
+summary = "Render the human-readable pilot diagnostics and evaluation report"
+options = [
+  { names = ["--mode"], value = "string", default = "pilot" },
+  { names = ["--output-dir"], value = "path" },
+]
+
 # ---- quarry
 
 [[cli.quarry.commands]]
@@ -1431,13 +1584,14 @@ options = [
 
 [[cli.science.commands]]
 path = ["dataset"]
-summary = "Hold a local file in the store and mint the dataset record under its content address"
+summary = "Hold a local file or directory in the store and mint the dataset record under its content address"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
   { names = ["--path"], value = "string", required = true },
   { names = ["--title"], value = "string", required = true },
+  { names = ["--resources"], value = "string", repeatable = true },
   { names = ["--locator"], value = "string" },
   { names = ["--facets"], value = "string", repeatable = true },
 ]
@@ -1464,6 +1618,7 @@ options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
+  { names = ["--key"], value = "string" },
   { names = ["--proposition"], value = "string", required = true },
 ]
 
@@ -1476,23 +1631,18 @@ options = [
   { names = ["--continue"], value = "string" },
   { names = ["--applicability"], value = "string", repeatable = true },
   { names = ["--assumptions"], value = "string", required = true },
-  { names = ["--baseline"], value = "string" },
-  { names = ["--comparison"], value = "string" },
-  { names = ["--conditioning"], value = "string", repeatable = true },
-  { names = ["--contrast"], value = "enum", values = ["levels", "continuous"], required = true },
+  { names = ["--estimand"], value = "string", required = true },
+  { names = ["--standing"], value = "enum", values = ["empirical", "model", "calibrated-model"], required = true },
+  { names = ["--evidence-mode"], value = "enum", values = ["observation", "annotation", "simulation", "derivation", "literature-extraction"], required = true },
+  { names = ["--rule-procedures"], value = "string", repeatable = true, required = true },
+  { names = ["--model"], value = "string" },
+  { names = ["--registers"], value = "string", repeatable = true },
   { names = ["--dataset"], value = "string", required = true },
   { names = ["--equivalence-rule"], value = "string", required = true },
   { names = ["--falsification"], value = "string", required = true },
-  { names = ["--identification"], value = "string", required = true },
-  { names = ["--increment"], value = "string" },
   { names = ["--interpretation-rule"], value = "string", required = true },
-  { names = ["--measure"], value = "string", required = true },
   { names = ["--method"], value = "string", required = true },
   { names = ["--parameters"], value = "string", repeatable = true },
-  { names = ["--quantity"], value = "string" },
-  { names = ["--reference"], value = "string", required = true },
-  { names = ["--scale"], value = "enum", values = ["additive", "multiplicative"], required = true },
-  { names = ["--slot"], value = "int", required = true },
   { names = ["--supersedes"], value = "string" },
   { names = ["--target"], value = "string", required = true },
 ]
@@ -1513,6 +1663,23 @@ options = [
 ]
 
 [[cli.science.commands]]
+path = ["derive"]
+summary = "Execute a dataset-production workflow under confinement, hold its outputs, and mint the run and derived dataset records"
+options = [
+  { shared = "config", value = "path" },
+  { names = ["--invocation-id"], value = "string" },
+  { names = ["--continue"], value = "string" },
+  { names = ["--code"], value = "string", required = true },
+  { names = ["--cores"], value = "int" },
+  { names = ["--dataset"], value = "string", required = true },
+  { names = ["--entrypoint"], value = "string", required = true },
+  { names = ["--parameters"], value = "string", repeatable = true },
+  { names = ["--reads"], value = "string", repeatable = true },
+  { names = ["--targets"], value = "string", repeatable = true, required = true },
+  { names = ["--title"], value = "string", required = true },
+]
+
+[[cli.science.commands]]
 path = ["assess"]
 summary = "Derive the assessment a run's outputs support under its spec's rule, and mint it"
 options = [
@@ -1524,15 +1691,16 @@ options = [
 
 [[cli.science.commands]]
 path = ["verify"]
-summary = "Replay an assessment's run, derive scope and verdict, and mint the verification"
+summary = "Replay an assessment or dataset-production run, derive scope and verdict, and mint the verification"
 options = [
   { shared = "config", value = "path" },
   { names = ["--invocation-id"], value = "string" },
   { names = ["--continue"], value = "string" },
-  { names = ["--assessment"], value = "string", required = true },
+  { names = ["--assessment"], value = "string" },
   { names = ["--code"], value = "string", required = true },
   { names = ["--cores"], value = "int" },
   { names = ["--entrypoint"], value = "string", required = true },
+  { names = ["--run"], value = "string" },
 ]
 
 [[cli.science.commands]]
@@ -2877,52 +3045,16 @@ output = "none"
 summary = "Focus a Niri workspace by its stable ID"
 args = [{ name = "id", value = "string", required = true }]
 
-# ---- forge
-
-[[cli.forge.commands]]
-path = ["graph"]
-summary = "Project the graph, or check committed records"
-options = [
-  { names = ["--check"], value = "none" },
-  { names = ["--partition"], value = "string", default = "all" },
-  { names = ["--theme-graph"], value = "path" },
-  { names = ["--sync-theme"], value = "none" },
-]
-exception = "check is a flag on the projection command rather than a verb, because the check re-derives the same graph"
-
-[[cli.forge.commands]]
-path = ["show"]
-verb = "show"
-summary = "Show one committed graph node"
-args = [{ name = "node", value = "ref", required = true }]
-options = [
-  { names = ["--theme-graph"], value = "path" },
-]
-
-[[cli.forge.commands]]
-path = ["seed"]
-summary = "Seed a new exploration flow from a committed node"
-args = [{ name = "dest-flow-dir", value = "path", required = true }]
-options = [
-  { names = ["--from"], value = "ref", required = true },
-  { names = ["--member"], value = "string", required = true },
-  { names = ["--goal"], value = "string", required = true },
-  { names = ["--family"], value = "string", required = true },
-  { names = ["--riff"], value = "string", required = true },
-  { names = ["--namespace"], value = "string", required = true },
-  { names = ["--model"], value = "string", default = "gpt-image" },
-  { names = ["--floor-rows"], value = "int", default = "12" },
-  { names = ["--body-plan"], value = "string", default = "cat" },
-  { names = ["--reason"], value = "string" },
-  { names = ["--theme-graph"], value = "path" },
-]
-
 # ---- relay
 
 [[cli.relay.commands]]
 path = ["list"]
 verb = "list"
 summary = "The live-agent registry"
+
+[[cli.relay.commands]]
+path = ["whoami"]
+summary = "The agent session this process belongs to"
 
 [[cli.relay.commands]]
 path = ["reap"]
@@ -3039,9 +3171,9 @@ args = [{ name = "mode", value = "enum", values = ["here", "away"], required = f
 
 [[cli.relay.commands]]
 path = ["model"]
-summary = "The model a Codex tool call's turn runs, read from its rollout"
+summary = "The model and effort of a Codex or agy tool call, read from the harness's own record"
 options = [
-  { shared = "harness", role = "select", value = "enum", values = ["codex"], required = true, repeatable = false },
+  { shared = "harness", role = "select", value = "enum", values = ["codex", "agy"], required = true, repeatable = false },
 ]
 
 # Minimal adoption surface; existing ops-projects commands remain outside this inventory.
@@ -3064,6 +3196,13 @@ options = [
   {names = ["--purpose"], value = "string", required = true},
   {names = ["--name"], value = "string"},
   {names = ["--explain"], value = "none"},
+]
+
+[[cli.ops-projects.commands]]
+path = ["atlas"]
+summary = "Render the cross-project document of purposes, abstracts, subsystems and goal status"
+options = [
+  {names = ["--out"], value = "path"},
 ]
 
 # Minimal adoption surface; existing doc-review options remain outside this inventory.
@@ -3119,7 +3258,7 @@ path = ["peer"]
 summary = "Serve a bounded internal retention session"
 
 [cli.worktree]
-project = "ops"
+project = "hostkit"
 tier = "automation"
 default_output = "pretty"
 env = "WORKTREE"
