@@ -6,13 +6,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { extname, join, relative } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderHelp } from '../bin/familiar.js';
 import { GRAPHICS_MARKERS, MULTIPLEXER_MARKERS } from '../src/render/term/capability.js';
 import { decodeRgba, encodeRgba } from 'familiar-theme';
 import { writeTheme } from './helpers/themes.js';
 import { git, initRepo } from './fixtures/git-worktree.mjs';
+import { scanCurrentSurfaces } from './helpers/current-docs.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -381,80 +382,7 @@ test('projects draws each sprite above its caption on a graphics terminal', (t) 
 });
 
 test('current user and agent surfaces contain no retired CLI invocations', () => {
-  // splitAway: true for a surface classified away from engine by the split
-  // manifest (spec §1) — themes/cats/** to cats-main, tools/art/**,
-  // docs/art/**, skills/art-discovery/** to forge — which carries no engine
-  // copy at all once the repository splits, so its absence there is
-  // expected rather than a defect. Every other surface is engine-owned and
-  // must exist in ANY correctly composed tree, monolith or post-split; a
-  // missing one is a real failure this scan must catch, not something to
-  // shrug past.
-  const currentSurfaces = [
-    { path: 'README.md', splitAway: false },
-    { path: 'docs/install.md', splitAway: false },
-    { path: 'docs/art/discovery.md', splitAway: true },
-    { path: 'docs/art/lessons.md', splitAway: true },
-    { path: 'docs/surfaces.md', splitAway: false },
-    { path: 'AGENTS.md', splitAway: false },
-    { path: 'skills/art-discovery/SKILL.md', splitAway: true },
-    { path: 'themes/cats/theme.yaml', splitAway: true },
-    { path: 'tools/art/theme/scaffold.js', splitAway: true },
-    { path: 'src', splitAway: false },
-    { path: 'bin', splitAway: false },
-    { path: 'test', splitAway: false },
-  ];
-  const oldRootLeaves = ['themes', 'preview', 'contact', 'pets'];
-  const retired = new RegExp(
-    `familiar (?:${oldRootLeaves.join('|')})\\b|tools/whoami\\.mjs|` +
-    'familiar theme (?!list\\b|add\\b|remove\\b|validate\\b|show\\b|preview\\b|sheet\\b|--help\\b|<command>)',
-    'u',
-  );
-  // Both agents' configuration is generated now, so a literal placeholder path in user-facing
-  // Markdown is stale by construction -- as is any instruction to copy the deleted Codex hooks
-  // fixture, which is what `familiar setup codex` replaced.
-  const retiredLiteralSetup =
-    /\/path\/to\/familiar\/bin\/familiar (?:hook|statusline)|integrations\/codex\/hooks\.json/u;
-  const textExtensions = new Set(['.js', '.mjs', '.ts', '.tsx', '.md', '.yaml', '.yml']);
-  const failures = [];
-
-  function inspect(path) {
-    for (const entry of readdirSync(path, { withFileTypes: true })) {
-      const file = join(path, entry.name);
-      if (entry.isDirectory()) inspect(file);
-      else if (entry.isFile() && (
-        textExtensions.has(extname(entry.name)) || (path === join(repoRoot, 'bin') && extname(entry.name) === '')
-      )) {
-        const name = relative(repoRoot, file);
-        if (name === 'test/cli-help.test.js') continue;
-        readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
-          if (retired.test(line) || (extname(name) === '.md' && retiredLiteralSetup.test(line))) {
-            failures.push(`${name}:${index + 1}: ${line.trim()}`);
-          }
-        });
-      }
-    }
-  }
-
-  for (const { path: surface, splitAway } of currentSurfaces) {
-    const path = join(repoRoot, surface);
-    if (!existsSync(path)) {
-      // A split-away surface's absence is expected and this scan skips it
-      // (its retired-CLI text, if any, is someone else's problem once it
-      // lives in a different repo). An engine-owned surface's absence is
-      // never expected — assert.ok fails LOUDLY here rather than letting
-      // the scan silently pass having checked nothing.
-      assert.ok(splitAway, `${surface} is engine-owned and must exist, but is missing`);
-      continue;
-    }
-    if (extname(path)) {
-      readFileSync(path, 'utf8').split('\n').forEach((line, index) => {
-        if (retired.test(line) || (extname(surface) === '.md' && retiredLiteralSetup.test(line))) {
-          failures.push(`${surface}:${index + 1}: ${line.trim()}`);
-        }
-      });
-    } else inspect(path);
-  }
-  assert.deepEqual(failures, []);
+  assert.deepEqual(scanCurrentSurfaces(repoRoot, git(repoRoot, ['ls-files', '-z']).split('\0').filter(Boolean)), []);
 });
 
 test('root help names the attention controls and each has its own help', (t) => {
@@ -472,4 +400,69 @@ test('root help names the attention controls and each has its own help', (t) => 
     assert.match(result.stdout, new RegExp(`familiar attention ${leaf}`));
   }
   assert.equal(existsSync(join(root, 'state')), false);
+});
+
+function documentationFixture(t, references = []) {
+  const root = mkdtempSync(join(tmpdir(), 'familiar-doc-scan-'));
+  initRepo(root);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const dir of ['src', 'bin', 'test', 'docs']) mkdirSync(join(root, dir));
+  for (const file of ['README.md', 'AGENTS.md', 'docs/install.md', 'docs/surfaces.md']) {
+    writeFileSync(join(root, file), '# Current\n');
+  }
+  writeFileSync(join(root, 'identity.toml'), `[documents]\nstandard = 1\nreferences = ${JSON.stringify(references)}\n`);
+  return {
+    root,
+    scan() {
+      git(root, ['add', '.']);
+      return scanCurrentSurfaces(root, git(root, ['ls-files', '-z']).split('\0').filter(Boolean));
+    },
+  };
+}
+
+const retiredExample = ['familiar', 'themes'].join(' ');
+
+test('retired scan covers a new top-level reference', (t) => {
+  const f = documentationFixture(t);
+  writeFileSync(join(f.root, 'docs/configuration.md'), retiredExample + '\n');
+  assert.deepEqual(f.scan(), [`docs/configuration.md:1: ${retiredExample}`]);
+});
+
+test('retired scan covers a declared nested reference', (t) => {
+  const f = documentationFixture(t, ['docs/runbooks/desktop-attention.md']);
+  mkdirSync(join(f.root, 'docs/runbooks'));
+  writeFileSync(join(f.root, 'docs/runbooks/desktop-attention.md'), retiredExample + '\n');
+  assert.deepEqual(f.scan(), [`docs/runbooks/desktop-attention.md:1: ${retiredExample}`]);
+});
+
+test('retired scan rejects a missing declared reference', (t) => {
+  const f = documentationFixture(t, ['docs/runbooks/missing.md']);
+  assert.deepEqual(f.scan(), ['docs/runbooks/missing.md: declared reference is missing or untracked']);
+});
+
+test('retired scan accepts clean declared references', (t) => {
+  const f = documentationFixture(t, ['docs/runbooks/desktop-attention.md']);
+  mkdirSync(join(f.root, 'docs/runbooks'));
+  writeFileSync(join(f.root, 'docs/runbooks/desktop-attention.md'), 'familiar theme list\n');
+  writeFileSync(join(f.root, 'docs/configuration.md'), 'familiar whoami\n');
+  assert.deepEqual(f.scan(), []);
+});
+
+test('retired scan retains engine roots and split-away handling', (t) => {
+  const f = documentationFixture(t);
+  writeFileSync(join(f.root, 'src/entry.js'), retiredExample + '\n');
+  assert.deepEqual(f.scan(), [`src/entry.js:1: ${retiredExample}`]);
+});
+
+test('retired scan rejects an escaping declared reference', (t) => {
+  const f = documentationFixture(t, ['../escape.md']);
+  assert.throws(() => f.scan(), /invalid declared reference/);
+});
+
+test('retired scan keeps historical and undeclared nested docs out of the reference set', (t) => {
+  const f = documentationFixture(t);
+  mkdirSync(join(f.root, 'docs/notes'));
+  writeFileSync(join(f.root, 'docs/2026-01-01-old.md'), retiredExample + '\n');
+  writeFileSync(join(f.root, 'docs/notes/current.md'), retiredExample + '\n');
+  assert.deepEqual(f.scan(), []);
 });
