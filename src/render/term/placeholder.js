@@ -91,8 +91,8 @@ export function imageIdFor(sessionId) {
 
 // Transmit the image and create a VIRTUAL placement. Draws nothing by itself.
 //
-// q=2 is not optional here and never was. These escapes are written to the AGENT's fd 1
-// -- and any reply kitty sends comes back on the agent's STDIN, i.e. gets typed into
+// q=2 is not optional here and never was. These escapes go to the AGENT's terminal,
+// and any reply kitty sends comes back on the agent's STDIN, i.e. gets typed into
 // claude-code's prompt. transmit() in kitty.js could get away without it because it
 // sends no `i=`, and kitty answers nothing when there is no id to answer about. We send
 // an id, by necessity: the placeholder's foreground colour has to name it. So from here

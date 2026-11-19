@@ -15,8 +15,7 @@ export function transmit(png, { rows, frame = (command) => command }) {
   const payload = encode(png);
 
   // q=2: SUPPRESS THE TERMINAL'S REPLIES. Kitty answers a graphics escape ON STDIN, and
-  // the stdin our bytes share is the CODING AGENT's pty, because emit() writes to
-  // /proc/<intent.pid>/fd/1 -- so a reply would be typed into the agent's input.
+  // emit() writes to the CODING AGENT's pty, so any reply would go to the agent's input.
   //
   // THAT CANNOT HAPPEN AS THE CODE STANDS, AND THE EARLIER RATIONALE HERE SAID IT COULD.
   // It claimed the success path was quiet but an ERROR reply (`\x1b_G...;EBAD...\x1b\`)

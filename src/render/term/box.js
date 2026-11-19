@@ -16,7 +16,7 @@ export { pngSize };
 // allowed to be one: kitty scales the image to FIT the box preserving aspect, so an imperfect
 // cell aspect costs a column of air beside the cat, never a cropped cat. Getting it roughly
 // right is what makes the cat fill its box; getting it exactly right is not possible without a
-// round trip to a terminal we cannot read from (emit() writes to another process's fd 1).
+// round trip to the agent's terminal, which emit() opens only for writing.
 const CELL_ASPECT = 2;
 
 // PNG dimensions from the IHDR, after validating the container without decoding its pixels.
