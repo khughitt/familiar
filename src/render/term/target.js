@@ -11,6 +11,7 @@ function envOf(pid, read) {
 
 export function terminalTarget(pid, {
   platform = process.platform,
+  harness,
   record,
   hookEnv = process.env,
   readEnviron = readFileSync,
@@ -20,7 +21,9 @@ export function terminalTarget(pid, {
     let env;
     try { env = envOf(pid, readEnviron); }
     catch { /* tint and bell do not need graphics capability */ }
-    return { path: `/proc/${pid}/fd/1`, env, tmux: env === undefined ? undefined : probe(env) };
+    // agy keeps its terminal on stdin and redirects stdout and stderr to its log.
+    const fd = harness === 'agy' ? 0 : 1;
+    return { path: `/proc/${pid}/fd/${fd}`, env, tmux: env === undefined ? undefined : probe(env) };
   }
   if (platform === 'darwin') {
     if (!record || typeof record.tty !== 'string' || !/^ttys[0-9a-f]+$/i.test(record.tty)) {

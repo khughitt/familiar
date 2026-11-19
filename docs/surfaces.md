@@ -88,7 +88,9 @@ Each poll, cached or otherwise, starts a stale stage-cache refresher when needed
 agy uses Claude-shaped stdin with product antigravity and its conversation id;
 relay uses that id prefixed agy:. Until an id exists there are no image cells,
 only the uncoloured HUD. Its custom line's ESC colour-reset rewriting leaves the
-placeholder cells intact. agy under tmux, overlays and resize is not yet observed.
+placeholder cells intact. On Linux the observer and statusline settle open agy's
+stdin as a terminal device for writing, since agy redirects stdout and stderr to
+its log. agy under tmux, overlays and resize is not yet observed.
 
 ## Statusline diagnostics
 

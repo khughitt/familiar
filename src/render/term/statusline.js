@@ -6,7 +6,7 @@
 //
 // WHY THE STATUS LINE CANNOT TRANSMIT THE IMAGE. It would be the obvious place: it knows the
 // state, it runs often enough. But the hook is already writing chunked graphics escapes to the
-// agent's fd 1, and two processes interleaving 4096-byte chunks into one fd produce a corrupt
+// agent's terminal, and two processes interleaving 4096-byte chunks into one fd produce a corrupt
 // escape stream -- a garbled screen, intermittently, under load. ONE WRITER. The hook transmits;
 // this prints. That is also why this file imports nothing that can write to a terminal.
 //

@@ -16,7 +16,7 @@ const RINGS = new Set(['needs-input', 'needs-approval', 'error']);
 
 // NO DEFAULT FOR `env`, for exactly the reason graphicsCapability() has
 // none: the environment that decides "does this terminal do graphics" belongs to the
-// AGENT process — the one whose fd 1 the bytes are written to — and NOT to whoever
+// AGENT process — the one whose terminal receives the bytes — and NOT to whoever
 // happens to be asking. A `env = process.env` default here would hand graphicsCapability
 // the very default it refuses, one layer up: the hook subprocess's own environment,
 // silently, in the one function that turns the answer into escape bytes. The caller

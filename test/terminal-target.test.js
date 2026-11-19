@@ -19,6 +19,13 @@ test('Linux binds path and environment to the agent pid', () => {
   assert.deepEqual(reads, [['/proc/42/environ', 'utf8']]);
 });
 
+test('Linux targets the terminal on agy stdin when stdout is reserved for logging', () => {
+  const target = terminalTarget(42, {
+    platform: 'linux', harness: 'agy', readEnviron: () => 'TERM=xterm-kitty\0', probe: () => null,
+  });
+  assert.equal(target.path, '/proc/42/fd/0');
+});
+
 test('Darwin combines validated agent tty with hook environment', () => {
   const hookEnv = { TERM: 'xterm-kitty', KITTY_WINDOW_ID: '1' };
   assert.deepEqual(terminalTarget(42, {

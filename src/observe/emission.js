@@ -22,6 +22,7 @@ export async function emitTransition({
   if (record == null) return { kind: 'noop' };
   const terminal = terminalTarget(record.pid, {
     platform,
+    harness,
     record: renderProcess.recordOf(record.pid),
     hookEnv,
     probe,
@@ -35,7 +36,7 @@ export async function emitTransition({
     prev,
     next,
     seq,
-    transmitSprite: printsPlaceholderCells(harness),
+    transmitSprite: next !== null && printsPlaceholderCells(harness),
     provisional,
     terminal,
     ledger: fileLedger(entryPath),

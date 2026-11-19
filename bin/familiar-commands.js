@@ -111,6 +111,7 @@ export async function settleStatusline({
     sessionId: record.sessionId, seq: null, lockWith, lockOptions }, () => {
     const terminal = terminalTarget(record.pid, {
       platform,
+      harness: record.harness,
       record: processOps.recordOf(record.pid),
       hookEnv,
       probe,
