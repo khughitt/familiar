@@ -157,6 +157,12 @@ schema-1 subscriber file for rollback. Familiar accepts both envelope versions.
 The generated snapshot observers include Claude Stop background facts and
 Codex worker events.
 
+`relay reap` reads the default `relay/subscribers.json` under its config home.
+To use it with schema 2 while retaining a schema-1 default, give the reaper a
+separate `XDG_CONFIG_HOME` with the schema-2 document at that default relative
+path. Keep the relay state location the same. The scheduled
+`familiar reap` jobs below read the registry directly.
+
 Relay's installer plans by default. Inspect the JSON plan, then repeat the same
 arguments with `--apply --artifact <file>` to write the configuration and save a
 rollback artifact. Keep that artifact; `"$RELAY_BIN" rollback --artifact <file>` restores
@@ -216,8 +222,8 @@ Plan and apply relay's Codex hooks instead of generating Familiar hooks:
 ```
 
 The relay 0.5.0 installer gives Codex SessionEnd 3 seconds. That fits relay's
-registry publication only, so Familiar reconciles the ended session on the next
-observation or scheduled reap.
+registry publication only. Familiar reconciles the ended session on the next
+observation or scheduled `familiar reap`.
 
 The hook targets must already contain valid configuration. For a fresh target,
 create its parent directory and an empty JSON object before planning. Codex asks
