@@ -191,7 +191,8 @@ test('setup resolves an npm-style link to a checkout path containing spaces', (t
 test('observe reconciles through the CLI and reports malformed envelopes as faults', () => {
   const runEnv = env();
   writeFileSync(join(runEnv.FAMILIAR_CONFIG_DIR, 'scheme.json'), JSON.stringify({ mode: 'dark', satScale: 1 }));
-  const input = JSON.stringify({ schema: 1, type: 'reconcile', subscriber: 'familiar', event: null, registry: { generation: null, revision: null }, changed: false, reaped: [] });
+  const input = JSON.stringify({ schema: 2, type: 'reconcile', subscriber: 'familiar',
+    registry: { status: 'unavailable', code: 'NO_SNAPSHOT' }, reaped: [] });
   const result = spawnSync(process.execPath, [bin, 'observe'], { input, encoding: 'utf8', env: runEnv });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, '');
@@ -647,9 +648,11 @@ function tracedObserve(t, e, envelope) {
   return { result, loaded: readFileSync(trace, 'utf8').split('\n').filter(Boolean) };
 }
 
-const envelopeFor = (event, snapshot) => ({
-  schema: 1, type: 'event', subscriber: 'familiar', event,
-  registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: true, reaped: [],
+const envelopeFor = ({ kind, harness, nativeEvent, cwd, agentId, sessionId }, snapshot) => ({
+  schema: 2, type: 'event', subscriber: 'familiar',
+  event: { schema: 2, kind, harness, nativeEvent, cwd, identity: { status: 'valid', value: { agentId, sessionId } },
+    facts: {}, tool: null, private: {} },
+  registry: { status: 'ready', generation: snapshot.generation, revision: snapshot.revision },
 });
 
 test('a SessionEnd ends an admitted session without loading the theme contract, YAML, TOML or the other commands', { skip: traceSkip }, async (t) => {
@@ -683,8 +686,8 @@ test('the import trace sees the theme contract and YAML on an envelope that reso
   await f.admit();
   const snapshot = await readSnapshot({ paths: relayPaths(f.e) });
   const { result, loaded } = tracedObserve(t, f.e, {
-    schema: 1, type: 'reconcile', subscriber: 'familiar', event: null,
-    registry: { generation: snapshot.generation, revision: snapshot.revision }, changed: false, reaped: [],
+    schema: 2, type: 'reconcile', subscriber: 'familiar',
+    registry: { status: 'ready', generation: snapshot.generation, revision: snapshot.revision }, reaped: [],
   });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(loaded.some((url) => url.endsWith('/src/observe/context.js')), 'the reconcile resolved visuals');

@@ -31,9 +31,10 @@ FAMILIAR_BIN="$PWD/bin/familiar"
 RELAY_BIN="$PWD/node_modules/.bin/relay"
 ```
 
-`npm install` installs the pinned relay dependency too; the second path is its
+`npm install` installs the pinned relay 0.5.0 dependency too. The second path is its
 CLI. Keep this checkout and its dependencies available to installed commands.
-A shared npm link is optional when invoking these paths directly.
+Put `familiar` on the harnesses' PATH, for example with the npm link above.
+Relay 0.5.0 resolves subscriber commands by basename outside the event repository.
 
 `theme add` accepts a public HTTPS repository or a local directory. It copies only
 `theme.yaml`, licence files and each member's sprite directory, validates that copy
@@ -132,7 +133,7 @@ editing its configuration. Choose a new durable private backup directory:
 ```sh
 INSTALL_BACKUP=/absolute/path/to/private-install-backup
 mkdir -m 700 "$INSTALL_BACKUP"
-SUBSCRIBERS="${XDG_CONFIG_HOME:-$HOME/.config}/relay/subscribers.json"
+SUBSCRIBERS="${XDG_CONFIG_HOME:-$HOME/.config}/relay/subscribers-v2.json"
 ```
 
 Before every edit, retain exact bytes, permissions and whether the target existed;
@@ -141,22 +142,20 @@ created file. Stop on drift rather than overwrite subsequent changes. Include
 subscribers and any launcher/service changes. Keep artifacts for the rollback window.
 The examples below use plain JSON; JSONC manual edits need the same exact snapshots.
 
-Use the relay CLI installed above and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/main/docs/runbooks/hook-install-rollback.md),
+Use the relay CLI installed above and follow its [hook installation and rollback guide](https://github.com/khughitt/relay/blob/v0.5.0/docs/runbooks/hook-install-rollback.md),
 including the platform evidence gates. Generate Familiar's observer document:
 
 ```sh
 "$FAMILIAR_BIN" setup relay
 ```
 
-Review stdout and merge its `subscribers` entries into relay's
-`~/.config/relay/subscribers.json`, retaining other subscribers and one top-level
-`schema: 1`. For a fresh file, save the complete document. The command only prints
-JSON. Keep the parent directory privately owned with mode 0700 and the file mode
-0600. Every installer invocation below names that file explicitly; use its
-absolute path if you keep it elsewhere. OpenCode's server plugin reads relay's
-default subscribers file at runtime: if `XDG_CONFIG_HOME` is set, use
-`$XDG_CONFIG_HOME/relay/subscribers.json` consistently and keep the same environment
-when starting OpenCode.
+Review stdout and save the schema-2 document at `$SUBSCRIBERS`. Merge any other
+subscribers after migrating their entries to schema 2. Keep the parent directory
+privately owned with mode 0700 and the file mode 0600. Each Claude and Codex
+installer invocation names that file explicitly. Retain the prior relay and its
+schema-1 subscriber file for rollback. Familiar accepts both envelope versions.
+The generated snapshot observers include Claude Stop background facts and
+Codex worker events.
 
 Relay's installer plans by default. Inspect the JSON plan, then repeat the same
 arguments with `--apply --artifact <file>` to write the configuration and save a
@@ -168,8 +167,10 @@ launchers, or services. Follow the coordinated rollback below. The apply command
 recomputes the plan from the current configuration, so inspect a fresh plan if anything changed after review. For
 hook commands, relay records the Node executable used by its installer; use its
 `--node /absolute/stable/node` option when that executable would otherwise live
-under a version manager. Existing guard subscribers may require `--evidence`;
-follow relay's guide rather than removing them to make installation pass.
+under a version manager. The installer also needs `--qualification FILE` and
+`--session-mode MODE` for each selected Claude or Codex dispatch route. Set
+`QUALIFICATION_FILE` and `SESSION_MODE` to those values before each procedure.
+Existing guard subscribers may also require `--evidence`.
 
 ## Claude Code
 
@@ -190,9 +191,11 @@ cp -p "$HOME/.claude/settings.json" "$INSTALL_BACKUP/claude.before-familiar"
 # Merge the reviewed statusLine fragment now, then:
 cp -p "$HOME/.claude/settings.json" "$INSTALL_BACKUP/claude.after-familiar"
 "$RELAY_BIN" install --harness claude-code --subscribers "$SUBSCRIBERS" \
+  --qualification "$QUALIFICATION_FILE" --session-mode "$SESSION_MODE" \
   --target "$HOME/.claude/settings.json" --json
 # After reviewing the plan:
 "$RELAY_BIN" install --harness claude-code --subscribers "$SUBSCRIBERS" \
+  --qualification "$QUALIFICATION_FILE" --session-mode "$SESSION_MODE" \
   --target "$HOME/.claude/settings.json" \
   --apply --artifact "$INSTALL_BACKUP/claude-code-install.json"
 ```
@@ -203,14 +206,20 @@ Plan and apply relay's Codex hooks instead of generating Familiar hooks:
 
 ```sh
 "$RELAY_BIN" install --harness codex --subscribers "$SUBSCRIBERS" \
+  --qualification "$QUALIFICATION_FILE" --session-mode "$SESSION_MODE" \
   --target "$HOME/.codex/hooks.json" --json
 # After reviewing the plan:
 "$RELAY_BIN" install --harness codex --subscribers "$SUBSCRIBERS" \
+  --qualification "$QUALIFICATION_FILE" --session-mode "$SESSION_MODE" \
   --target "$HOME/.codex/hooks.json" \
   --apply --artifact "$INSTALL_BACKUP/codex-install.json"
 ```
 
-The hook targets must already contain valid configuration; for a fresh target,
+The relay 0.5.0 installer gives Codex SessionEnd 3 seconds. That fits relay's
+registry publication only, so Familiar reconciles the ended session on the next
+observation or scheduled reap.
+
+The hook targets must already contain valid configuration. For a fresh target,
 create its parent directory and an empty JSON object before planning. Codex asks
 for a one-time trust confirmation before it runs hooks. Codex draws its own pet,
 so it has no status line entry — see Codex pets below for the art.
@@ -300,12 +309,34 @@ Restart an existing Codex session after syncing.
 
 ## OpenCode
 
+Use relay 0.3.0 for the OpenCode server plugin. Relay 0.5.0 gives the plugin
+5 seconds and leaves 84 ms to run an observer after its reserves. Familiar's
+1-second OpenCode observer exceeds that budget.
+
+The OpenCode server plugin reads the default
+`${XDG_CONFIG_HOME:-$HOME/.config}/relay/subscribers.json` at runtime. Retain or
+add the following entry under the schema-1 document's `subscribers` array, replacing
+the example executable with the absolute path to your Familiar launcher.
+
+```json
+{
+  "name": "familiar-opencode",
+  "role": "observer",
+  "harnesses": ["opencode"],
+  "kinds": ["session-start", "activity", "idle", "needs-approval", "turn-error", "session-end"],
+  "argv": ["/absolute/path/to/familiar", "observe"],
+  "timeoutMs": 1000
+}
+```
+
 Relay installs the server plugin; Familiar installs the sprite renderer. Plan the relay change, review it, and
 apply it before installing the sprite. Save relay's exact postimage before
 Familiar removes the old server entry; rollback needs those bytes. With plain
 `$OPENCODE_DIR/opencode.json` and `$OPENCODE_DIR/tui.json` (no `.jsonc` siblings), run:
 
 ```sh
+OPENCODE_RELAY_BIN=/absolute/path/to/relay-0.3.0/bin/relay.js
+OPENCODE_SUBSCRIBERS="${XDG_CONFIG_HOME:-$HOME/.config}/relay/subscribers.json"
 OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 mkdir -p "$OPENCODE_DIR"
 if test -e "$OPENCODE_DIR/tui.json"; then
@@ -313,10 +344,10 @@ if test -e "$OPENCODE_DIR/tui.json"; then
 else
   touch "$INSTALL_BACKUP/tui.before-familiar.absent"
 fi
-"$RELAY_BIN" install --harness opencode --subscribers "$SUBSCRIBERS" \
+"$OPENCODE_RELAY_BIN" install --harness opencode --subscribers "$OPENCODE_SUBSCRIBERS" \
   --config-dir "$OPENCODE_DIR" --json
 # After reviewing the plan:
-"$RELAY_BIN" install --harness opencode --subscribers "$SUBSCRIBERS" \
+"$OPENCODE_RELAY_BIN" install --harness opencode --subscribers "$OPENCODE_SUBSCRIBERS" \
   --config-dir "$OPENCODE_DIR" \
   --apply --artifact "$INSTALL_BACKUP/opencode-install.json"
 cp -p "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-relay"
@@ -366,7 +397,7 @@ server/TUI changes, verifies relay's exact postimage, and rolls relay back:
     cp -p "$INSTALL_BACKUP/tui.before-familiar" "$OPENCODE_DIR/tui.json"
   fi
   cmp "$OPENCODE_DIR/opencode.json" "$INSTALL_BACKUP/opencode.after-relay"
-  "$RELAY_BIN" rollback --artifact "$INSTALL_BACKUP/opencode-install.json"
+  "$OPENCODE_RELAY_BIN" rollback --artifact "$INSTALL_BACKUP/opencode-install.json"
 )
 ```
 

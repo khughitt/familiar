@@ -13,28 +13,28 @@ test('Claude setup contains only the status line', () => {
     type: 'command', command: `${shellQuote(bin)} statusline`, refreshInterval: 2,
   } });
 });
-test('relay setup declares its observers and fits every mapped event budget', () => {
+test('schema-2 setup observers fit the released relay installer budgets', () => {
   const document = setupDocument('relay', bin);
-  const nonEnd = ['session-start', 'prompt', 'before-tool', 'activity', 'idle', 'needs-input', 'needs-approval', 'turn-end', 'turn-error', 'reconcile'];
-  assert.deepEqual(document, { schema: 1, subscribers: [
-    { name: 'familiar', role: 'observer', harnesses: ['claude-code', 'codex'], kinds: nonEnd, argv: [bin, 'observe'], timeoutMs: 2000 },
-    { name: 'familiar-opencode', role: 'observer', harnesses: ['opencode'], kinds: ['session-start', 'activity', 'idle', 'needs-approval', 'turn-error', 'session-end'], argv: [bin, 'observe'], timeoutMs: 1000 },
-    { name: 'familiar-teardown', role: 'observer', harnesses: ['claude-code'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 400 },
-    { name: 'familiar-teardown-codex', role: 'observer', harnesses: ['codex'], kinds: ['session-end'], argv: [bin, 'observe'], timeoutMs: 267 },
-  ] });
   const config = validateSubscribers(document);
+  for (const observer of config.subscribers) {
+    assert.equal(observer.registry, 'snapshot');
+    assert.deepEqual(observer.argv, ['familiar', 'observe']);
+  }
   for (const harness of ['claude-code', 'codex', 'opencode']) {
-    for (const [nativeEvent, { kind }] of Object.entries(adapterFor(harness).events)) {
-      assert.doesNotThrow(() => checkBudget(config, budgetFor({ harness, nativeEvent }), { harness, kind }));
+    for (const [nativeEvent, { kind }] of Object.entries(adapterFor(harness).hookEvents)) {
+      const outerMs = nativeEvent === 'SessionEnd' ? (harness === 'claude-code' ? 60000 : 3000) : undefined;
+      const observers = checkBudget(config, budgetFor({ harness, nativeEvent, outerMs }), { harness, kind, nativeEvent });
+      if (harness === 'opencode' || (harness === 'codex' && nativeEvent === 'SessionEnd')
+        || ['after-tool', 'tool-error', 'model-change', 'compact-start', 'compact-end'].includes(kind)
+        || (harness === 'claude-code' && ['child-start', 'child-stop'].includes(kind))) {
+        assert.deepEqual(observers, [], `${harness} ${nativeEvent}`);
+      } else {
+        assert.equal(observers.length, 1, `${harness} ${nativeEvent}`);
+      }
     }
   }
-  // A cold `familiar observe` takes about 200 ms, so each teardown takes every
-  // millisecond relay admits for SessionEnd at that harness's default outer timeout.
-  for (const harness of ['claude-code', 'codex']) {
-    const [teardown] = checkBudget(config, budgetFor({ harness, nativeEvent: 'SessionEnd' }), { harness, kind: 'session-end' });
-    assert.equal(teardown.timeoutMs, budgetFor({ harness, nativeEvent: 'SessionEnd' }).subscribersMs, harness);
-  }
-  assert.doesNotThrow(() => checkBudget(config, budgetFor({ outerMs: 60000 }), { kind: 'reconcile' }));
+  assert.deepEqual(checkBudget(config, budgetFor({ outerMs: 30000 }), { kind: 'reconcile' }).map(({ name }) => name), ['familiar']);
+  assert.deepEqual(config.subscribers[0].privateFields, [{ nativeEvent: 'Stop', fields: ['backgroundTasks'] }]);
 });
 test('relay setup adds an agy observer only when asked, and it fits every agy event budget', () => {
   const plain = setupDocument('relay', bin);
@@ -43,8 +43,8 @@ test('relay setup adds an agy observer only when asked, and it fits every agy ev
   const document = setupDocument('relay', bin, { agy: true });
   assert.deepEqual(document.subscribers.slice(0, -1), plain.subscribers);
   assert.deepEqual(document.subscribers.at(-1), {
-    name: 'familiar-agy', role: 'observer', harnesses: ['agy'],
-    kinds: ['session-start', 'before-tool', 'turn-end'], argv: [bin, 'observe'], timeoutMs: 2000,
+    name: 'familiar-agy', role: 'observer', registry: 'snapshot', harnesses: ['agy'],
+    kinds: ['session-start', 'before-tool', 'turn-end'], argv: ['familiar', 'observe'], timeoutMs: 2000,
   });
   // Every agy event relay maps reaches familiar, and nothing familiar asks for is unmapped.
   const mapped = Object.values(adapterFor('agy').events).map(({ kind }) => kind);
