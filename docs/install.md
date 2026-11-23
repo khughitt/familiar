@@ -377,6 +377,21 @@ A malformed configuration prevents any Familiar writes.
 Restart OpenCode after installation. For server-side errors, inspect relay's
 `~/.local/state/relay/opencode-plugin.log` (or the log under `RELAY_STATE_DIR`).
 
+## pi
+
+pi loads each directory under `~/.pi/agent/extensions/` with an `index.ts`. Link
+Familiar's extension there:
+
+```sh
+ln -s "$FAMILIAR_CHECKOUT/integrations/pi" ~/.pi/agent/extensions/familiar
+```
+
+The extension runs `familiar` from `PATH`, or the launcher `FAMILIAR_BIN` names.
+To try a checkout without installing it, run
+`FAMILIAR_BIN=<checkout>/bin/familiar pi --extension <checkout>/integrations/pi`.
+Restart pi (or `/reload`) after linking; remove the link to restore pi's own
+footer. See [pi](surfaces.md#pi) for what it shows.
+
 ## Rollback
 
 These commands apply only to the sequence recorded above.

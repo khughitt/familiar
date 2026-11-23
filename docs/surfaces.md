@@ -17,6 +17,7 @@ that registry and publishes presentation intent; renderers own the space they dr
 | agy | The same statusline arrangement; agy configuration is managed outside Familiar's installer. |
 | Codex | Native pet renderer; Familiar installs sheets and maintains eligible project selections. |
 | OpenCode | Relay server plugin supplies events; Familiar TUI plugin renders intent in its sidebar box. |
+| pi | Familiar's pi extension replaces pi's footer with the statusline's lines; no pet until relay has a pi adapter. |
 | Niri moments | Quickshell reserves eligible episodes from attention.json on the focused output. |
 | Noctalia pills | Plugin reads attention.json and niri-workspaces.json, with trusted health. |
 | Niri window signals | familiar-niri watch maps intent to each terminal's niri-material signal slot. |
@@ -136,6 +137,26 @@ stream alongside the frontend. Combining-diacritic placeholders are not portable
 through that layout path. TUI API integration is version-coupled; an isolated
 fixture does not replace real-OpenCode acceptance. Install server then renderer;
 JSONC/unverifiable entries require the [documented manual edits](install.md#opencode).
+
+## pi
+
+`integrations/pi/` is a pi extension that replaces pi's footer with the lines
+`familiar statusline` prints for a Claude-shaped payload: session id `pi:<id>`,
+pi's working directory, the model as pi's footer names it (id, then the thinking
+level for a reasoning model) and pi's context usage. pi redraws its footer every
+frame, so the extension keeps the last lines and reruns familiar on pi's events
+(agent and turn boundaries, tool results, model or thinking changes, compaction,
+a git branch change) and every 10 seconds; a run past 2 seconds, a non-zero exit
+or a missing launcher shows as a `familiar statusline:` line under the HUD.
+Other extensions' `setStatus` texts follow on one line, as in pi's own footer.
+
+Relay has no pi adapter yet, so no bus record carries a pi
+session: the HUD is uncoloured, its state slot reads as absent and there is no
+image. pi's renderer already counts placeholder cells one column each, so a pet
+needs the adapter, not a new rendering path. `tasks` does not record pi sessions
+as `pi:<id>` claims either, so the task segment stays empty under pi. `familiar
+reap` removes pi sessions' render-cache entries, since none is on the bus.
+Checked live against pi 1.1.0; [install](install.md#pi).
 
 ## Desktop
 

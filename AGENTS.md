@@ -48,7 +48,7 @@ never edit them.
 ## Layout
 
 - `bin/`: launchers and CLI implementations; `src/`: the engine.
-- `integrations/`: Niri, Noctalia and OpenCode plugins.
+- `integrations/`: Niri, Noctalia, OpenCode and pi plugins.
 - `test/`: the suite; `tools/test-runner.mjs` runs it in isolated workers.
 - `tools/`: test and gate helpers, plus ops tooling vendored as exact copies
   (tools/README.md); never edit a vendored copy.
