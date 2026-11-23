@@ -380,10 +380,11 @@ Restart OpenCode after installation. For server-side errors, inspect relay's
 ## pi
 
 pi loads each directory under `~/.pi/agent/extensions/` with an `index.ts`. Link
-Familiar's extension there:
+Familiar's extension there, replacing `<checkout>` with the absolute path of your
+Familiar checkout:
 
 ```sh
-ln -s "$FAMILIAR_CHECKOUT/integrations/pi" ~/.pi/agent/extensions/familiar
+ln -s <checkout>/integrations/pi ~/.pi/agent/extensions/familiar
 ```
 
 The extension runs `familiar` from `PATH`, or the launcher `FAMILIAR_BIN` names.

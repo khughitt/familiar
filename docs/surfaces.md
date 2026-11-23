@@ -146,9 +146,13 @@ pi's working directory, the model as pi's footer names it (id, then the thinking
 level for a reasoning model) and pi's context usage. pi redraws its footer every
 frame, so the extension keeps the last lines and reruns familiar on pi's events
 (agent and turn boundaries, tool results, model or thinking changes, compaction,
-a git branch change) and every 10 seconds; a run past 2 seconds, a non-zero exit
-or a missing launcher shows as a `familiar statusline:` line under the HUD.
-Other extensions' `setStatus` texts follow on one line, as in pi's own footer.
+`/tree` moves, a git branch change) and every 10 seconds. Only terminal (`tui`)
+sessions get the footer; RPC, JSON and print modes never run familiar. A run past
+2 seconds, a non-zero exit, a missing launcher, or an exit 0 with nothing on stdout
+(how familiar reports its own errors under `statusline`) shows as a
+`familiar statusline:` line under the last good HUD. Another extension replacing
+the footer stops the refreshes. Other extensions' `setStatus` texts follow on one
+sanitised line, as in pi's own footer.
 
 Relay has no pi adapter yet, so no bus record carries a pi
 session: the HUD is uncoloured, its state slot reads as absent and there is no
