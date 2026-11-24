@@ -108,13 +108,22 @@ writes nothing, so the session keeps its previous record. The member is:
 
 | role | the theme holds the role | pin names a member of this theme | member | source shown |
 | --- | --- | --- | --- | --- |
-| none | not applicable | no | the `default` holder | `default` |
+| none | not applicable | no | the project's hashed member | `auto` |
 | none | not applicable | yes | the pinned member | `pin` |
 | set | yes | either | the role's member | `role` |
-| set | no | no | the `default` holder | `unmapped` |
+| set | no | no | the project's hashed member | `unmapped` |
 | set | no | yes | the pinned member | `pin` |
 
-A pin replaces the `default` holder for its project and never overrides a role the theme
+The hashed member is drawn from a hash of the project key (the same key the
+[slot](#project-colour) hash reads, mixed separately), so unpinned projects show
+different members with no configuration, and a project keeps its member across sessions
+and hosts. Only members that hold no role other than `default` are drawn, so a role's
+member stays that role's face alone. A theme whose every member holds a real role leaves
+nothing to draw: its `default` holder is used and shown as `default`. Adding, removing or
+reordering a theme's role-free members can move projects to other members; pin the ones
+that matter.
+
+A pin replaces the hashed member for its project and never overrides a role the theme
 covers. A role the theme does not cover is not a fault; `familiar whoami` shows
 `unmapped` so a theme author sees which roles the cast lacks. The hue is the project's,
 as in [Project colour](#project-colour); roles never change it.

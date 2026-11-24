@@ -1,18 +1,33 @@
 import { presentationFor, ttlFor, decayTo } from '../protocol/intent.js';
 import { identityColors } from '../theme/ramp.js';
-import { assertState, defaultMember, memberForRole, memberOrThrow } from 'familiar-theme';
+import { DEFAULT_ROLE, assertState, defaultMember, memberForRole, memberOrThrow } from 'familiar-theme';
 import { assertHexColor } from '../protocol/color.js';
 import { slotForColor } from '../protocol/slot-hues.js';
 import { themeFor } from '../config.js';
 import { autoSlot } from './identity.js';
+import { fnv1a32, mix32 } from '../protocol/hash.js';
 import { matchPin, pinnedMember } from './pins.js';
 import { MOTION_POLICIES } from '../animation/program.js';
 import { RESERVED_ROLE } from './id.js';
 
 const nullableString = (value) => value === null || typeof value === 'string';
 
+// A project's own face when no covered role and no pin decides one: a member drawn from
+// a hash of the project key, so unconfigured projects differ without any setup. Only
+// members holding no role but `default` are drawn, in pack order, so a role's member
+// stays that role's face alone: a reviewer never looks like the project it reviews. A
+// pack whose every member holds a real role leaves no pool and falls back to the
+// `default` holder. The hash is mixed (see mix32) and independent of the slot's.
+export function autoMember(pack, projectKey) {
+  const pool = [...pack.members.values()]
+    .filter((member) => member.roles.every((role) => role === DEFAULT_ROLE))
+    .map((member) => member.id);
+  if (pool.length === 0) return { memberId: defaultMember(pack), pooled: false };
+  return { memberId: pool[mix32(fnv1a32(projectKey)) % pool.length], pooled: true };
+}
+
 // projectKey -> slot -> hue for the colour; family -> theme, then role, pin and the
-// theme's `default` holder -> member for the face. The two axes are independent: a
+// project's hashed member -> member for the face. The two axes are independent: a
 // role never changes a project's colour, and a slot never chooses a member.
 //
 // `remote`, `repoRoot` and `repositoryRoot` are carried separately rather than
@@ -52,7 +67,7 @@ export function resolveIdentity({
     );
   }
 
-  // 3. Member. A pin is the project's own face: it replaces the `default` holder and
+  // 3. Member. A pin is the project's own face: it replaces the hashed member and
   // never overrides a role the theme covers. A pin naming a member its theme lacks is
   // an error whichever way the table resolves, so a broken pin cannot hide behind a role.
   const pinned = pinnedMember(pin, theme);
@@ -67,8 +82,10 @@ export function resolveIdentity({
     memberId = pinned;
     memberSource = 'pin';
   } else {
-    memberId = defaultMember(pack);
-    memberSource = role === null ? 'default' : 'unmapped';
+    const auto = autoMember(pack, projectKey);
+    memberId = auto.memberId;
+    if (role !== null) memberSource = 'unmapped';
+    else memberSource = auto.pooled ? 'auto' : 'default';
   }
   const member = memberOrThrow(pack, memberId);
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveIdentity, resolveIdentities, resolveIntent, resolveAll } from '../src/bus/resolve.js';
+import { autoMember, resolveIdentity, resolveIdentities, resolveIntent, resolveAll } from '../src/bus/resolve.js';
 import { autoSlot } from '../src/bus/identity.js';
 import { parseIdentities } from '../src/bus/pins.js';
 import { TTL_DONE_MS, TTL_ERROR_MS } from '../src/protocol/intent.js';
@@ -128,22 +128,22 @@ const pinMember = (member, theme = 'cats') => parseIdentities(
   `identities:\n  - project: api\n    slot: 6\n    members:\n      ${theme}: ${member}\n`
 );
 
-test('an unpinned project with no role gets its slot by hash and the default member', () => {
+test('an unpinned project with no role gets its slot and its member by hash', () => {
   const identity = resolveIdentity({ ...ctx, catalog: NO_PINS, themes: THEMES });
   assert.deepEqual(identity, {
     projectKey: 'github.com/me/api',
     project: 'api',
     slot: 3,                      // frozen: autoSlot('github.com/me/api')
-    member: 'ginger-tabby',       // the `default` holder
-    label: 'Ginger Tabby',
+    member: 'schrodingers-cat',   // frozen: autoMember(PACK, 'github.com/me/api')
+    label: "Schrodinger's Cat",
     projectColor: null,
     source: 'auto',
     family: null,
     theme: 'cats',
     themeSource: 'default',
     role: null,
-    memberSource: 'default',
-    anchor: 'floor',
+    memberSource: 'auto',
+    anchor: 'center',
   });
 });
 
@@ -171,11 +171,11 @@ test('a role the theme covers beats a pin-free lookup of the default holder', ()
   assert.deepEqual([identity.member, identity.memberSource], ['ginger-tabby', 'role']);
 });
 
-test('a role the theme does not cover falls back to the default holder, marked unmapped', () => {
+test('a role the theme does not cover falls back to the hashed member, marked unmapped', () => {
   const identity = resolveIdentity({ ...ctx, role: 'poet', catalog: NO_PINS, themes: THEMES });
   assert.deepEqual(
     [identity.member, identity.role, identity.memberSource],
-    ['ginger-tabby', 'poet', 'unmapped'],
+    ['schrodingers-cat', 'poet', 'unmapped'],
   );
 });
 
@@ -186,6 +186,51 @@ test('a role the theme does not cover yields to a pin', () => {
   assert.deepEqual([identity.member, identity.memberSource], ['maine-coon', 'pin']);
 });
 
+test('projects differ by hash: two unpinned keys draw different members, repeatably', () => {
+  const api = resolveIdentity({ ...ctx, catalog: NO_PINS, themes: THEMES });
+  const web = resolveIdentity({
+    ...ctx, projectKey: 'github.com/me/web', remote: 'github.com/me/web', project: 'web',
+    catalog: NO_PINS, themes: THEMES,
+  });
+  assert.deepEqual([api.member, web.member], ['schrodingers-cat', 'maine-coon']);
+  assert.equal(resolveIdentity({ ...ctx, catalog: NO_PINS, themes: THEMES }).member, api.member);
+});
+
+test('the hash never draws a member that holds a real role, even the default holder', () => {
+  // ginger-tabby holds [default, planner] and dog-in-disguise [reviewer]: neither is drawn.
+  const drawn = new Set();
+  for (let i = 0; i < 200; i += 1) drawn.add(autoMember(PACK, `github.com/me/p${i}`).memberId);
+  assert.deepEqual([...drawn].sort(), ['maine-coon', 'schrodingers-cat']);
+});
+
+test('a pack whose every member holds a real role falls back to the default holder', () => {
+  const roled = parseThemePack(`
+spec-version: 2
+id: crew
+label: Crew
+members:
+  - id: lead
+    asset-root: sprites/lead
+    label: Lead
+    roles: [default, planner]
+    persona: The Lead.
+    animation: { kind: static }
+    poses:
+${POSES}
+  - id: critic
+    asset-root: sprites/critic
+    label: Critic
+    roles: [reviewer]
+    persona: The Critic.
+    animation: { kind: static }
+    poses:
+${POSES}
+`, '/themes/crew');
+  const themes = { themeId: 'crew', families: {}, packFor: () => roled };
+  const identity = resolveIdentity({ ...ctx, catalog: NO_PINS, themes });
+  assert.deepEqual([identity.member, identity.memberSource], ['lead', 'default']);
+});
+
 test('a role that is not a valid id throws', () => {
   assert.throws(
     () => resolveIdentity({ ...ctx, role: 'Reviewer', catalog: NO_PINS, themes: THEMES }),
@@ -193,11 +238,11 @@ test('a role that is not a valid id throws', () => {
   );
 });
 
-test('a family named in families: chooses its theme and that theme\'s default member', () => {
+test('a family named in families: chooses its theme and the member comes from that theme', () => {
   const identity = resolveIdentity({ ...ctx, family: 'verifiably', catalog: NO_PINS, themes: THEMES });
   assert.deepEqual(
     [identity.family, identity.theme, identity.themeSource, identity.member, identity.label, identity.memberSource],
-    ['verifiably', 'plants', 'family', 'fern', 'Fern', 'default'],
+    ['verifiably', 'plants', 'family', 'fern', 'Fern', 'auto'],
   );
 });
 
@@ -205,7 +250,7 @@ test('a family not named in families: keeps the default theme', () => {
   const identity = resolveIdentity({ ...ctx, family: 'guild', catalog: NO_PINS, themes: THEMES });
   assert.deepEqual(
     [identity.family, identity.theme, identity.themeSource, identity.member],
-    ['guild', 'cats', 'default', 'ginger-tabby'],
+    ['guild', 'cats', 'default', 'schrodingers-cat'],
   );
 });
 
@@ -227,7 +272,7 @@ test('a family whose theme fails to load throws that theme\'s error', () => {
     /theme "plants": theme\.yaml: members must be a list/,
   );
   // Only that family's theme is loaded: the default theme still resolves.
-  assert.equal(resolveIdentity({ ...ctx, catalog: NO_PINS, themes }).member, 'ginger-tabby');
+  assert.equal(resolveIdentity({ ...ctx, catalog: NO_PINS, themes }).member, 'schrodingers-cat');
 });
 
 test('pins are theme-scoped: the resolved theme reads its own entry of a pin', () => {
@@ -269,7 +314,7 @@ test('the anchor is the resolved member\'s', () => {
 test('a slot pin overrides the hash and no longer constrains the member', () => {
   const catalog = parseIdentities('identities:\n  - project: api\n    slot: 6\n');
   const identity = resolveIdentity({ ...ctx, catalog, themes: THEMES });
-  assert.deepEqual([identity.slot, identity.source, identity.member], [6, 'pin', 'ginger-tabby']);
+  assert.deepEqual([identity.slot, identity.source, identity.member], [6, 'pin', 'schrodingers-cat']);
 });
 
 test('a member pinned beside any slot is accepted: the member/slot check is gone', () => {
@@ -282,7 +327,7 @@ test('a member pinned beside any slot is accepted: the member/slot check is gone
 
 test('a member pin naming an uninstalled theme is INERT, not an error', () => {
   const identity = resolveIdentity({ ...ctx, catalog: pinMember('ember', 'elements'), themes: THEMES });
-  assert.deepEqual([identity.member, identity.memberSource], ['ginger-tabby', 'default']);
+  assert.deepEqual([identity.member, identity.memberSource], ['schrodingers-cat', 'auto']);
 });
 
 test('a path pin matches a repo that ALSO has a remote — the pin is not silently ignored', () => {
@@ -298,7 +343,7 @@ test('slot and colours are unchanged: a colour still decides the slot', () => {
   const ginger = resolveIdentity({ ...ctx, projectColor: '#bc8369', catalog: NO_PINS, themes: THEMES });
   assert.deepEqual([ginger.slot, ginger.source, ginger.projectColor], [0, 'colour', '#bc8369']);
   const green = resolveIdentity({ ...ctx, projectColor: '#317d01', catalog: NO_PINS, themes: THEMES });
-  assert.deepEqual([green.slot, green.member, green.source], [3, 'ginger-tabby', 'colour']);
+  assert.deepEqual([green.slot, green.member, green.source], [3, 'schrodingers-cat', 'colour']);
 });
 
 test('undefined family or role throws, as projectColor does', () => {
@@ -316,8 +361,9 @@ test('undefined family or role throws, as projectColor does', () => {
   );
 });
 
-// `default` is the one reserved role: it names the member an agent with no role gets,
-// so a record carries null for that agent, never the word (controller ruling 8).
+// `default` is the one reserved role: it names the member a pack falls back to when no
+// member is free to draw, so a record carries null for an agent with no role, never the
+// word (controller ruling 8).
 test('a role of "default" is refused, not resolved as a role', () => {
   assert.throws(
     () => resolveIdentity({ ...ctx, role: 'default', catalog: NO_PINS, themes: THEMES }),
@@ -488,7 +534,7 @@ test('resolveIdentities resolves every record once, keyed by session id', () => 
   };
   const { identities, faults } = resolveIdentities({ agents, catalog: NO_PINS, themes: THEMES });
   assert.deepEqual([...identities.keys()], ['s1', 's2', 's3']);
-  assert.equal(identities.get('s1').member, 'ginger-tabby');
+  assert.equal(identities.get('s1').member, 'schrodingers-cat');
   assert.equal(identities.get('s2').member, 'dog-in-disguise');
   assert.deepEqual([identities.get('s3').theme, identities.get('s3').member], ['plants', 'fern']);
   assert.equal(faults.size, 0);
@@ -513,7 +559,7 @@ test('an unresolvable record is a FAULT ON THAT RECORD, not on the pass', () => 
   const { identities, faults } = resolveIdentities({ agents, catalog, themes: THEMES });
 
   assert.deepEqual([...identities.keys()], ['s1'], 'the healthy record still resolves');
-  assert.equal(identities.get('s1').member, 'ginger-tabby');
+  assert.equal(identities.get('s1').member, 'schrodingers-cat');
   assert.match(faults.get('s2'), /theme "cats" has no member "cheshire"/);
   assert.equal(faults.size, 1);
 });
@@ -599,7 +645,7 @@ test('a worktree path pin brings its own member map, never the inherited one', (
   ] };
   const result = resolveIdentity({ ...WORKTREE, catalog, themes: THEMES });
   assert.equal(result.slot, 6);
-  assert.equal(result.member, 'ginger-tabby', 'the default holder, not the inherited maine-coon');
+  assert.equal(result.member, 'schrodingers-cat', 'the hashed member, not the inherited maine-coon');
 });
 
 test('resolveAll keys intent records by session id', () => {

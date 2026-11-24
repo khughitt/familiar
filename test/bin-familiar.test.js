@@ -2770,7 +2770,7 @@ test('whoami reports the family, its theme and the role from FAMILIAR_ROLE', (t)
   assert.match(text.stdout, /^  family  guild · theme guild-theme \(family\)$/m);
   assert.match(text.stdout, /^  role    reviewer · member .+ \(unmapped\)$/m);
   const bare = whoami(e, a);
-  assert.deepEqual([bare.role, bare.memberSource], [null, 'default']);
+  assert.deepEqual([bare.role, bare.memberSource], [null, 'auto']);
 });
 
 test('whoami refuses a reserved or malformed FAMILIAR_ROLE', (t) => {
@@ -2787,8 +2787,8 @@ test('projects lists checkouts with no role even when FAMILIAR_ROLE is set', (t)
   const { a, b, e } = familyLayout(t);
   const rows = projectsJson({ ...e, FAMILIAR_ROLE: 'reviewer' }, [a, b]);
   assert.deepEqual(rows.map((p) => [p.project, p.family, p.theme, p.themeSource, p.memberSource]), [
-    ['alpha', 'guild', 'guild-theme', 'family', 'default'],
-    ['beta', 'grove', 'grove-theme', 'family', 'default'],
+    ['alpha', 'guild', 'guild-theme', 'family', 'auto'],
+    ['beta', 'grove', 'grove-theme', 'family', 'auto'],
   ]);
   assert.equal(Object.hasOwn(rows[0], 'role'), false);
 });
@@ -2801,5 +2801,5 @@ test('projects lists two families under two theme headers', (t) => {
   assert.equal(headers.length, 2, r.stdout);
   assert.match(headers[0], /^  guild-theme — /);
   assert.match(headers[1], /^  grove-theme — /);
-  assert.match(r.stdout, /^      .+ · default · auto$/m);
+  assert.match(r.stdout, /^      .+ · auto · auto$/m);
 });

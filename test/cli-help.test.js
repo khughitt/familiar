@@ -206,7 +206,7 @@ test('whoami reports the resolver and proves selected assets', (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /^widget$/m);
   assert.match(result.stdout, /^  family\s+— · theme fixture \(default\)$/m);
-  assert.match(result.stdout, /^  role\s+— · member .+ \(default\)$/m);
+  assert.match(result.stdout, /^  role\s+— · member .+ \(auto\)$/m);
   assert.match(result.stdout, /^  slot\s+\d+ · hue \d+°$/m);
   assert.match(result.stdout, /^  member\s+.+ \([a-z0-9-]+\)$/m);
 
@@ -247,8 +247,8 @@ test('projects prints one cell per directory and says who decided the slot', (t)
   // Sorted by label, one column off a TTY, blank line between cells.
   const cells = result.stdout.trim().split('\n\n').slice(1);
   assert.equal(cells.length, 2);
-  assert.match(cells[0], /^  #[0-9a-f]{6}  loose\n      .+ · default · auto$/);
-  assert.match(cells[1], /^  #[0-9a-f]{6}  widget\n      .+ · default · pin$/);
+  assert.match(cells[0], /^  #[0-9a-f]{6}  loose\n      .+ · auto · auto$/);
+  assert.match(cells[1], /^  #[0-9a-f]{6}  widget\n      .+ · auto · pin$/);
 
   // With no DIR the pin catalog's paths are the list.
   const pinsOnly = run(['projects'], f.env);
@@ -292,7 +292,7 @@ test('projects shows the project colour and its source', (t) => {
   const r = run(['--color', 'never', 'projects', gitRepo(t)], f.env);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
-  assert.match(r.stdout, /^  #317d01  widget\n      .+ · default · colour$/m);
+  assert.match(r.stdout, /^  #317d01  widget\n      .+ · auto · colour$/m);
 });
 
 test('projects fills the terminal width with columns', (t) => {

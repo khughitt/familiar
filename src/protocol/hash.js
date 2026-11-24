@@ -24,3 +24,17 @@ export function fnv1a32Bytes(bytes, seed = 0x811c9dc5) {
   }
   return h >>> 0;
 }
+
+// murmur3's 32-bit finalizer. An ADDITION, like fnv1a32Bytes: fnv1a32 stays frozen.
+// FNV-1a diffuses its last bytes poorly into both ends of the word (bit 0 is just the
+// parity of the input's low bits), so keys that differ only in their tail, which project
+// keys usually do, crowd into a few buckets under `% n`. Mixing first spreads them.
+export function mix32(h) {
+  let x = h >>> 0;
+  x ^= x >>> 16;
+  x = Math.imul(x, 0x85ebca6b);
+  x ^= x >>> 13;
+  x = Math.imul(x, 0xc2b2ae35);
+  x ^= x >>> 16;
+  return x >>> 0;
+}
