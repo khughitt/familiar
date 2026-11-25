@@ -26,7 +26,9 @@ try {
   for await (const line of lines) {
     if (stopping) break;
     const { event, payload } = JSON.parse(line);
+    // Relay's installer raises Claude SessionEnd to 60 s: its 1.5 s default admits no observer.
     const child = spawn(process.execPath, [relay, 'hook', '--harness', 'claude-code',
+      ...(event === 'SessionEnd' ? ['--outer-ms', '60000'] : []),
       '--subscribers', subscribers, event], { stdio: ['pipe', 'inherit', 'inherit'] });
     active = once(child, 'close');
     child.stdin.end(JSON.stringify(payload));
