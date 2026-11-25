@@ -37,7 +37,8 @@ test('readFields reads the payload pi builds', () => {
     thinkingLevel: 'high',
     contextUsage: { tokens: 105_000, contextWindow: 1_000_000, percent: 10.5 },
   });
-  assert.equal(payload.session_id, 'pi:abc');
+  // The bus keys a session by its bare id; only a claim names it with its harness.
+  assert.equal(payload.session_id, 'abc');
   const claimed = [];
   const fields = readFields(payload, {
     git: (cwd) => (cwd === '/work/tasks' ? 'main' : null),
@@ -212,7 +213,7 @@ test('the footer shows familiar lines, then a fault under the last good lines', 
   await emit('session_start');
   await settle();
   assert.deepEqual(host.footer.render(80), ['row one', 'row two']);
-  assert.equal(runs[0].payload.session_id, 'pi:s1');
+  assert.equal(runs[0].payload.session_id, 's1');
   assert.equal(runs[0].command, 'familiar');
   await emit('agent_end');
   await settle();

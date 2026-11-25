@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# cli_surface 4: the conformance half of docs/cli-conventions.md.
+# cli_surface 5: automation-tier parsers retain explicit color options.
 """Build a CLI's parser surface and compare it with its rows in cli.toml.
 
 Vendored from https://github.com/khughitt/ops (bin/cli_surface.py); never edit the copy, see tools/README.md.
@@ -16,7 +16,8 @@ tuple or (); `default` is a string or None, and for a flag it is "true" when the
 defaults on and None otherwise. Roles, verbs, output, protocol, and exception are
 table-only metadata and never compared.
 
---json, --pretty, --color, -h, and --help are implied on every command and never rows;
+--json, --pretty, -h, and --help are implied on every command and never rows;
+--color is implied for typed CLIs; argparse automation adapters pass tier="automation".
 -V and --version are implied at the root only, so a nested --version (mindful history)
 is an ordinary option row. The root `help` command is implied by the Help rule and
 never a row.
@@ -34,10 +35,11 @@ IMPLIED_EVERYWHERE = {"--json", "--pretty", "--color", "-h", "--help"}
 IMPLIED_AT_ROOT = {"-V", "--version"}
 
 
-def implied(names, path):
+def implied(names, path, tier="typed"):
     """True when an option with these names is implied by the CLI header at this path."""
     names = set(names)
-    return bool(names & IMPLIED_EVERYWHERE) or (not path and bool(names & IMPLIED_AT_ROOT))
+    everywhere = IMPLIED_EVERYWHERE if tier=="typed" else IMPLIED_EVERYWHERE-{"--color"}
+    return bool(names & everywhere) or (not path and bool(names & IMPLIED_AT_ROOT))
 
 
 def normalize_names(names):
@@ -86,10 +88,12 @@ def _argparse_kind(action):
     return "string"
 
 
-def argparse_rows(parser, path=(), summary=None):
+def argparse_rows(parser, path=(), summary=None, *, tier="typed"):
     """The live surface of an argparse parser tree. A subparser's help is its summary,
     its own description when it has no help; a `type=` callable named ref, when, or
     age declares that value kind; Path and int map. The parser is never modified."""
+    if tier not in ("typed","automation"):
+        raise ValueError(f"unknown CLI tier: {tier}")
     rows = set()
     if path:
         rows.add(("command", tuple(path), (summary or parser.description or "").rstrip(".")))
@@ -108,12 +112,12 @@ def argparse_rows(parser, path=(), summary=None):
                 seen.add(id(sub))
                 if not path and name == "help":
                     continue
-                rows |= argparse_rows(sub, path + (name,), helps.get(name) or sub.description)
+                rows |= argparse_rows(sub, path + (name,), helps.get(name) or sub.description,tier=tier)
             continue
         kind = _argparse_kind(action)
         values = tuple(action.choices) if action.choices is not None else ()
         if action.option_strings:
-            if implied(action.option_strings, path):
+            if implied(action.option_strings, path,tier):
                 continue
             default = None
             if kind == "none":

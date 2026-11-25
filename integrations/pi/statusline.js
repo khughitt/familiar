@@ -39,12 +39,12 @@ export function sanitizeStatus(text) {
   return text.replace(/[\r\n\t]/g, ' ').replace(/ +/g, ' ').trim();
 }
 
-// `pi:<session id>` is the key relay's planned pi adapter names pi sessions by. Until
-// that adapter exists no bus record carries it, so the HUD renders uncoloured with no image;
-// the render cache is still keyed per session.
+// The session id is pi's own, bare: the key of the session's bus record, whose relay agent id
+// is `pi:<id>`. `product` is how claimSession names that agent id to tasks.
 export function statuslinePayload({ sessionId, cwd, model, thinkingLevel, contextUsage }) {
   return {
-    session_id: `pi:${sessionId}`,
+    session_id: sessionId,
+    product: 'pi',
     cwd,
     workspace: { current_dir: cwd },
     model: { display_name: modelLabel(model, thinkingLevel) },

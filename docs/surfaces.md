@@ -17,7 +17,7 @@ that registry and publishes presentation intent; renderers own the space they dr
 | agy | The same statusline arrangement; agy configuration is managed outside Familiar's installer. |
 | Codex | Native pet renderer; Familiar installs sheets and maintains eligible project selections. |
 | OpenCode | Relay server plugin supplies events; Familiar TUI plugin renders intent in its sidebar box. |
-| pi | Familiar's pi extension replaces pi's footer with the statusline's lines; no pet until relay has a pi adapter. |
+| pi | Familiar's pi extension replaces pi's footer with the statusline's lines; no pet until pi's events reach Familiar. |
 | Niri moments | Quickshell reserves eligible episodes from attention.json on the focused output. |
 | Noctalia pills | Plugin reads attention.json and niri-workspaces.json, with trusted health. |
 | Niri window signals | familiar-niri watch maps intent to each terminal's niri-material signal slot. |
@@ -141,9 +141,9 @@ JSONC/unverifiable entries require the [documented manual edits](install.md#open
 ## pi
 
 `integrations/pi/` is a pi extension that replaces pi's footer with the lines
-`familiar statusline` prints for a Claude-shaped payload: session id `pi:<id>`,
-pi's working directory, the model as pi's footer names it (id, then the thinking
-level for a reasoning model) and pi's context usage. pi redraws its footer every
+`familiar statusline` prints for a Claude-shaped payload: product `pi`, pi's bare
+session id, pi's working directory, the model as pi's footer names it (id, then the
+thinking level for a reasoning model) and pi's context usage. pi redraws its footer every
 frame, so the extension keeps the last lines and reruns familiar on pi's events
 (agent and turn boundaries, tool results, model or thinking changes, compaction,
 `/tree` moves, a git branch change) and every 10 seconds. Only terminal (`tui`)
@@ -154,12 +154,13 @@ sessions get the footer; RPC, JSON and print modes never run familiar. A run pas
 the footer stops the refreshes. Other extensions' `setStatus` texts follow on one
 sanitised line, as in pi's own footer.
 
-Relay has no pi adapter yet, so no bus record carries a pi
-session: the HUD is uncoloured, its state slot reads as absent and there is no
-image. pi's renderer already counts placeholder cells one column each, so a pet
-needs the adapter, not a new rendering path. `tasks` does not record pi sessions
-as `pi:<id>` claims either, so the task segment stays empty under pi. `familiar
-reap` removes pi sessions' render-cache entries, since none is on the bus.
+Familiar accepts relay's pi rows (agent id `pi:<id>`, bus key `<id>`) and transmits
+the pose for them; pi's renderer counts placeholder cells one column each. None
+arrives yet: the relay release Familiar pins has no pi adapter and refuses a
+registry holding such a row, so that pin moves before relay's pi extension is
+linked on a host. Until then the HUD is uncoloured, its state slot reads as absent
+and there is no image, and `familiar reap` removes pi sessions' render-cache
+entries. The claim lookup asks `tasks` for `pi:<id>`.
 Checked live against pi 1.1.0; [install](install.md#pi).
 
 ## Desktop

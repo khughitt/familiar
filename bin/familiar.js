@@ -402,7 +402,7 @@ event (an invalid FAMILIAR_ROLE) exits 0, a refusal after printing one error lin
 `,
   statusline: `Render the Claude Code status line.
 
-Also reads agy's status-line input (product: antigravity).
+Also reads agy's status-line input (product: antigravity) and the pi extension's (product: pi).
 
 Usage:
   familiar statusline [--with CMD]

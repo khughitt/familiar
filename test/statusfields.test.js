@@ -349,7 +349,7 @@ test('readFields with a payload lacking session_id has no stage and no agents', 
   try {
     const stateDir = join(root, 'state');
     const warnings = [];
-    for (const payload of [{ cwd: root }, { cwd: root, session_id: '' }, { cwd: root, session_id: '', product: 'antigravity' }]) {
+    for (const payload of [{ cwd: root }, { cwd: root, session_id: '' }, { cwd: root, session_id: '', product: 'antigravity' }, { cwd: root, session_id: '', product: 'pi' }]) {
       const fields = readFields(payload, {
         git: noGit,
         // The default lookup asks nothing without a session; a claim here would be a bug upstream.

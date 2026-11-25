@@ -43,9 +43,9 @@ test('sessions round trip with numeric terminal starttime', async (t) => {
   assert.deepEqual(await readSessions(path), valid());
 });
 
-test('every accepted harness round trips, agy included', async (t) => {
+test('every accepted harness round trips, agy and pi included', async (t) => {
   const path = await fixture(t);
-  assert.ok(HARNESSES.includes('agy'));
+  assert.ok(['agy', 'pi'].every((harness) => HARNESSES.includes(harness)));
   for (const harness of HARNESSES) {
     const value = valid();
     const a = value.sessions.a;

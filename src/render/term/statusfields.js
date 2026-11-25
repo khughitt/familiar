@@ -125,11 +125,15 @@ function statuslineWarn(message) {
 
 // THE SESSION A CLAIM NAMES. A Claude Code claim's `session` is the session_id on stdin. agy
 // sends the same shape with `product: "antigravity"` and its conversation UUID as session_id,
-// but tasks records an agy claim under relay's agent id, `agy:<uuid>`. An empty session_id
-// (agy before its first conversation) names no session at all.
+// but tasks records an agy claim under relay's agent id, `agy:<uuid>`. familiar's pi extension
+// sends `product: "pi"` and pi's bare session id, the bus record's key; `pi:<id>` is relay's
+// agent id for it. An empty session_id (agy before its first conversation) names no session.
+const HARNESS_OF_PRODUCT = new Map([['antigravity', 'agy'], ['pi', 'pi']]);
+
 export function claimSession(data) {
   if (!data.session_id) return null;
-  return data.product === 'antigravity' ? `agy:${data.session_id}` : data.session_id;
+  const harness = HARNESS_OF_PRODUCT.get(data.product);
+  return harness === undefined ? data.session_id : `${harness}:${data.session_id}`;
 }
 
 // THE TASK AND ITS STAGE ARE INJECTED. `taskOf` turns the live claim into the line's task (the

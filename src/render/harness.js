@@ -1,7 +1,8 @@
 export function printsPlaceholderCells(harness) {
   // agy 1.4.12's status line passes the placeholder rows to the terminal verbatim (fam-93c939),
   // so `familiar statusline` can own the cells there as it does in Claude Code.
-  if (harness === 'claude-code' || harness === 'agy') return true;
+  // pi's footer prints the same rows, and its renderer counts each cell as one column (fam-709741).
+  if (harness === 'claude-code' || harness === 'agy' || harness === 'pi') return true;
   if (harness === 'codex' || harness === 'opencode') return false;
   throw new Error(`unknown harness: ${harness}`);
 }
