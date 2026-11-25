@@ -157,10 +157,12 @@ sanitised line, as in pi's own footer.
 Familiar accepts relay's pi rows (agent id `pi:<id>`, bus key `<id>`) and transmits
 the pose for them; pi's renderer counts placeholder cells one column each. None
 arrives yet: the relay release Familiar pins has no pi adapter and refuses a
-registry holding such a row, so that pin moves before relay's pi extension is
-linked on a host. Until then the HUD is uncoloured, its state slot reads as absent
-and there is no image, and `familiar reap` removes pi sessions' render-cache
-entries. The claim lookup asks `tasks` for `pi:<id>`.
+registry holding such a row. Before relay's pi extension is linked on a host, that
+pin moves and `familiar-niri watch` restarts: a watcher started on older code refuses
+every bus update while a pi row exists. Until then the HUD is uncoloured, its state
+slot reads as absent and there is no image, and `familiar reap` removes pi sessions'
+render-cache entries. The claim lookup asks `tasks` for `pi:<id>`; `tasks` records no
+such claim yet, so the task segment stays empty.
 Checked live against pi 1.1.0; [install](install.md#pi).
 
 ## Desktop
