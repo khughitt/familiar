@@ -14,6 +14,7 @@ import { decodeRgba, encodeRgba } from 'familiar-theme';
 import { writeTheme } from './helpers/themes.js';
 import { git, initRepo } from './fixtures/git-worktree.mjs';
 import { scanCurrentSurfaces } from './helpers/current-docs.js';
+import { spawnAll } from './helpers/spawn-all.js';
 
 const bin = fileURLToPath(new URL('../bin/familiar', import.meta.url));
 const ttyBin = fileURLToPath(new URL('fixtures/tty-familiar.mjs', import.meta.url));
@@ -108,10 +109,12 @@ const leaves = [
   ['install', 'opencode'], ['setup', 'claude-code'], ['setup', 'relay'], ['observe'], ['statusline'], ['reap'],
 ];
 
-test('every leaf owns -h and --help before config or work', (t) => {
+test('every leaf owns -h and --help before config or work', async (t) => {
   const f = fixture(t);
-  for (const leaf of leaves) for (const flag of ['-h', '--help']) {
-    const result = run([...leaf, flag], f.env);
+  const runs = leaves.flatMap((leaf) => ['-h', '--help'].map((flag) => ({ leaf, flag })));
+  const results = await spawnAll(runs.map(({ leaf, flag }) => ({ command: process.execPath, args: [bin, ...leaf, flag], env: f.env })));
+  for (const [i, { leaf, flag }] of runs.entries()) {
+    const result = results[i];
     assert.equal(result.status, 0, `${leaf.join(' ')} ${flag}: ${result.stderr}`);
     assert.equal(result.stderr, '');
     assert.match(result.stdout, leaf.join(' ') === 'theme add' ? /^Usage$/m : /Usage:/);

@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMANDS } from '../src/commands.js';
+import { spawnAll } from './helpers/spawn-all.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = path.join(ROOT, 'bin', 'familiar');
@@ -53,13 +54,18 @@ test('declared surface equals tools/cli.toml', () => {
   assert.deepEqual({ parserOnly: [...live].filter((r) => !table.has(r)), tableOnly: [...table].filter((r) => !live.has(r)) }, { parserOnly: [], tableOnly: [] });
 });
 
-test('help on root and every command, families and protocol commands included', () => {
-  for (const cmd of [{ path: [] }, ...COMMANDS]) {
+test('help on root and every command, families and protocol commands included', async () => {
+  const cmds = [{ path: [] }, ...COMMANDS];
+  const argvs = cmds.flatMap((cmd) => [[...cmd.path, '--help'], [...cmd.path, '-h'], ...(cmd.path.length ? [['help', ...cmd.path]] : [])]);
+  const results = await spawnAll(argvs.map((args) => ({ command: process.execPath, args: [BIN, ...args], env: base })));
+  const ran = new Map(argvs.map((args, i) => [args.join('\0'), results[i]]));
+  const of = (args) => ran.get(args.join('\0'));
+  for (const cmd of cmds) {
     for (const flag of ['--help', '-h']) {
-      const r = run([...cmd.path, flag]);
+      const r = of([...cmd.path, flag]);
       assert.deepEqual({ path: cmd.path, flag, status: r.status, err: r.stderr, empty: r.stdout === '' }, { path: cmd.path, flag, status: 0, err: '', empty: false });
     }
-    if (cmd.path.length) assert.equal(run(['help', ...cmd.path]).stdout, run([...cmd.path, '--help']).stdout);
+    if (cmd.path.length) assert.equal(of(['help', ...cmd.path]).stdout, of([...cmd.path, '--help']).stdout);
   }
 });
 
