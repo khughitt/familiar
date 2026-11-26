@@ -28,10 +28,13 @@ const SOCKET_FIXTURE_ROOM = 56;
 // Every partition and focused run reports through tools/quiet-reporter.mjs: failures, skips
 // and totals, never a line per passing test. Under tools/tt, which offers an empty
 // TT_JUNIT_DIR, the worker also writes JUnit there so tt records the run's slowest tests.
-export function reporterArgs(env = process.env) {
+// The file is named for this runner: `just test` runs two partitions under one tt run, and
+// node's junit reporter truncates its destination. tt reads the runner from the `node-` stem.
+export function reporterArgs(env = process.env, runner = process.pid) {
   const args = [`--test-reporter=${QUIET_REPORTER}`, '--test-reporter-destination=stdout'];
   if (env.TT_JUNIT_DIR) {
-    args.push('--test-reporter=junit', `--test-reporter-destination=${join(env.TT_JUNIT_DIR, 'node-familiar.xml')}`);
+    args.push('--test-reporter=junit',
+      `--test-reporter-destination=${join(env.TT_JUNIT_DIR, `node-familiar-${runner}.xml`)}`);
   }
   return args;
 }
@@ -253,7 +256,7 @@ export async function runSuite(files, {
 
       const child = spawnChild('/bin/sh', [
         '-c', 'read -r ready <&3 || exit 1; exec 3<&-; exec "$@"', 'familiar-test-worker',
-        process.execPath, '--test', ...reporterArgs(env), ...files,
+        process.execPath, '--test', ...reporterArgs(env, pid), ...files,
       ], {
         stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
         // Imported subjects spawn subprocesses too; contain the whole worker.

@@ -283,9 +283,11 @@ test('the worker reports quietly, and writes JUnit only where tools/tt offers a 
   assert.equal(quiet.length, 2);
   assert.match(quiet[0], /^--test-reporter=\/.+\/tools\/quiet-reporter\.mjs$/);
   assert.equal(quiet[1], '--test-reporter-destination=stdout');
-  assert.deepEqual(reporterArgs({ TT_JUNIT_DIR: '/tmp/tt-junit-x' }), [
-    ...quiet, '--test-reporter=junit', '--test-reporter-destination=/tmp/tt-junit-x/node-familiar.xml',
+  assert.deepEqual(reporterArgs({ TT_JUNIT_DIR: '/tmp/tt-junit-x' }, 4242), [
+    ...quiet, '--test-reporter=junit', '--test-reporter-destination=/tmp/tt-junit-x/node-familiar-4242.xml',
   ]);
+  // Each runner writes its own file: `just test` runs two partitions under one TT_JUNIT_DIR.
+  assert.notEqual(reporterArgs({ TT_JUNIT_DIR: '/d' }, 1).at(-1), reporterArgs({ TT_JUNIT_DIR: '/d' }, 2).at(-1));
 });
 
 test('runSuite terminates and settles a spawned worker when fresh identity lookup throws', async (t) => {
