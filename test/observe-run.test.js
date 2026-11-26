@@ -169,12 +169,45 @@ for (const input of ['', 'not json']) test(`invalid envelope ${JSON.stringify(in
   await assert.rejects(readFile(f.paths.seqPath), { code: 'ENOENT' });
 });
 
-test('session-end drop-only median of twenty runs stays under 100 ms', async (t) => {
-  const f = await fixture(t); await f.publish(event()); await f.run(); await f.publish(event('session-end'));
-  const samples = [];
-  for (let i = 0; i < 20; i++) { const start = performance.now(); assert.equal((await f.run(event('session-end'))).exitCode, 0); samples.push(performance.now() - start); }
-  samples.sort((a, b) => a - b); const median = (samples[9] + samples[10]) / 2;
-  t.diagnostic(`drop-only median: ${median.toFixed(2)} ms`); assert.ok(median < 100);
+// Teardown budget without wall-clock flakiness under parallel suite or host contention:
+// each drop-only SessionEnd takes three locks, reads relay's snapshot twice, skips
+// enrichment and visuals, and burns single-digit milliseconds of process CPU time.
+// Cold-process imports and relay's 400 ms subscriber deadline are covered in
+// test/bin-familiar.test.js, test/setup.test.js and test/relay-e2e.slow.test.js.
+test('session-end drop-only bounds locks, snapshot reads and CPU time without enrichment or visuals', async (t) => {
+  const f = await fixture(t);
+  let locks = 0;
+  let snapshots = 0;
+  const readSnapshot = f.deps.relay.readSnapshot;
+  const lockWith = f.deps.lockWith;
+  f.deps.relay.readSnapshot = () => { snapshots += 1; return readSnapshot(); };
+  f.deps.lockWith = (path, fn, opts) => { locks += 1; return lockWith(path, fn, opts); };
+  const cpuSamples = [];
+  for (let i = 0; i < 20; i++) {
+    await f.publish(event('session-start'));
+    assert.equal((await f.run(event('session-start'))).exitCode, 0);
+    const dropSnapshot = await f.publish(event('session-end'));
+    const dropText = text(event('session-end'), dropSnapshot);
+    locks = 0;
+    snapshots = 0;
+    const teardownDeps = {
+      ...f.deps,
+      adapterFor: () => { throw new Error('teardown must not enrich'); },
+      gitContext: async () => { throw new Error('teardown must not read git'); },
+      lookupProjectColor: async () => { throw new Error('teardown must not query tasks'); },
+      loadContext: async () => { throw new Error('teardown must not load visuals'); },
+    };
+    const cpuStart = process.cpuUsage();
+    const result = await observe({ text: dropText, deps: teardownDeps });
+    const cpu = process.cpuUsage(cpuStart);
+    assert.deepEqual(result, { exitCode: 0, lines: [] });
+    assert.equal(locks, 3, `run ${i}: presentation drop, attention capture, ended acknowledgement`);
+    assert.equal(snapshots, 2, `run ${i}: projection and attention capture`);
+    cpuSamples.push((cpu.user + cpu.system) / 1000);
+  }
+  cpuSamples.sort((a, b) => a - b);
+  const medianCpuMs = (cpuSamples[9] + cpuSamples[10]) / 2;
+  assert.ok(medianCpuMs < 50, `drop-only median CPU ${medianCpuMs.toFixed(2)} ms >= 50 ms`);
 });
 
 for (const outcome of [{ kind: 'suppressed', reason: 'owner-dead' }, { kind: 'superseded' }, { kind: 'superseded', reason: 'terminal' }]) {

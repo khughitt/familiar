@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs';
@@ -80,14 +80,27 @@ test('suite workers keep in-process installer Git calls inside their fixtures un
     GIT_INDEX_FILE: join(unrelated, '.git', 'index'),
   };
   let code;
+  let stdout = '';
+  let stderr = '';
   try {
     code = await runSuite(['test/fixtures/codex-git-isolation.mjs'], {
       tmpdir: () => root, reap: () => {}, suiteLease: async (fn) => fn(),
+      spawn: (command, args, options) => {
+        // Capture the nested worker's summary so tools/tt does not add it to the outer run.
+        const child = spawn(command, args, {
+          ...options, stdio: ['ignore', 'pipe', 'pipe', options.stdio[3]],
+        });
+        child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+        child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
+        return child;
+      },
     });
   } finally {
     process.env = previous;
   }
-  assert.equal(code, 0, 'the installer must resolve and write its own fixture');
+  assert.equal(code, 0, stderr + stdout || 'the installer must resolve and write its own fixture');
+  assert.match(stdout, /^ℹ tests 1$/m);
+  assert.equal(stderr, '');
   assert.equal(existsSync(join(unrelated, '.codex')), false);
   assert.equal(readFileSync(join(unrelated, '.git', 'info', 'exclude'), 'utf8'), before);
 });

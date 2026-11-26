@@ -96,6 +96,7 @@ test('real relay hooks project lifecycle states and reset the controlling termin
     }
     assert.equal(JSON.parse(readFileSync(ledgerPaths(join(state, 'transmit'), sessionId).entryPath, 'utf8')).ended, true);
     const captured = terminal();
+    assert.doesNotMatch(captured, /SUBSCRIBER_(?:FAILED|SKIPPED)|CONTAINMENT_FAILED/, captured);
     assert.ok(captured.includes(oscReset()), 'terminal received the reset');
     assert.ok(captured.lastIndexOf(oscReset()) > captured.indexOf('complete Stop 0'), 'final reset follows Stop');
   } finally {
