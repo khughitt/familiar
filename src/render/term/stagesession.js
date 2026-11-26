@@ -3,7 +3,7 @@
 // imports node builtins and ledger.js, which the render cache's hit path already loads, and
 // holds only what a poll with no task needs: with no claim and no session file, a poll loads
 // this alone and does one read. The stage of a task that is shown is read by stagecache.js,
-// which the front door loads only then (test/stagecache.test.js and test/bin-familiar.test.js
+// which the front door loads only then (test/stagecache.test.js and test/bin-familiar-render-cache.test.js
 // hold both graphs to that). Each module a poll loads costs it a fixed share, and its code a
 // compile, so keep code here to the session file.
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';

@@ -304,7 +304,7 @@ test('familiar theme list reports a user theme that shadows a shipped one', () =
 });
 
 // maxBuffer, and it is NOT a nicety (see the identical note in
-// test/bin-familiar.test.js). `theme` transmits all twelve of the shipped
+// test/bin-familiar-themes.test.js). `theme` transmits all twelve of the shipped
 // cats theme's idle masters in one process: ~1.6 MB raw, ~2.1 MB base64 on
 // the wire — well past spawnSync's 1 MiB default, which truncates stdout and
 // sets status to null. Every GRAPHICAL call below needs the same raise.
@@ -325,7 +325,7 @@ test('familiar theme show without graphics names the capability on stderr', () =
 });
 
 // preview is deliberately silent about this (it prints poses and no escapes,
-// and test/bin-familiar.test.js pins that) — only theme gets the notice.
+// and test/bin-familiar-themes.test.js pins that) — only theme gets the notice.
 test('familiar theme show WITH graphics prints no capability notice', () => {
   const result = runTty(['theme', 'show'], {
     encoding: 'utf8', env: cliEnv(GRAPHICAL), maxBuffer: THEME_MAX_BUFFER,

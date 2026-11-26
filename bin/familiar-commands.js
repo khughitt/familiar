@@ -954,7 +954,7 @@ export async function main({ command, args: rest, color, mode }) {
     // the theme's members WITH their art. Without graphics (a plain TERM, or a
     // tmux pane the probe refuses — and for tmux it says which setting) it silently
     // degrades to a bare member listing. `preview` stays quiet about this on
-    // purpose (test/bin-familiar.test.js pins that); `theme` does not, because
+    // purpose (test/bin-familiar-themes.test.js pins that); `theme` does not, because
     // a human judging whether a cast coheres as a set needs to know
     // they are looking at labels, not the set.
     if (interactive && !graphical) {

@@ -577,7 +577,7 @@ async function statuslineCommand(args) {
   // Every poll pays for the stage path, so the stage reader loads only for a poll that shows
   // a task: readFields asks for the stage of the task it shows (stageOf), and that stage is
   // read here once the module has loaded, before the key is computed. A poll with no task
-  // loads stagesession.js alone (test/bin-familiar.test.js traces both).
+  // loads stagesession.js alone (test/bin-familiar-render-cache.test.js traces both).
   let fields = null;
   if (wrapped === null) {
     const { taskForSession } = await import('../src/render/term/stagesession.js');

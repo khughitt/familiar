@@ -34,7 +34,7 @@ test('a caller that names no environment is an error, not an ambient guess', () 
 
 // THE EXPORTED LISTS ARE THE CONTRACT, so they are tested AS lists — driven from the
 // arrays themselves rather than from a hand-copy of them. GRAPHICS_MARKERS has a second
-// reader (test/bin-familiar.test.js's negative preview fixture, which must scrub every
+// reader (test/bin-familiar-themes.test.js's negative preview fixture, which must scrub every
 // accept condition or it stops being negative on a kitty desktop). Exporting the list
 // gave that reader one source of truth; these two tests are what stop the source of
 // truth from lying.
