@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  assertSocketRoom, focusedTestFiles, pidNamespaceOf, runSuite, testFiles, testInventory, withSuiteLease,
+  assertSocketRoom, focusedTestFiles, pidNamespaceOf, reporterArgs, runSuite, testFiles, testInventory, withSuiteLease,
 } from '../tools/test-runner.mjs';
 import { fixtureGitEnv, seedRepo } from './fixtures/git-worktree.mjs';
 
@@ -239,6 +239,7 @@ test('runSuite reads a newly spawned worker identity outside the invocation snap
     end() { queueMicrotask(() => child.emit('close', 0)); },
   }];
   const processEvents = new EventEmitter();
+  let workerArgs;
 
   const code = await runSuite(['test/fake.test.js'], {
     tmpdir: () => dir,
@@ -246,7 +247,9 @@ test('runSuite reads a newly spawned worker identity outside the invocation snap
     processOps,
     pidNamespace: () => 'darwin-host',
     processEvents,
-    spawn: () => {
+    env: { PATH: '/usr/bin:/bin' },
+    spawn: (_command, args) => {
+      workerArgs = args;
       queueMicrotask(() => child.emit('spawn'));
       return child;
     },
@@ -264,6 +267,7 @@ test('runSuite reads a newly spawned worker identity outside the invocation snap
     writes.find(({ path }) => path.endsWith('.familiar-suite-owner.json.next')).bytes
   ));
   assert.equal(code, 0);
+  assert.deepEqual(workerArgs.slice(-5), [process.execPath, '--test', ...reporterArgs({}), 'test/fake.test.js']);
   assert.deepEqual(startCalls, [process.pid]);
   assert.deepEqual(freshCalls, [childPid]);
   assert.deepEqual(workerOwner, {
@@ -272,6 +276,16 @@ test('runSuite reads a newly spawned worker identity outside the invocation snap
     pidNamespace: 'darwin-host',
     worker: { pid: childPid, starttime: 200 },
   });
+});
+
+test('the worker reports quietly, and writes JUnit only where tools/tt offers a directory', () => {
+  const quiet = reporterArgs({});
+  assert.equal(quiet.length, 2);
+  assert.match(quiet[0], /^--test-reporter=\/.+\/tools\/quiet-reporter\.mjs$/);
+  assert.equal(quiet[1], '--test-reporter-destination=stdout');
+  assert.deepEqual(reporterArgs({ TT_JUNIT_DIR: '/tmp/tt-junit-x' }), [
+    ...quiet, '--test-reporter=junit', '--test-reporter-destination=/tmp/tt-junit-x/node-familiar.xml',
+  ]);
 });
 
 test('runSuite terminates and settles a spawned worker when fresh identity lookup throws', async (t) => {

@@ -12,6 +12,7 @@ import { withLock } from '../src/bus/lock.js';
 import { defaultProcessOps } from '../src/bus/proc.js';
 
 const FAKE_TASKS = fileURLToPath(new URL('../test/fixtures/fake-tasks', import.meta.url));
+const QUIET_REPORTER = fileURLToPath(new URL('quiet-reporter.mjs', import.meta.url));
 const OWNER = '.familiar-suite-owner.json';
 const OWNER_KIND = 'familiar-test-suite';
 const SUITE_LEASE = '\0familiar-test-suite';
@@ -23,6 +24,17 @@ const SOCKET_PATH_MAX = { linux: 107, darwin: 103 };
 // What the suite's socket fixtures need beneath the suite root: the deepest today is
 // familiar-cli-XXXXXX/scratch-XXXXXX/niri.sock (45 bytes), with room to spare.
 const SOCKET_FIXTURE_ROOM = 56;
+
+// Every partition and focused run reports through tools/quiet-reporter.mjs: failures, skips
+// and totals, never a line per passing test. Under tools/tt, which offers an empty
+// TT_JUNIT_DIR, the worker also writes JUnit there so tt records the run's slowest tests.
+export function reporterArgs(env = process.env) {
+  const args = [`--test-reporter=${QUIET_REPORTER}`, '--test-reporter-destination=stdout'];
+  if (env.TT_JUNIT_DIR) {
+    args.push('--test-reporter=junit', `--test-reporter-destination=${join(env.TT_JUNIT_DIR, 'node-familiar.xml')}`);
+  }
+  return args;
+}
 
 const ownerBytes = (pidNamespace, pid, starttime) => Buffer.from(`${JSON.stringify({
   version: 2,
@@ -215,6 +227,7 @@ export async function runSuite(files, {
   processOps = defaultProcessOps, writeFile = writeFileSync, processEvents = process,
   readdir = readdirSync, lstat = lstatSync, readFile = readFileSync,
   pidNamespace = pidNamespaceOf, pid = process.pid, suiteLease = withSuiteLease,
+  env = process.env,
 } = {}) {
   if (files.length === 0) throw new Error('no test files selected');
   return suiteLease(async () => {
@@ -240,12 +253,12 @@ export async function runSuite(files, {
 
       const child = spawnChild('/bin/sh', [
         '-c', 'read -r ready <&3 || exit 1; exec 3<&-; exec "$@"', 'familiar-test-worker',
-        process.execPath, '--test', ...files,
+        process.execPath, '--test', ...reporterArgs(env), ...files,
       ], {
         stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
         // Imported subjects spawn subprocesses too; contain the whole worker.
         env: {
-          PATH: `${FAKE_TASKS}:${process.env.PATH ?? ''}`, HOME: scratch, TMPDIR: scratch,
+          PATH: `${FAKE_TASKS}:${env.PATH ?? ''}`, HOME: scratch, TMPDIR: scratch,
           GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
           GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
           GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',

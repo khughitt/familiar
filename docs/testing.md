@@ -35,6 +35,16 @@ Git isolation and cleanup for focused runs. Concurrent suite workers are refused
 On macOS use `TMPDIR=/tmp`; an overlong temporary root is refused before fixtures
 are created because Unix-socket paths are short on that platform.
 
+Every run reports through `tools/quiet-reporter.mjs`, node's spec reporter without
+passing tests: a green run prints its skips, what tests print and the closing totals
+tt counts; a failure prints in full, with its file and line in the closing recap.
+Under tt the worker also writes JUnit to the `TT_JUNIT_DIR` tt offers, so each run
+records its slowest tests (`slowest` in the shared log). Node runs test files in
+parallel but a file's tests in turn, so split a module whose tests each spawn the CLI
+by surface (`test/bin-familiar*.test.js`, sharing `test/helpers/familiar-cli.js`),
+and run a test's many independent short subprocesses through
+`test/helpers/spawn-all.js`.
+
 ## Gates and policy
 
 `check` and pre-commit always run ops-check, ops-docs and tasks check. Both push
